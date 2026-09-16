@@ -1,0 +1,1323 @@
+import express from 'express';
+import cors from 'cors';
+import { createServer } from 'http';
+import { WebSocketServer } from 'ws';
+import { promises as fs } from 'fs';
+import path from 'path';
+import dotenv from 'dotenv';
+import { google } from 'googleapis';
+
+dotenv.config();
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const PORT = process.env.PORT || 5000;
+const API_KEY = process.env.OMNIDIM_API_KEY;
+const AGENT_ID = Number(process.env.AGENT_ID || 232228);
+
+const DATA_DIR = path.join(process.cwd(), 'data');
+const REGISTRATIONS_FILE = path.join(DATA_DIR, 'registrations.json');
+const INTERESTS_FILE = path.join(DATA_DIR, 'call_interests.json');
+const GOOGLE_SHEETS_CACHE_FILE = path.join(DATA_DIR, 'google_sheets_cache.json');
+
+let CALL_INTERESTS = {};
+
+async function loadInterests() {
+  try {
+    const raw = await fs.readFile(INTERESTS_FILE, 'utf8');
+    CALL_INTERESTS = JSON.parse(raw);
+  } catch {
+    CALL_INTERESTS = {};
+  }
+}
+
+async function saveInterests() {
+  try {
+    await fs.writeFile(INTERESTS_FILE, JSON.stringify(CALL_INTERESTS, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Failed to save call interests:', err);
+  }
+}
+
+// Session logs to show on the frontend
+const LOGS = [];
+const PENDING_CALLS = new Map(); // Key: to_number, Value: { fullName, dispatchTime, lastStatus, queueContactId }
+
+// Sequential Calling Campaign Engine State
+let CAMPAIGN_STATE = {
+  isRunning: false,
+  isPaused: false,
+  totalCount: 0,
+  completedCount: 0,
+  answeredCount: 0,
+  unansweredCount: 0,
+  delayMs: 2000,
+  currentContactIndex: -1
+};
+
+let CALL_QUEUE = []; // Array of { id, phone, formattedPhone, name, status: 'queued'|'in-progress'|'completed'|'no-answer'|'canceled', duration, reason, dispatchTime }
+let CURRENT_CALL = null;
+let queueNextTimer = null;
+
+// Helper to format duration to a readable MM:SS layout for logs
+function formatDuration(durationStr) {
+  if (!durationStr || durationStr === '—') return '0:00';
+  const parts = String(durationStr).split(':');
+  if (parts.length >= 2) {
+    const min = Math.floor(parseFloat(parts[parts.length - 2]));
+    const sec = Math.floor(parseFloat(parts[parts.length - 1]));
+    return `${min}:${sec < 10 ? '0' : ''}${sec}`;
+  }
+  return durationStr;
+}
+
+function addLog(type, message) {
+  const logEntry = {
+    id: String(Date.now()) + '-' + Math.random().toString(36).substr(2, 4),
+    timestamp: new Date().toISOString(),
+    type, // 'info', 'success', 'error', 'warning'
+    message
+  };
+  LOGS.push(logEntry);
+  if (LOGS.length > 150) LOGS.shift(); // Keep logs memory clean
+  console.log(`[${type.toUpperCase()}] ${message}`);
+  broadcast({ type: 'logs', data: LOGS });
+}
+
+function broadcastQueueUpdate() {
+  broadcast({
+    type: 'queue_update',
+    data: {
+      campaignState: CAMPAIGN_STATE,
+      queue: CALL_QUEUE,
+      currentCall: CURRENT_CALL
+    }
+  });
+}
+
+// Ensure database file and folder exists
+async function initDb() {
+  try {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    try {
+      await fs.access(REGISTRATIONS_FILE);
+    } catch {
+      await fs.writeFile(REGISTRATIONS_FILE, JSON.stringify([], null, 2), 'utf8');
+      console.log('Created empty registrations database file.');
+    }
+    try {
+      await fs.access(INTERESTS_FILE);
+      await loadInterests();
+    } catch {
+      await saveInterests();
+      console.log('Created empty call interests database file.');
+    }
+  } catch (err) {
+    console.error('Failed to initialize database folder/file:', err);
+  }
+}
+await initDb();
+
+// Google Sheets Service Setup
+let googleSheetsClient = null;
+
+async function getGoogleSheetsClient() {
+  if (googleSheetsClient) return googleSheetsClient;
+
+  const spreadsheetId = process.env.GOOGLE_SPREADSHEET_ID;
+  if (!spreadsheetId) {
+    console.warn('[WARNING] GOOGLE_SPREADSHEET_ID is not configured in .env.');
+    return null;
+  }
+
+  let credentials = null;
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+    try {
+      credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+      console.log('Google Sheets: Loaded credentials from GOOGLE_SERVICE_ACCOUNT_JSON env variable.');
+    } catch (err) {
+      console.error('Failed to parse GOOGLE_SERVICE_ACCOUNT_JSON:', err);
+    }
+  }
+
+  if (!credentials) {
+    const credentialPaths = [
+      path.join(DATA_DIR, 'service-account.json'),
+      path.join(process.cwd(), 'service-account.json'),
+      path.join(process.cwd(), 'credentials.json')
+    ];
+    for (const p of credentialPaths) {
+      try {
+        const fileContent = await fs.readFile(p, 'utf8');
+        credentials = JSON.parse(fileContent);
+        console.log(`Google Sheets: Loaded credentials from local file: ${p}`);
+        break;
+      } catch (err) {
+        // search next
+      }
+    }
+  }
+
+  if (credentials) {
+    try {
+      const auth = new google.auth.JWT({
+        email: credentials.client_email,
+        key: credentials.private_key,
+        scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+      });
+      googleSheetsClient = google.sheets({ version: 'v4', auth });
+      console.log('Google Sheets client initialized successfully.');
+      return googleSheetsClient;
+    } catch (err) {
+      console.error('Failed to initialize Google Sheets client:', err);
+    }
+  }
+
+  return null;
+}
+
+async function fetchPublicGoogleSheet(spreadsheetId) {
+  const sheetName = process.env.GOOGLE_SHEET_NAME || '';
+  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?${sheetName ? 'sheet=' + encodeURIComponent(sheetName) + '&' : ''}tqx=out:json`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Google Sheets public endpoint returned status ${response.status}`);
+  }
+  const text = await response.text();
+  const match = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\);/);
+  if (!match) {
+    throw new Error('Failed to parse Google Sheets public response.');
+  }
+  const data = JSON.parse(match[1]);
+  if (data.status === 'error') {
+    throw new Error(`Google Sheets returned error: ${JSON.stringify(data.errors)}`);
+  }
+  
+  const rows = data.table.rows.map(r => {
+    return r.c.map(cell => (cell ? (cell.v !== null ? cell.v : cell.f || '') : ''));
+  });
+  
+  return rows;
+}
+
+async function fetchSheetRawData() {
+  const spreadsheetId = process.env.GOOGLE_SPREADSHEET_ID;
+  if (!spreadsheetId) {
+    throw new Error('GOOGLE_SPREADSHEET_ID is missing.');
+  }
+
+  // 1. Try private API
+  try {
+    const client = await getGoogleSheetsClient();
+    if (client) {
+      console.log('Fetching sheet data using Google Private API...');
+      const spreadsheetInfo = await client.spreadsheets.get({ spreadsheetId });
+      const firstSheetName = spreadsheetInfo.data.sheets[0].properties.title || 'Sheet1';
+      const res = await client.spreadsheets.values.get({
+        spreadsheetId,
+        range: `${firstSheetName}!A:ZZ`,
+      });
+      return res.data.values || [];
+    }
+  } catch (err) {
+    console.error('Google Sheets Private API failed, trying public fallback:', err.message);
+  }
+
+  // 2. Try public gviz API fallback
+  try {
+    console.log('Fetching sheet data using public endpoint...');
+    return await fetchPublicGoogleSheet(spreadsheetId);
+  } catch (err) {
+    console.error('Google Sheets Public API fallback failed:', err.message);
+    throw err;
+  }
+}
+
+// Product-level status enum schema
+const CALL_OUTCOME_STATUS = Object.freeze({
+  INTERESTED: 'INTERESTED',
+  CALLBACK: 'CALLBACK',
+  ALREADY_APPLIED: 'ALREADY_APPLIED',
+  ALREADY_JOINED: 'ALREADY_JOINED',
+  NOT_INTERESTED: 'NOT_INTERESTED',
+  WRONG_NUMBER_INVALID: 'WRONG_NUMBER_INVALID',
+  NOT_ANSWERED: 'NOT_ANSWERED'
+});
+
+function resolveFinalCallStatus(item) {
+  if (!item) return CALL_OUTCOME_STATUS.NOT_ANSWERED;
+
+  const direct = String(item.final_status || item.finalStatus || '').toUpperCase().trim();
+  if (direct && CALL_OUTCOME_STATUS[direct]) return CALL_OUTCOME_STATUS[direct];
+
+  const outcome = String(item.callOutcome || item.call_status || item.status || '').toUpperCase().trim();
+  const leadStatus = String(item.leadStatus || item.lead_status || '').toUpperCase().trim();
+  const interestLevel = String(item.interestLevel || item.interest_level || '').toUpperCase().trim();
+  const callbackReq = String(item.callbackRequired || item.callback_required || '').toLowerCase().trim();
+
+  const fullText = (
+    String(item.summary || item.call_summary || '') + ' ' +
+    String(item.notes || item.additional_notes || '') + ' ' +
+    String(item.call_conversation || item.transcript || item.conversation || '') + ' ' +
+    String(item.details || item.interest_details || '') + ' ' +
+    String(leadStatus) + ' ' +
+    String(outcome)
+  ).toLowerCase();
+
+  // 1. Calls Not Answered
+  const lowerCallStatus = String(item.call_status || item.status || '').toLowerCase().trim();
+  const lowerOutcome = outcome.toLowerCase();
+  const unansweredSet = new Set(['failed', 'canceled', 'cancelled', 'busy', 'no-answer', 'no_answer', 'timeout', 'timedout', 'unreachable', 'missed', 'not answered', 'unanswered']);
+  if (
+    unansweredSet.has(lowerCallStatus) || unansweredSet.has(lowerOutcome) ||
+    outcome.includes('NO ANSWER') || outcome.includes('NO-ANSWER') || outcome.includes('MISSED') ||
+    outcome.includes('FAILED') || outcome.includes('BUSY') || outcome.includes('UNREACHABLE') ||
+    outcome.includes('CANCEL') || outcome.includes('TIMEOUT') ||
+    leadStatus === 'NO_ANSWER' || leadStatus === 'NOT ANSWERED' || leadStatus === 'UNANSWERED' ||
+    interestLevel === 'NO_ANSWER' || outcome === 'NO_ANSWER'
+  ) {
+    return CALL_OUTCOME_STATUS.NOT_ANSWERED;
+  }
+
+  // 2. Wrong Number / Invalid
+  const wrongNumberKeywords = ['wrong number', 'wrong person', 'invalid number', 'not the right person', 'wrong contact', 'not my number', 'mistaken number', 'incorrect number', 'does not belong', 'fake number', 'out of service'];
+  if (leadStatus.includes('WRONG') || leadStatus.includes('INVALID') || outcome.includes('WRONG') || outcome.includes('INVALID') || wrongNumberKeywords.some(kw => fullText.includes(kw))) {
+    return CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID;
+  }
+
+  // 3. Already Joined
+  const alreadyJoinedKeywords = ['already joined', 'already enrolled', 'already taken admission', 'already admitted', 'already taken', 'joined another college', 'joined college', 'joined university', 'currently studying in another college', 'enrolled in another', 'joined degree'];
+  if (leadStatus.includes('ALREADY_JOINED') || leadStatus.includes('ALREADY JOINED') || leadStatus.includes('ENROLLED') || outcome.includes('ALREADY_JOINED') || outcome.includes('ALREADY JOINED') || alreadyJoinedKeywords.some(kw => fullText.includes(kw))) {
+    return CALL_OUTCOME_STATUS.ALREADY_JOINED;
+  }
+
+  // 4. Already Applied
+  const alreadyAppliedKeywords = ['already applied', 'applied already', 'application submitted', 'submitted application', 'already submitted form', 'form already submitted', 'already filled application', 'filled application', 'applied online', 'application pending'];
+  if (leadStatus.includes('ALREADY_APPLIED') || leadStatus.includes('ALREADY APPLIED') || outcome.includes('ALREADY_APPLIED') || outcome.includes('ALREADY APPLIED') || alreadyAppliedKeywords.some(kw => fullText.includes(kw))) {
+    return CALL_OUTCOME_STATUS.ALREADY_APPLIED;
+  }
+
+  // 5. Callback
+  const callbackKeywords = ['callback', 'call back', 'call later', 'call me later', 'call tomorrow', 'reach out later', 'talk later', 'busy right now call later', 'contact later', 'call again', 'schedule a call', 'call after'];
+  if (callbackReq === 'yes' || callbackReq === 'true' || leadStatus.includes('CALLBACK') || leadStatus.includes('CALL_BACK') || leadStatus.includes('CALL BACK') || outcome.includes('CALLBACK') || outcome.includes('CALL_BACK') || outcome.includes('CALL BACK') || callbackKeywords.some(kw => fullText.includes(kw))) {
+    return CALL_OUTCOME_STATUS.CALLBACK;
+  }
+
+  // 6. Not Interested
+  const notInterestedKeywords = ['not interested', 'no interest', 'dont call', "don't call", 'do not call', 'no thanks', 'not looking', 'reject', 'cancel', 'not planning', 'no need', 'doing a job', 'doing job', 'working', 'already working', 'doing work', 'im working', "i'm working", 'im doing a job', "i'm doing a job", 'employed', 'not required', 'bad timing', 'stop calling'];
+  if (leadStatus === 'NOT INTERESTED' || leadStatus === 'NOT_INTERESTED' || leadStatus === 'DECLINED' || interestLevel === 'NOT INTERESTED' || interestLevel === 'NOT_INTERESTED' || interestLevel === 'LOW' || outcome.includes('NOT INTERESTED') || outcome.includes('NOT_INTERESTED') || outcome.includes('DECLINED') || notInterestedKeywords.some(kw => fullText.includes(kw))) {
+    return CALL_OUTCOME_STATUS.NOT_INTERESTED;
+  }
+
+  // 7. Explicit Interest
+  const interestedKeywords = ['interested in college', 'looking for college', 'want admission', 'want to join', 'tell me fees', 'send details', 'fee structure', 'which college', 'which course', 'want to take admission', 'looking for admission', 'connect me with counselor'];
+  if (leadStatus === 'INTERESTED' || leadStatus === 'HOT LEAD' || leadStatus === 'QUALIFIED' || leadStatus.includes('HOT') || interestLevel === 'HIGH' || interestLevel === 'INTERESTED' || interestedKeywords.some(kw => fullText.includes(kw))) {
+    return CALL_OUTCOME_STATUS.INTERESTED;
+  }
+
+  // 8. Answered call fallback: if completed without positive interest, mark NOT_INTERESTED
+  if (lowerCallStatus === 'completed' || outcome.includes('COMPLETED') || outcome.includes('ANSWERED')) {
+    if (interestLevel === 'MEDIUM' || String(item.sentiment || '').toLowerCase() === 'positive') {
+      return CALL_OUTCOME_STATUS.INTERESTED;
+    }
+    return CALL_OUTCOME_STATUS.NOT_INTERESTED;
+  }
+
+  return CALL_OUTCOME_STATUS.NOT_ANSWERED;
+}
+
+function normalizeRow(row, headers) {
+  const findValue = (keywords) => {
+    const cleanHeaders = headers.map(h => String(h || '').trim().toLowerCase().replace(/_/g, ' '));
+    const cleanKeywords = keywords.map(k => String(k || '').trim().toLowerCase().replace(/_/g, ' '));
+
+    // 1. Exact match priority
+    for (const kw of cleanKeywords) {
+      const idx = cleanHeaders.findIndex(h => h === kw);
+      if (idx !== -1 && row[idx] !== undefined && row[idx] !== null && String(row[idx]).trim() !== '' && String(row[idx]).trim().toLowerCase() !== 'null') {
+        return String(row[idx]).trim();
+      }
+    }
+
+    // 2. Partial match priority (skip generic match on bot_name if searching student name/name)
+    for (const kw of cleanKeywords) {
+      const idx = cleanHeaders.findIndex(h => h.includes(kw));
+      if (idx !== -1 && row[idx] !== undefined && row[idx] !== null && String(row[idx]).trim() !== '' && String(row[idx]).trim().toLowerCase() !== 'null') {
+        const headerName = cleanHeaders[idx];
+        if (kw === 'name' && headerName.includes('bot')) {
+          continue; // Skip bot name when we seek student name
+        }
+        return String(row[idx]).trim();
+      }
+    }
+    return '';
+  };
+
+  const studentName = findValue(['student name', 'fullname', 'name']) || 'Student';
+  const contactNumber = findValue(['to number', 'contact number', 'phone number', 'mobile', 'phone', 'number', 'recipient']) || '—';
+  const email = findValue(['email address', 'email', 'mail']) || '—';
+  const program = findValue(['program type', 'program', 'degree']) || '—';
+  const course = findValue(['preferred course', 'course', 'specialization', 'branch']) || '—';
+  const preferredState = findValue(['preferred state', 'state']) || '—';
+  const preferredCity = findValue(['preferred city', 'city']) || '—';
+  const leadStatus = findValue(['lead status', 'status', 'qualification']) || '—';
+  const interestLevel = findValue(['interest level', 'interest status', 'interest']) || '—';
+  const counselorRequired = findValue(['counselor required', 'counselor follow-up', 'counselor requirement', 'counselor']) || '—';
+  const callbackRequired = findValue(['callback required', 'callback']) || '—';
+  const callDate = findValue(['call date', 'timestamp', 'date', 'call time', 'registered_at']) || '—';
+  const callOutcome = findValue(['call outcome', 'outcome', 'status']) || '—';
+  const questionsAsked = findValue(['questions asked', 'questions', 'query']) || '—';
+  const universitiesDiscussed = findValue(['universities discussed', 'colleges discussed', 'universities', 'colleges']) || '—';
+  const summary = findValue(['conversation summary', 'summary', 'call summary', 'transcript']) || '—';
+  const notes = findValue(['additional notes', 'notes']) || '—';
+  const entranceExam = findValue(['entrance exam', 'exam']) || '—';
+  const educationStatus = findValue(['education status', 'education', 'qualification']) || '—';
+
+  // Extra vital fields mapped explicitly
+  const recordingUrl = findValue(['recording url', 'recording_url']);
+  const transferStatus = findValue(['call transfered status', 'call_transfered_status', 'transfer']);
+  const preferredUniversity = findValue(['preferred university', 'preferred_university', 'university']);
+  const sentiment = findValue(['sentiment']);
+  const botName = findValue(['bot name', 'bot_name']);
+
+  const rawFields = {};
+  headers.forEach((h, i) => {
+    if (h) {
+      rawFields[h] = row[i] !== undefined ? String(row[i]).trim() : '';
+    }
+  });
+
+  let id = findValue(['call id', 'call_id']) || findValue(['lead id', 'lead_id']);
+
+  const final_status = resolveFinalCallStatus({
+    callOutcome,
+    leadStatus,
+    interestLevel,
+    callbackRequired,
+    summary,
+    notes,
+    sentiment,
+    call_status: callOutcome
+  });
+
+  return {
+    id,
+    studentName,
+    contactNumber,
+    email,
+    program,
+    course,
+    preferredState,
+    preferredCity,
+    leadStatus,
+    interestLevel,
+    final_status,
+    finalStatus: final_status,
+    counselorRequired,
+    callbackRequired,
+    callDate,
+    callOutcome,
+    questionsAsked,
+    universitiesDiscussed,
+    summary,
+    notes,
+    entranceExam,
+    educationStatus,
+    recordingUrl,
+    transferStatus,
+    preferredUniversity,
+    sentiment,
+    botName,
+    rawFields
+  };
+}
+
+async function loadCache() {
+  try {
+    const raw = await fs.readFile(GOOGLE_SHEETS_CACHE_FILE, 'utf8');
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+
+async function saveCache(data) {
+  try {
+    await fs.writeFile(GOOGLE_SHEETS_CACHE_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Failed to save cache file:', err);
+  }
+}
+
+// Polling Google Sheets
+let sheetsPollInterval = null;
+let lastSheetsDataJson = '';
+
+// Load cached sheets data into memory on startup
+loadCache().then(cached => {
+  if (cached && cached.length > 0) {
+    lastSheetsDataJson = JSON.stringify(cached);
+  }
+}).catch(() => {});
+
+async function pollGoogleSheets() {
+  const spreadsheetId = process.env.GOOGLE_SPREADSHEET_ID;
+  if (!spreadsheetId) return;
+
+  try {
+    const rawData = await fetchSheetRawData();
+    const normalizedList = [];
+
+    if (rawData && rawData.length > 0) {
+      const headers = rawData[0];
+      const rows = rawData.slice(1);
+      const seenIds = new Set();
+      
+      rows.forEach((row, index) => {
+        if (!row || row.length === 0) return;
+        const item = normalizeRow(row, headers);
+        if (!item.id) {
+          const cleanPhone = item.contactNumber.replace(/\D/g, '');
+          const cleanDate = item.callDate.replace(/[^a-zA-Z0-9]/g, '');
+          item.id = `row-${index}-${cleanPhone}-${cleanDate}`;
+        }
+        if (!seenIds.has(item.id)) {
+          seenIds.add(item.id);
+          normalizedList.push(item);
+        }
+      });
+    }
+
+    const recordsJson = JSON.stringify(normalizedList);
+    if (recordsJson !== lastSheetsDataJson) {
+      console.log('Detected new/updated Google Sheets records. Broadcasting...');
+      lastSheetsDataJson = recordsJson;
+      await saveCache(normalizedList);
+      broadcast({ type: 'sheets_update', data: normalizedList });
+    }
+  } catch (err) {
+    console.warn('Background Google Sheets polling failed:', err.message);
+  }
+}
+
+function extractTranscriptText(callRecord) {
+  if (!callRecord) return '';
+  const raw = callRecord.call_conversation || callRecord.transcript || callRecord.conversation || callRecord.summary || callRecord.call_summary || callRecord.dialogue || callRecord.analysis || '';
+
+  if (Array.isArray(raw)) {
+    return raw.map(item => {
+      if (typeof item === 'string') return item;
+      const speaker = item.speaker || item.role || item.from || 'Speaker';
+      const text = item.text || item.content || item.message || '';
+      return `${speaker}: ${text}`;
+    }).join('\n');
+  }
+
+  if (typeof raw === 'object' && raw !== null) {
+    return JSON.stringify(raw);
+  }
+
+  return String(raw || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').trim();
+}
+
+// Intelligent Post-Call Interest & Preference Analyzer (Strict real call data)
+function analyzeCallInterest(callRecord) {
+  if (!callRecord) return { interestStatus: 'PENDING', college: '—', course: '—', details: 'No call data recorded' };
+
+  const phone = callRecord.to_number || callRecord.phone_number || callRecord.to || callRecord.formattedPhone || callRecord.phone || '';
+  const name = callRecord.name || callRecord.fullName || callRecord.student_name || (phone ? `Recipient (${phone})` : 'Recipient');
+  const status = (callRecord.call_status || callRecord.status || '').toLowerCase();
+  
+  const transcriptText = extractTranscriptText(callRecord);
+  const summaryText = String(callRecord.summary || callRecord.call_summary || '').toLowerCase();
+  const fullText = (transcriptText + ' ' + summaryText).toLowerCase().trim();
+  const hasTranscript = fullText.length > 0;
+
+  // 1. If NO transcript exists and call was not completed:
+  if (!hasTranscript) {
+    if (['failed', 'canceled', 'busy', 'no-answer', 'no_answer', 'timeout', 'unreachable'].includes(status)) {
+      return {
+        interestStatus: CALL_OUTCOME_STATUS.NOT_ANSWERED,
+        final_status: CALL_OUTCOME_STATUS.NOT_ANSWERED,
+        college: '—',
+        course: '—',
+        details: `${name} did not answer call.`
+      };
+    }
+    return {
+      interestStatus: CALL_OUTCOME_STATUS.NOT_ANSWERED,
+      final_status: CALL_OUTCOME_STATUS.NOT_ANSWERED,
+      college: '—',
+      course: '—',
+      details: `${name} call pending / no conversation recorded yet.`
+    };
+  }
+
+  // 2. Specific outcome keywords for mutually exclusive classification
+  const wrongNumberKeywords = [
+    'wrong number', 'wrong person', 'invalid number', 'not the right person', 
+    'wrong contact', 'not my number', 'mistaken number', 'incorrect number', 'does not belong'
+  ];
+
+  const alreadyJoinedKeywords = [
+    'already joined', 'already enrolled', 'already taken admission', 'already admitted', 
+    'already taken', 'joined another college', 'joined college', 'joined university', 
+    'currently studying in another college', 'enrolled in another'
+  ];
+
+  const alreadyAppliedKeywords = [
+    'already applied', 'applied already', 'application submitted', 'submitted application', 
+    'already submitted form', 'form already submitted', 'already filled application', 
+    'filled application', 'applied online', 'application pending'
+  ];
+
+  const callbackKeywords = [
+    'callback', 'call back', 'call later', 'call me later', 'call tomorrow', 
+    'reach out later', 'talk later', 'busy right now call later', 'contact later', 
+    'call again', 'schedule a call', 'call after'
+  ];
+
+  const notInterestedKeywords = [
+    'not interested', 'no interest', 'dont call', "don't call", 'do not call', 
+    'no thanks', 'not looking', 'reject', 'cancel', 'not planning', 'no need', 
+    'doing a job', 'doing job', 'working', 'already working', 'doing work', 
+    'im working', "i'm working", 'im doing a job', "i'm doing a job", 'employed', 
+    'not required', 'bad timing', 'stop calling'
+  ];
+
+  // 3. Explicit Interest keywords
+  const interestedKeywords = [
+    'interested in college', 'looking for college', 'want admission', 'want to join', 
+    'tell me fees', 'send details', 'fee structure', 'which college', 'which course', 
+    'b.tech', 'btech', 'cse', 'ece', 'mba', 'computer science', 'information technology'
+  ];
+
+  const isWrongNumber = wrongNumberKeywords.some(kw => fullText.includes(kw));
+  const isAlreadyJoined = alreadyJoinedKeywords.some(kw => fullText.includes(kw));
+  const isAlreadyApplied = alreadyAppliedKeywords.some(kw => fullText.includes(kw));
+  const isCallback = callbackKeywords.some(kw => fullText.includes(kw)) || String(callRecord.callback_required || callRecord.callbackRequired || '').toLowerCase().includes('yes');
+  const isNotInterested = notInterestedKeywords.some(kw => fullText.includes(kw));
+  
+  let finalStatus = CALL_OUTCOME_STATUS.NOT_INTERESTED;
+  let college = 'Not Mentioned in Call';
+  let course = 'Not Mentioned in Call';
+  let detailsStr = '';
+
+  if (isWrongNumber) {
+    finalStatus = CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID;
+    college = 'Invalid Contact';
+    course = 'Invalid Contact';
+    detailsStr = `${name} flagged as wrong/invalid contact number.`;
+  } else if (isAlreadyJoined) {
+    finalStatus = CALL_OUTCOME_STATUS.ALREADY_JOINED;
+    college = 'Already Enrolled';
+    course = 'Already Enrolled';
+    detailsStr = `${name} stated already joined / enrolled in a university.`;
+  } else if (isAlreadyApplied) {
+    finalStatus = CALL_OUTCOME_STATUS.ALREADY_APPLIED;
+    college = 'Already Applied';
+    course = 'Already Applied';
+    detailsStr = `${name} stated already submitted admission application.`;
+  } else if (isCallback) {
+    finalStatus = CALL_OUTCOME_STATUS.CALLBACK;
+    detailsStr = `${name} requested a callback to discuss admission details later.`;
+  } else if (isNotInterested) {
+    finalStatus = CALL_OUTCOME_STATUS.NOT_INTERESTED;
+    college = 'Not Interested';
+    course = 'Not Interested';
+
+    if (fullText.includes('doing a job') || fullText.includes('doing job') || fullText.includes('working') || fullText.includes('employed') || fullText.includes('doing work')) {
+      detailsStr = `${name} stated currently working / doing a job (Not looking for college).`;
+    } else {
+      detailsStr = `${name} stated NOT interested in college admissions during call.`;
+    }
+  } else {
+    // Check if course spoken in transcript
+    if (fullText.includes('cse') || fullText.includes('computer science')) course = 'B.Tech CSE';
+    else if (fullText.includes('ai') || fullText.includes('data science') || fullText.includes('machine learning') || fullText.includes('aiml')) course = 'AI & Data Science';
+    else if (fullText.includes('ece') || fullText.includes('electronics')) course = 'B.Tech ECE';
+    else if (fullText.includes('mba') || fullText.includes('management')) course = 'MBA';
+    else if (fullText.includes('it') || fullText.includes('information technology')) course = 'B.Tech IT';
+    else if (fullText.includes('mech') || fullText.includes('mechanical')) course = 'B.Tech Mech';
+    else if (fullText.includes('civil')) course = 'B.Tech Civil';
+
+    const isExplicitlyInterested = interestedKeywords.some(kw => fullText.includes(kw)) ||
+      String(callRecord.interestLevel || callRecord.interest_level || '').toUpperCase() === 'HIGH' ||
+      String(callRecord.leadStatus || callRecord.lead_status || '').toUpperCase() === 'INTERESTED';
+
+    if (isExplicitlyInterested) {
+      finalStatus = CALL_OUTCOME_STATUS.INTERESTED;
+      if (course !== 'Not Mentioned in Call') {
+        detailsStr = `${name} expressed interest in ${course} during call.`;
+      } else {
+        detailsStr = `${name} confirmed interest in college admission during call.`;
+      }
+    } else {
+      // Completed call without explicit interest is Not Interested / General Query
+      finalStatus = CALL_OUTCOME_STATUS.NOT_INTERESTED;
+      detailsStr = `${name} call completed without positive admission interest.`;
+    }
+  }
+
+  return {
+    interestStatus: finalStatus,
+    final_status: finalStatus,
+    college,
+    course,
+    details: detailsStr
+  };
+}
+
+function enrichCallWithInterest(callRecord) {
+  const interestData = analyzeCallInterest(callRecord);
+  return {
+    ...callRecord,
+    ...interestData,
+    final_status: interestData.interestStatus,
+    finalStatus: interestData.interestStatus,
+    interest_status: interestData.interestStatus,
+    target_college: interestData.college,
+    target_course: interestData.course,
+    interest_details: interestData.details
+  };
+}
+
+// WebSocket Server Setup
+const server = createServer(app);
+const wss = new WebSocketServer({ noServer: true });
+
+function broadcast(message) {
+  const payload = JSON.stringify(message);
+  for (const client of wss.clients) {
+    if (client.readyState === 1) {
+      client.send(payload);
+    }
+  }
+}
+
+let lastCallsJson = '';
+let pollInterval = null;
+
+async function fetchCallsFromOmni() {
+  if (!API_KEY) {
+    return null;
+  }
+  const target = `https://backend.omnidim.io/api/v1/calls/logs?pageno=1&pagesize=50`;
+  try {
+    const response = await fetch(target, {
+      headers: { Authorization: `Bearer ${API_KEY}` }
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`OmniDimension API error (${response.status}): ${errText}`);
+      return null;
+    }
+    const data = await response.json();
+    const rawCalls = data.call_log_data || data.calls || data.data || data || [];
+    if (Array.isArray(rawCalls)) {
+      return rawCalls.map(c => enrichCallWithInterest(c));
+    }
+    return [];
+  } catch (error) {
+    console.error('Error fetching calls from OmniDimension:', error);
+    return null;
+  }
+}
+
+// Handle completion of a call in queue and trigger next contact
+function handleQueueContactFinished(contact, isAnswered, statusText, durationStr) {
+  if (!contact) return;
+
+  contact.duration = durationStr || '0:00';
+  if (isAnswered) {
+    contact.status = 'completed';
+    CAMPAIGN_STATE.answeredCount++;
+    addLog('success', `Sequential Call [${contact.index + 1}/${CAMPAIGN_STATE.totalCount}] to "${contact.name || contact.formattedPhone}" (${contact.formattedPhone}) COMPLETED. Result: ANSWERED. Duration: ${contact.duration}.`);
+  } else {
+    contact.status = 'no-answer';
+    contact.reason = statusText;
+    CAMPAIGN_STATE.unansweredCount++;
+    addLog('error', `Sequential Call [${contact.index + 1}/${CAMPAIGN_STATE.totalCount}] to "${contact.name || contact.formattedPhone}" (${contact.formattedPhone}) ENDED. Result: NOT ANSWERED (${statusText}).`);
+  }
+
+  CAMPAIGN_STATE.completedCount++;
+  CURRENT_CALL = null;
+  broadcastQueueUpdate();
+
+  // Schedule next contact after delay (enforcing minimum 5s buffer for OmniDimension channel cooldown)
+  if (CAMPAIGN_STATE.isRunning && !CAMPAIGN_STATE.isPaused) {
+    const effectiveDelay = Math.max(CAMPAIGN_STATE.delayMs, 5000);
+    addLog('info', `Waiting ${effectiveDelay / 1000}s telephony channel cooldown buffer before initiating next call...`);
+    queueNextTimer = setTimeout(processNextInQueue, effectiveDelay);
+  }
+}
+
+async function pollCallsOnce() {
+  if (wss.clients.size === 0 && PENDING_CALLS.size === 0) return;
+  const calls = await fetchCallsFromOmni();
+  if (!calls || !Array.isArray(calls)) return;
+
+  // Process pending call dispatches to capture status changes (completed/no-answer/ringing/in-progress)
+  for (const [phone, pending] of PENDING_CALLS.entries()) {
+    const matchedCall = calls.find(c => {
+      const cPhone = c.to_number || c.phone_number || c.to || '';
+      return cPhone === phone;
+    });
+
+    if (matchedCall) {
+      const rawStatus = matchedCall.call_status || matchedCall.status || '';
+      const currentStatus = rawStatus.toLowerCase();
+      const rawDuration = matchedCall.call_duration || matchedCall.duration || '—';
+      const formattedDuration = formatDuration(rawDuration);
+
+      if (currentStatus !== pending.lastStatus) {
+        if (currentStatus === 'completed') {
+          PENDING_CALLS.delete(phone);
+          updateWsPolling();
+
+          const queueContact = CALL_QUEUE.find(q => q.id === pending.queueContactId || q.formattedPhone === phone);
+          if (queueContact && queueContact.status === 'in-progress') {
+            handleQueueContactFinished(queueContact, true, 'completed', formattedDuration);
+          } else {
+            addLog('success', `Call to "${pending.fullName}" (${phone}) COMPLETED. Duration: ${formattedDuration}.`);
+          }
+        } else if (['failed', 'canceled', 'busy', 'no-answer', 'no_answer'].includes(currentStatus)) {
+          const displayStatus = currentStatus.replace('_', ' ');
+          PENDING_CALLS.delete(phone);
+          updateWsPolling();
+
+          const queueContact = CALL_QUEUE.find(q => q.id === pending.queueContactId || q.formattedPhone === phone);
+          if (queueContact && queueContact.status === 'in-progress') {
+            handleQueueContactFinished(queueContact, false, displayStatus, formattedDuration);
+          } else {
+            addLog('error', `Call to "${pending.fullName}" (${phone}) ended. Result: NOT ANSWERED (${displayStatus}).`);
+          }
+        } else if (['ringing', 'in-progress', 'in_progress', 'queued'].includes(currentStatus)) {
+          const displayStatus = currentStatus.replace('_', ' ');
+          addLog('info', `Call to "${pending.fullName || phone}" (${phone}) is now ${displayStatus}.`);
+          pending.lastStatus = currentStatus;
+        } else {
+          addLog('info', `Call to "${pending.fullName || phone}" (${phone}) changed status to: ${currentStatus}.`);
+          pending.lastStatus = currentStatus;
+        }
+      }
+    } else {
+      // Timeout tracking if call log doesn't appear after 3 minutes
+      if (Date.now() - pending.dispatchTime > 180000) {
+        PENDING_CALLS.delete(phone);
+        updateWsPolling();
+
+        const queueContact = CALL_QUEUE.find(q => q.id === pending.queueContactId || q.formattedPhone === phone);
+        if (queueContact && queueContact.status === 'in-progress') {
+          handleQueueContactFinished(queueContact, false, 'timeout', '0:00');
+        } else {
+          addLog('error', `Call status tracking for "${pending.fullName}" (${phone}) timed out.`);
+        }
+      }
+    }
+  }
+
+  const callsJson = JSON.stringify(calls);
+  if (callsJson !== lastCallsJson) {
+    lastCallsJson = callsJson;
+    broadcast({ type: 'calls', data: calls });
+  }
+}
+
+function updateWsPolling() {
+  const needsOmniPolling = PENDING_CALLS.size > 0 || CAMPAIGN_STATE.isRunning;
+  if (needsOmniPolling) {
+    if (!pollInterval) {
+      pollInterval = setInterval(pollCallsOnce, 3500);
+      pollCallsOnce();
+    }
+  } else {
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
+  }
+
+  // Google Sheets background polling tied to active dashboard clients
+  const needsSheetsPolling = wss.clients.size > 0;
+  if (needsSheetsPolling) {
+    if (!sheetsPollInterval) {
+      sheetsPollInterval = setInterval(pollGoogleSheets, 45000);
+      pollGoogleSheets(); // Run once immediately
+    }
+  } else {
+    if (sheetsPollInterval) {
+      clearInterval(sheetsPollInterval);
+      sheetsPollInterval = null;
+    }
+  }
+}
+
+// Sequential Execution Processor
+async function processNextInQueue() {
+  if (queueNextTimer) {
+    clearTimeout(queueNextTimer);
+    queueNextTimer = null;
+  }
+
+  if (!CAMPAIGN_STATE.isRunning || CAMPAIGN_STATE.isPaused) {
+    broadcastQueueUpdate();
+    return;
+  }
+
+  const nextIndex = CALL_QUEUE.findIndex(c => c.status === 'queued');
+  if (nextIndex === -1) {
+    CAMPAIGN_STATE.isRunning = false;
+    CAMPAIGN_STATE.isPaused = false;
+    CURRENT_CALL = null;
+    addLog('success', `🎉 Campaign Complete! All ${CAMPAIGN_STATE.totalCount} contacts have been called sequentially.`);
+    addLog('info', `Campaign Summary: ${CAMPAIGN_STATE.answeredCount} Answered, ${CAMPAIGN_STATE.unansweredCount} Not Answered / Failed.`);
+    broadcastQueueUpdate();
+    return;
+  }
+
+  const contact = CALL_QUEUE[nextIndex];
+  contact.index = nextIndex;
+  contact.status = 'in-progress';
+  contact.dispatchTime = Date.now();
+  CURRENT_CALL = contact;
+  CAMPAIGN_STATE.currentContactIndex = nextIndex;
+
+  broadcastQueueUpdate();
+
+  const nameDisplay = contact.name ? `"${contact.name}"` : 'Not provided';
+  const universityDisplay = CAMPAIGN_STATE.universityName || 'Vidyavision AI Admission Assistant';
+  const activeAgentId = CAMPAIGN_STATE.agentId || AGENT_ID;
+  addLog('info', `Sequential Dialing [${nextIndex + 1}/${CAMPAIGN_STATE.totalCount}] using ${universityDisplay} (Agent ID: ${activeAgentId}): Initiating call to ${contact.formattedPhone} (Name: ${nameDisplay})...`);
+
+  if (!API_KEY) {
+    addLog('error', 'OMNIDIM_API_KEY is missing! Call dispatch aborted.');
+    handleQueueContactFinished(contact, false, 'api_key_missing', '0:00');
+    return;
+  }
+
+  try {
+    const dispatchPayload = {
+      agent_id: activeAgentId,
+      to_number: contact.formattedPhone,
+      call_context: {
+        student_name: contact.name || '',
+        name: contact.name || '',
+        user_name: contact.name || ''
+      }
+    };
+
+    const targetUrl = 'https://backend.omnidim.io/api/v1/calls/dispatch';
+    const dispatchResponse = await fetch(targetUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(dispatchPayload)
+    });
+
+    const responseData = await dispatchResponse.json().catch(() => ({}));
+
+    if (dispatchResponse.ok) {
+      addLog('info', `Call dispatched to ${contact.formattedPhone}. Monitoring call status until answered or ended...`);
+      PENDING_CALLS.set(contact.formattedPhone, {
+        fullName: contact.name || contact.formattedPhone,
+        dispatchTime: Date.now(),
+        lastStatus: 'dispatched',
+        queueContactId: contact.id
+      });
+      updateWsPolling();
+    } else {
+      const errorMsg = responseData.detail || responseData.error || `HTTP ${dispatchResponse.status}`;
+
+      // Auto-retry on OmniDimension concurrency limit / line busy error
+      if (errorMsg.includes('concurrency') || errorMsg.includes('limit') || dispatchResponse.status === 429) {
+        contact.retryCount = (contact.retryCount || 0) + 1;
+        if (contact.retryCount <= 3) {
+          contact.status = 'queued';
+          CURRENT_CALL = null;
+          addLog('warning', `OmniDimension line busy for ${contact.formattedPhone} (Concurrency Cooldown). Retrying call in 5 seconds (Attempt ${contact.retryCount}/3)...`);
+          broadcastQueueUpdate();
+          queueNextTimer = setTimeout(processNextInQueue, 5000);
+          return;
+        }
+      }
+
+      addLog('error', `OmniDimension Dispatch API failed for ${contact.formattedPhone}: ${errorMsg}`);
+      handleQueueContactFinished(contact, false, `dispatch_failed: ${errorMsg}`, '0:00');
+    }
+  } catch (err) {
+    addLog('error', `Network failure during dispatch to ${contact.formattedPhone}: ${err.message}`);
+    handleQueueContactFinished(contact, false, 'network_error', '0:00');
+  }
+}
+
+wss.on('connection', (ws) => {
+  updateWsPolling();
+  
+  // Immediately send cached Google Sheets data so dashboard loads instantly
+  loadCache().then(cached => {
+    ws.send(JSON.stringify({ type: 'sheets_update', data: cached }));
+  }).catch(() => {});
+
+  // Send current logs, calls, and queue state
+  ws.send(JSON.stringify({ type: 'logs', data: LOGS }));
+  ws.send(JSON.stringify({
+    type: 'queue_update',
+    data: {
+      campaignState: CAMPAIGN_STATE,
+      queue: CALL_QUEUE,
+      currentCall: CURRENT_CALL
+    }
+  }));
+
+  if (lastCallsJson) {
+    try {
+      ws.send(JSON.stringify({ type: 'calls', data: JSON.parse(lastCallsJson) }));
+    } catch {}
+  } else {
+    pollCallsOnce();
+  }
+
+  ws.on('message', async (message) => {
+    try {
+      const msg = JSON.parse(message);
+      if (msg.type === 'reload_calls') {
+        const calls = await fetchCallsFromOmni();
+        if (calls) {
+          lastCallsJson = JSON.stringify(calls);
+          ws.send(JSON.stringify({ type: 'calls', data: calls }));
+        }
+      }
+    } catch (err) {
+      console.error('WS client message error:', err);
+    }
+  });
+
+  ws.on('close', () => {
+    updateWsPolling();
+  });
+});
+
+server.on('upgrade', (req, socket, head) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  if (url.pathname === '/api/stream') {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit('connection', ws, req);
+    });
+  } else {
+    socket.destroy();
+  }
+});
+
+// Helper to validate and format Indian mobile number
+function validateAndFormatMobile(mobile) {
+  const cleanMobile = String(mobile || '').replace(/\D/g, '');
+  if (cleanMobile.length === 10 && cleanMobile[0] !== '0') {
+    return `+91${cleanMobile}`;
+  }
+  return null;
+}
+
+// Initial status logs
+console.log(`[INFO] OmniDimension Server Ready. Agent ID: ${AGENT_ID}`);
+if (!API_KEY) {
+  console.error('[ERROR] OMNIDIM_API_KEY is not defined in .env! Call dispatches will fail.');
+} else {
+  console.log('[INFO] OMNIDIM_API_KEY authenticated successfully.');
+}
+
+// REST Endpoints
+
+// 1. Batch & Sequential Calling API
+app.post('/api/queue/start', (req, res) => {
+  const { contacts, delaySeconds, agentId, universityName } = req.body;
+
+  if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
+    addLog('error', 'Batch call failed: No contacts provided.');
+    return res.status(400).json({ error: 'Please provide at least one contact to start dialing.' });
+  }
+
+  // Validate and parse contacts
+  const parsedQueue = [];
+  const invalidCount = 0;
+
+  contacts.forEach((c, idx) => {
+    const formatted = validateAndFormatMobile(c.phone);
+    if (formatted) {
+      parsedQueue.push({
+        id: `contact-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 4)}`,
+        phone: c.phone,
+        formattedPhone: formatted,
+        name: c.name ? String(c.name).trim() : '',
+        status: 'queued',
+        duration: '—',
+        reason: ''
+      });
+    }
+  });
+
+  if (parsedQueue.length === 0) {
+    addLog('error', 'Batch call failed: No valid 10-digit Indian phone numbers found in list.');
+    return res.status(400).json({ error: 'No valid 10-digit mobile numbers found in submission.' });
+  }
+
+  // Reset campaign state
+  CALL_QUEUE = parsedQueue;
+  CURRENT_CALL = null;
+  CAMPAIGN_STATE = {
+    isRunning: true,
+    isPaused: false,
+    totalCount: parsedQueue.length,
+    completedCount: 0,
+    answeredCount: 0,
+    unansweredCount: 0,
+    delayMs: (Number(delaySeconds) || 2) * 1000,
+    currentContactIndex: -1,
+    agentId: agentId ? Number(agentId) : null,
+    universityName: universityName ? String(universityName) : 'Vidyavision AI Admission Assistant'
+  };
+
+  const universityDisplay = CAMPAIGN_STATE.universityName;
+  const activeAgentId = CAMPAIGN_STATE.agentId || AGENT_ID;
+  addLog('success', `Campaign initialized for ${universityDisplay} (Agent ID: ${activeAgentId}) with ${parsedQueue.length} contacts! Starting sequential calling...`);
+  broadcastQueueUpdate();
+
+  // Kick off sequential execution
+  processNextInQueue();
+
+  res.json({
+    success: true,
+    message: `Started sequential calling campaign with ${parsedQueue.length} contacts.`,
+    totalCount: parsedQueue.length
+  });
+});
+
+// 2. Pause Sequential Queue
+app.post('/api/queue/pause', (req, res) => {
+  if (!CAMPAIGN_STATE.isRunning) {
+    return res.status(400).json({ error: 'No campaign is currently running.' });
+  }
+
+  CAMPAIGN_STATE.isPaused = true;
+  if (queueNextTimer) {
+    clearTimeout(queueNextTimer);
+    queueNextTimer = null;
+  }
+  addLog('warning', 'Sequential calling campaign PAUSED.');
+  broadcastQueueUpdate();
+  res.json({ success: true, message: 'Campaign paused.' });
+});
+
+// 3. Resume Sequential Queue
+app.post('/api/queue/resume', (req, res) => {
+  if (!CAMPAIGN_STATE.isRunning) {
+    return res.status(400).json({ error: 'No active campaign to resume.' });
+  }
+
+  CAMPAIGN_STATE.isPaused = false;
+  addLog('info', 'Sequential calling campaign RESUMED.');
+  broadcastQueueUpdate();
+
+  if (!CURRENT_CALL) {
+    processNextInQueue();
+  }
+
+  res.json({ success: true, message: 'Campaign resumed.' });
+});
+
+// 4. Cancel/Stop Sequential Queue
+app.post('/api/queue/cancel', (req, res) => {
+  if (queueNextTimer) {
+    clearTimeout(queueNextTimer);
+    queueNextTimer = null;
+  }
+
+  CAMPAIGN_STATE.isRunning = false;
+  CAMPAIGN_STATE.isPaused = false;
+  
+  CALL_QUEUE.forEach(c => {
+    if (c.status === 'queued' || c.status === 'in-progress') {
+      c.status = 'canceled';
+      c.reason = 'User stopped campaign';
+    }
+  });
+
+  CURRENT_CALL = null;
+  addLog('warning', 'Sequential calling campaign CANCELLED by user.');
+  broadcastQueueUpdate();
+  res.json({ success: true, message: 'Campaign cancelled.' });
+});
+
+// 5. Get Campaign & Queue Status
+app.get('/api/queue/status', (req, res) => {
+  res.json({
+    success: true,
+    campaignState: CAMPAIGN_STATE,
+    queue: CALL_QUEUE,
+    currentCall: CURRENT_CALL
+  });
+});
+
+// 6. Get registration logs
+app.get('/api/logs', (req, res) => {
+  res.json({ logs: LOGS });
+});
+
+// 7. Clear registration logs
+app.post('/api/logs/clear', (req, res) => {
+  LOGS.length = 0;
+  addLog('info', 'Activity logs cleared.');
+  res.json({ success: true, logs: LOGS });
+});
+
+// 8. Get recent call logs from OmniDimension
+app.get('/api/calls', async (req, res) => {
+  const calls = await fetchCallsFromOmni();
+  if (calls) {
+    res.json({ success: true, data: calls });
+  } else {
+    res.status(502).json({ error: 'Could not fetch calls from OmniDimension' });
+  }
+});
+
+// 9. Get call interests map
+app.get('/api/calls/interests', (req, res) => {
+  res.json({ success: true, data: CALL_INTERESTS });
+});
+
+// 10. Update or manually set call interest and preferences
+app.post('/api/calls/interest', async (req, res) => {
+  const { phone, callId, interestStatus, college, course, notes, studentName } = req.body;
+  if (!phone && !callId) {
+    return res.status(400).json({ error: 'Phone number or call ID is required.' });
+  }
+
+  const cleanPhone = String(phone || '').replace(/\D/g, '').slice(-10);
+  const key = cleanPhone || callId;
+
+  const updatedEntry = {
+    interestStatus: interestStatus || 'PENDING',
+    college: college && college.trim() ? college.trim() : (['NOT_INTERESTED', 'WRONG_NUMBER', 'ALREADY_JOINED', 'ALREADY_APPLIED'].includes(interestStatus) ? interestStatus.replace('_', ' ') : 'Not Mentioned in Call'),
+    course: course && course.trim() ? course.trim() : (['NOT_INTERESTED', 'WRONG_NUMBER', 'ALREADY_JOINED', 'ALREADY_APPLIED'].includes(interestStatus) ? interestStatus.replace('_', ' ') : 'Not Mentioned in Call'),
+    notes: notes ? String(notes).trim() : '',
+    details: notes && notes.trim() ? notes.trim() : (() => {
+      const name = studentName || 'Student';
+      if (interestStatus === 'CALLBACK') return `${name} requested a callback to discuss admission details later.`;
+      if (interestStatus === 'ALREADY_JOINED') return `${name} stated already joined/enrolled in another institution.`;
+      if (interestStatus === 'ALREADY_APPLIED') return `${name} stated already submitted admission application.`;
+      if (interestStatus === 'WRONG_NUMBER') return `${name} flagged as invalid/wrong phone number.`;
+      if (interestStatus === 'NOT_INTERESTED') return `${name} stated NOT interested in admissions.`;
+      return `${name} expressed interest${course ? ` in ${course}` : ''}${college ? ` at ${college}` : ' in college admission'}.`;
+    })(),
+    updatedAt: new Date().toISOString()
+  };
+
+  CALL_INTERESTS[key] = updatedEntry;
+  if (callId) CALL_INTERESTS[callId] = updatedEntry;
+
+  await saveInterests();
+  addLog('success', `Updated interest record for ${studentName || key}: Status=${updatedEntry.interestStatus}, College=${updatedEntry.college}, Course=${updatedEntry.course}`);
+
+  // Broadcast updated calls over WebSocket
+  const calls = await fetchCallsFromOmni();
+  if (calls) {
+    lastCallsJson = JSON.stringify(calls);
+    broadcast({ type: 'calls', data: calls });
+  }
+
+  res.json({ success: true, data: updatedEntry });
+});
+
+// Get call analytics from Google Sheets (Primary Source of Truth)
+app.get('/api/call-analytics', async (req, res) => {
+  const force = req.query.force === 'true';
+  try {
+    let records = [];
+    if (force) {
+      console.log('Force refresh requested. Querying Google Sheets...');
+      const rawData = await fetchSheetRawData();
+      if (rawData && rawData.length > 0) {
+        const headers = rawData[0];
+        const rows = rawData.slice(1);
+        const seenIds = new Set();
+        const normalizedList = [];
+        rows.forEach((row, index) => {
+          if (!row || row.length === 0) return;
+          const item = normalizeRow(row, headers);
+          if (!item.id) {
+            const cleanPhone = item.contactNumber.replace(/\D/g, '');
+            const cleanDate = item.callDate.replace(/[^a-zA-Z0-9]/g, '');
+            item.id = `row-${index}-${cleanPhone}-${cleanDate}`;
+          }
+          if (!seenIds.has(item.id)) {
+            seenIds.add(item.id);
+            normalizedList.push(item);
+          }
+        });
+        records = normalizedList;
+      }
+      lastSheetsDataJson = JSON.stringify(records);
+      await saveCache(records);
+    } else {
+      records = await loadCache();
+      if (records.length === 0) {
+        console.log('Cache empty. Fetching from Google Sheets...');
+        const rawData = await fetchSheetRawData();
+        if (rawData && rawData.length > 0) {
+          const headers = rawData[0];
+          const rows = rawData.slice(1);
+          const seenIds = new Set();
+          const normalizedList = [];
+          rows.forEach((row, index) => {
+            if (!row || row.length === 0) return;
+            const item = normalizeRow(row, headers);
+            if (!item.id) {
+              const cleanPhone = item.contactNumber.replace(/\D/g, '');
+              const cleanDate = item.callDate.replace(/[^a-zA-Z0-9]/g, '');
+              item.id = `row-${index}-${cleanPhone}-${cleanDate}`;
+            }
+            if (!seenIds.has(item.id)) {
+              seenIds.add(item.id);
+              normalizedList.push(item);
+            }
+          });
+          records = normalizedList;
+        }
+        lastSheetsDataJson = JSON.stringify(records);
+        await saveCache(records);
+      }
+    }
+    res.json({ success: true, source: force ? 'google_sheets' : 'cache', data: records });
+  } catch (error) {
+    console.error('Error in /api/call-analytics:', error);
+    const cached = await loadCache();
+    if (cached.length > 0) {
+      return res.json({
+        success: true,
+        source: 'cache_fallback',
+        error: 'Unable to refresh call data from Google Sheets. Showing the last successfully loaded records.',
+        data: cached
+      });
+    }
+    res.status(502).json({
+      success: false,
+      error: 'Google Sheets is currently unavailable and no cached data is found.'
+    });
+  }
+});
+
+// Start Server
+// Trigger server restart for google sheets cache clearing
+server.listen(PORT, () => {
+  console.log(`========================================`);
+  console.log(`OmniDimension Backend running on port ${PORT}`);
+  console.log(`WebSocket endpoint: ws://localhost:${PORT}/api/stream`);
+  console.log(`========================================`);
+});
+
+
+
