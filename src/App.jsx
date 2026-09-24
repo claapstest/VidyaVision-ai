@@ -70,8 +70,130 @@ export default function App() {
 
   // Temporary contacts staged before university/delay selection
   const [tempContacts, setTempContacts] = useState([]);
-  const [tempInputMode, setTempInputMode] = useState(''); // 'manual' | 'bulk' | 'excel'
+  const [tempInputMode, setTempInputMode] = useState(''); // 'manual' | 'bulk' | 'excel' | 'recent'
+  // Recently used contacts (persisted): re-add past numbers to call again, e.g. with another college
+  const getInitialRecent = () => {
+    try {
+      const raw = localStorage.getItem('vv_recent_contacts');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.slice(0, 50);
+    } catch (e) {}
+    return [];
+  };
+  const [recentContacts, setRecentContacts] = useState(getInitialRecent);
+  const [recentSearch, setRecentSearch] = useState('');
+  const [recentChecked, setRecentChecked] = useState([]);
+
+  const pushRecentContacts = (items) => {
+    if (!items || items.length === 0) return;
+    setRecentContacts(prev => {
+      const seen = new Map();
+      [...items, ...prev].forEach(c => {
+        const key = String(c.formattedPhone || c.phone || '').replace(/\D/g, '').slice(-10);
+        if (key && !seen.has(key)) {
+          seen.set(key, {
+            name: c.name || '',
+            phone: String(c.phone || '').replace(/\D/g, ''),
+            formattedPhone: c.formattedPhone || '',
+            universityId: c.universityId || '',
+            universityName: c.universityName || c.college || '',
+            usedAt: c.usedAt || new Date().toISOString()
+          });
+        }
+      });
+      const next = Array.from(seen.values()).slice(0, 50);
+      try { localStorage.setItem('vv_recent_contacts', JSON.stringify(next)); } catch (e) {}
+      return next;
+    });
+  };
+
+  const handleLoadRecentToTemp = (items) => {
+    const valid = (items || []).map(r => {
+      const formatted = validatePhone(r.phone || r.formattedPhone);
+      return formatted ? {
+        id: `recent-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        phone: String(r.phone || '').replace(/\D/g, ''),
+        formattedPhone: formatted,
+        name: (r.name || '').trim(),
+        hasName: Boolean((r.name || '').trim())
+      } : null;
+    }).filter(Boolean);
+    if (valid.length === 0) {
+      addToast('No valid numbers in selection.', 'error');
+      return;
+    }
+    setTempContacts(prev => [...prev, ...valid]);
+    setTempInputMode('recent');
+    setRecentChecked([]);
+    addToast(`Loaded ${valid.length} recent contact${valid.length > 1 ? 's' : ''} — pick a college in Step 2 to stage.`, 'success');
+  };
+
+  // Recent-numbers pagination (8 per page — stays usable with 50 saved)
+  const RECENT_PAGE_SIZE = 8;
+  const [recentPage, setRecentPage] = useState(0);
+
+  // Recently uploaded Excel/CSV files (parsed contacts kept, so any file can be
+  // re-loaded later to call with another college without re-uploading)
+  const RECENT_FILES_MAX = 5;
+  const RECENT_FILE_CONTACTS_MAX = 300;
+  const getInitialRecentFiles = () => {
+    try {
+      const raw = localStorage.getItem('vv_recent_files');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed.slice(0, RECENT_FILES_MAX);
+    } catch (e) {}
+    return [];
+  };
+  const [recentFiles, setRecentFiles] = useState(getInitialRecentFiles);
+
+  const pushRecentFile = (entry) => {
+    if (!entry || !entry.fileName) return;
+    setRecentFiles(prev => {
+      const next = [{ ...entry, id: `file-${Date.now()}` }, ...prev.filter(f => f.fileName !== entry.fileName)].slice(0, RECENT_FILES_MAX);
+      try { localStorage.setItem('vv_recent_files', JSON.stringify(next)); } catch (e) {}
+      return next;
+    });
+  };
+
+  const handleLoadRecentFile = (file) => {
+    if (!file || !Array.isArray(file.contacts) || file.contacts.length === 0) {
+      addToast('This saved file has no contacts left.', 'error');
+      return;
+    }
+    const valid = file.contacts.map((r, i) => {
+      const formatted = validatePhone(r.phone || r.formattedPhone);
+      return formatted ? {
+        id: `recentfile-${Date.now()}-${i}`,
+        phone: String(r.phone || '').replace(/\D/g, ''),
+        formattedPhone: formatted,
+        name: (r.name || '').trim(),
+        hasName: Boolean((r.name || '').trim())
+      } : null;
+    }).filter(Boolean);
+    if (valid.length === 0) {
+      addToast('No valid numbers left in this file.', 'error');
+      return;
+    }
+    setTempContacts(valid);
+    setTempInputMode('excel');
+    setUploadedFileInfo({
+      fileName: file.fileName,
+      fileSize: file.fileSize || '',
+      count: valid.length,
+      uploadedAt: file.uploadedAt ? new Date(file.uploadedAt).toLocaleTimeString() : new Date().toLocaleTimeString()
+    });
+    addToast(`Loaded ${valid.length} contacts from ${file.fileName}! Select college and delay in Step 2.`, 'success');
+  };
+
+  const handleDeleteRecentFile = (id) => {
+    setRecentFiles(prev => {
+      const next = prev.filter(f => f.id !== id);
+      try { localStorage.setItem('vv_recent_files', JSON.stringify(next)); } catch (e) {}
+      return next;
+    });
+  };
   const [selectedUniversity, setSelectedUniversity] = useState('vidyavision');
+  const [selectedCourse, setSelectedCourse] = useState('');
   const [uniSearchDialer, setUniSearchDialer] = useState('');
   const [uniSearchDashboard, setUniSearchDashboard] = useState('');
   const [showLogs, setShowLogs] = useState(false);
@@ -83,6 +205,7 @@ export default function App() {
       place: 'Hyderabad, Telangana',
       agentId: 257941,
       languages: 'Telugu, English, Hindi, Tamil, Malayalam',
+      courses: ['B.Tech CSE', 'B.Tech ECE', 'B.Tech IT', 'MBA'],
       status: 'active',
       websiteUrl: 'https://vidyavision.com/admissions',
       description: 'Multilingual south-region admission outreach.'
@@ -93,6 +216,7 @@ export default function App() {
       place: 'Visakhapatnam & Hyderabad',
       agentId: 257941,
       languages: 'English, Hindi',
+      courses: ['B.Tech CSE', 'B.Tech ECE', 'MBA'],
       status: 'active',
       websiteUrl: 'https://applications.gitam.edu',
       description: 'GITAM admission queries and course catalog details.'
@@ -103,6 +227,7 @@ export default function App() {
       place: 'Vijayawada & Hyderabad',
       agentId: 257941,
       languages: 'English, Hindi',
+      courses: ['B.Tech CSE', 'B.Tech ECE', 'MBA'],
       status: 'active',
       websiteUrl: 'https://kluniversity.in/admissions',
       description: 'KL University admission inquiries and course selection.'
@@ -113,6 +238,7 @@ export default function App() {
       place: 'Hyderabad, Telangana',
       agentId: 257941,
       languages: 'English, Hindi',
+      courses: ['MBA', 'BBA', 'B.Tech CSE'],
       status: 'active',
       websiteUrl: 'https://ifheindia.org/admissions',
       description: 'ICFAI IFHE Hyderabad admissions wing.'
@@ -123,6 +249,7 @@ export default function App() {
       place: 'Sangareddy, Telangana',
       agentId: 257941,
       languages: 'Telugu, English, Hindi',
+      courses: ['B.Tech CSE', 'B.Tech ECE', 'MBA'],
       status: 'active',
       websiteUrl: 'https://mnrindia.org/admissions',
       description: 'MNR University medical, engineering & general admissions.'
@@ -196,7 +323,8 @@ export default function App() {
     websiteUrl: '',
     description: '',
     agentId: '257941',
-    languages: 'English, Hindi, Telugu'
+    languages: 'English, Hindi, Telugu',
+    courses: ''
   });
 
   const getInitialColleges = () => {
@@ -211,6 +339,14 @@ export default function App() {
   };
 
   const [universities, setUniversities] = useState(getInitialColleges);
+
+  // Keep the Step-2 college selection valid as colleges change
+  useEffect(() => {
+    if (universities.length > 0 && !universities.find(u => u.id === selectedUniversity)) {
+      setSelectedUniversity(universities[0].id);
+      setSelectedCourse('');
+    }
+  }, [universities]);
 
   // Dashboard multi-select scope helpers (after universities is defined)
   const isAllUniScope = dashboardUniversityFilter.includes('ALL') || dashboardUniversityFilter.length === 0;
@@ -252,7 +388,8 @@ export default function App() {
       websiteUrl: '',
       description: '',
       agentId: '257941',
-      languages: 'English, Hindi, Telugu'
+      languages: 'English, Hindi, Telugu',
+      courses: ''
     });
     setEditingCollegeId('');
   };
@@ -265,7 +402,8 @@ export default function App() {
       websiteUrl: college.websiteUrl || '',
       description: college.description || '',
       agentId: String(college.agentId || 257941),
-      languages: college.languages || 'English, Hindi, Telugu'
+      languages: college.languages || 'English, Hindi, Telugu',
+      courses: Array.isArray(college.courses) ? college.courses.join(', ') : (college.courses || '')
     });
     setEditingCollegeId(college.id);
     setShowCollegeModal(true);
@@ -295,7 +433,8 @@ export default function App() {
           websiteUrl: collegeForm.websiteUrl.trim(),
           description: collegeForm.description.trim(),
           agentId: Number(collegeForm.agentId) || 257941,
-          languages: (collegeForm.languages || '').trim() || 'English, Hindi, Telugu'
+          languages: (collegeForm.languages || '').trim() || 'English, Hindi, Telugu',
+          courses: String(collegeForm.courses || '').split(',').map(s => s.trim()).filter(Boolean)
         })
       });
 
@@ -449,6 +588,26 @@ export default function App() {
     return () => {
       if (wsRef.current) wsRef.current.close();
     };
+  }, []);
+
+  // Fetch live OmniDimension call logs via REST (no WebSocket dependency, so the
+  // dashboard + Recent Calls update even if the live socket drops).
+  const fetchOmniCalls = async () => {
+    try {
+      const res = await fetch('/api/calls');
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.data)) {
+        setCalls(data.data);
+      }
+    } catch (err) {
+      console.error('REST calls sync error:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchOmniCalls();
+    const t = setInterval(fetchOmniCalls, 30000);
+    return () => clearInterval(t);
   }, []);
 
   // Fetch call analytics from Google Sheets API
@@ -630,6 +789,13 @@ export default function App() {
             count: parsedContacts.length,
             uploadedAt: new Date().toLocaleTimeString()
           });
+          pushRecentFile({
+            fileName: file.name,
+            fileSize: (file.size / 1024).toFixed(1) + ' KB',
+            count: parsedContacts.length,
+            uploadedAt: new Date().toISOString(),
+            contacts: parsedContacts.slice(0, RECENT_FILE_CONTACTS_MAX).map(c => ({ phone: c.phone, formattedPhone: c.formattedPhone, name: c.name }))
+          });
           addToast(`Imported ${parsedContacts.length} contacts from ${file.name}! Select settings below.`, 'success');
         }
       } catch (err) {
@@ -695,12 +861,14 @@ export default function App() {
       ...c,
       universityId: uni.id,
       universityName: uni.name,
-      agentId: uni.agentId
+      agentId: uni.agentId,
+      course: selectedCourse || ''
     }));
 
     setStagedContacts(prev => [...prev, ...enrichedContacts]);
     setTempContacts([]);
     setTempInputMode('');
+    pushRecentContacts(enrichedContacts.map(c => ({ ...c, usedAt: new Date().toISOString() })));
     addToast(`Successfully staged ${tempContacts.length} contacts for ${uni.name}!`, 'success');
   };
 
@@ -722,19 +890,21 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contacts: stagedContacts.map(c => ({ phone: c.phone, name: c.name })),
+          contacts: stagedContacts.map(c => ({ phone: c.phone, name: c.name, course: c.course || '' })),
           delaySeconds: callDelay !== '' ? callDelay : 2,
           agentId: uni.agentId,
           universityId: uni.id,
           universityName: uni.name,
           collegePlace: uni.place || uni.location || '',
-          applicationUrl: uni.websiteUrl || uni.applicationUrl || uni.admissionLink || ''
+          applicationUrl: uni.websiteUrl || uni.applicationUrl || uni.admissionLink || '',
+          course: selectedCourse || stagedContacts[0]?.course || ''
         })
       });
 
       const data = await res.json();
       if (res.ok) {
         addToast(`Campaign Started! Dialing ${data.totalCount} contacts sequentially using ${uni.name}...`, 'success');
+        pushRecentContacts(stagedContacts.map(c => ({ ...c, usedAt: new Date().toISOString() })));
         setStagedContacts([]);
         setShowLogs(true); // Auto-expand logs terminal
       } else {
@@ -1390,16 +1560,20 @@ export default function App() {
   };
 
   // Merge Google Sheets data with live outbound call logs from OmniDimension.
-  // Omni records carry the REAL transcript/status/duration/recording, so map them
-  // directly (plus the staged name + exact campaign college from the dial queue)
-  // instead of placeholder rows.
+  // The LIVE Omni record always wins for transcript/status/duration/recording:
+  // if the number already has a Sheets row, the live data is merged OVER it
+  // (Sheets keeps academic fields) so the dashboard updates the moment a call ends.
   const mergedCalls = React.useMemo(() => {
-    const list = [...sheetsCalls];
-    const existingIds = new Set(sheetsCalls.map(c => String(c.id || '').trim()).filter(Boolean));
-    const existingPhones = new Set(sheetsCalls.map(c => {
-      const p = String(c.contactNumber || '').replace(/\D/g, '');
-      return p.length === 10 ? p : p.slice(-10);
-    }).filter(Boolean));
+    const list = sheetsCalls.map(s => ({ ...s }));
+    const idxById = new Map();
+    const idxByPhone = new Map();
+    list.forEach((r, i) => {
+      const rid = String(r.id || '').trim();
+      if (rid && !idxById.has(rid)) idxById.set(rid, i);
+      const p = String(r.contactNumber || '').replace(/\D/g, '');
+      const key = p.length === 10 ? p : p.slice(-10);
+      if (key && !idxByPhone.has(key)) idxByPhone.set(key, i);
+    });
 
     // Staged/campaign queue lookup by phone: staged name + exact college called with
     const queueByPhone = new Map();
@@ -1421,9 +1595,6 @@ export default function App() {
       const phone = String(c.to_number || c.phone_number || c.to || '').replace(/\D/g, '');
       const cleanPhone = phone.length === 10 ? phone : phone.slice(-10);
       if (!cleanPhone) return;
-
-      const isAlreadyInSheets = (callId && existingIds.has(callId)) || (cleanPhone && existingPhones.has(cleanPhone));
-      if (isAlreadyInSheets) return;
 
       const queueMatch = queueByPhone.get(cleanPhone) || null;
       const status = (c.call_status || c.status || '').toLowerCase();
@@ -1452,38 +1623,80 @@ export default function App() {
       const cbReq = c.extracted_variables?.callback_requested;
       const callbackRequired = (cbReq && !/not provided|no|—/i.test(String(cbReq))) ? 'Yes' : 'No';
 
-      list.push({
-        ...c,
-        id: callId || `omni-${Date.now()}-${cleanPhone}`,
-        studentName: displayName,
-        contactNumber: c.to_number || c.phone_number || c.to || `+91${cleanPhone}`,
-        email: '—',
-        program: '—',
-        course: cleanCourse(c.target_course || c.course),
-        preferredState: '—',
-        preferredCity: '—',
-        leadStatus: finalStatus,
-        interestLevel: levelForStatus(finalStatus),
-        final_status: finalStatus,
-        finalStatus: finalStatus,
-        counselorRequired: 'No',
-        callbackRequired,
-        callDate: c.time_of_call || c.call_date || c.callDate || new Date().toISOString(),
+      // Live overlay: always fresh from this call; academic/Sheets fields filled only if blank
+      const liveOverlay = {
+        call_conversation: c.call_conversation,
+        interactions: c.interactions,
         callDuration: c.call_duration || c.duration || '—',
         duration: c.call_duration || c.duration || '—',
         callOutcome: outcome,
+        final_status: finalStatus,
+        finalStatus: finalStatus,
+        interestStatus: finalStatus,
+        leadStatus: finalStatus,
+        interestLevel: levelForStatus(finalStatus),
+        callbackRequired,
+        callDate: c.time_of_call || c.call_date || c.callDate || new Date().toISOString(),
         summary: c.interest_details || c.sentiment_analysis_details || c.summary || '',
         notes: c.interest_details || 'Not provided',
-        entranceExam: '—',
-        educationStatus: '—',
         recordingUrl: c.recording_url || c.recordingUrl || '—',
         internal_recording_url: c.internal_recording_url || '',
-        transferStatus: 'No',
-        preferredUniversity: displayCollege || '—',
-        universitiesDiscussed: displayCollege || '—',
         sentiment: c.sentiment_score || c.sentiment || 'Neutral',
         botName: c.bot_name || c.botName || '—'
-      });
+      };
+
+      const existingIdx = (callId && idxById.get(callId) !== undefined)
+        ? idxById.get(callId)
+        : idxByPhone.get(cleanPhone);
+
+      if (existingIdx !== undefined) {
+        // Sheets row exists: keep its academic fields, overwrite with live call data.
+        // Name rule: the CURRENT call's staged/dispatch name always wins over a
+        // stale Sheets name (same number can be re-called for different students).
+        const prev = list[existingIdx];
+        const isGenericName = (n) => !n || n === '—' || n === 'Student' || /^recipient\s*\(/i.test(String(n));
+        list[existingIdx] = {
+          ...prev,
+          ...liveOverlay,
+          studentName: !isGenericName(displayName) ? displayName : (!isGenericName(prev.studentName) ? prev.studentName : displayName),
+          course: prev.course && prev.course !== '—' ? prev.course : cleanCourse(c.target_course || c.course),
+          preferredUniversity: (prev.preferredUniversity && prev.preferredUniversity !== '—') ? prev.preferredUniversity : (displayCollege || '—'),
+          universitiesDiscussed: (prev.universitiesDiscussed && prev.universitiesDiscussed !== '—') ? prev.universitiesDiscussed : (displayCollege || '—')
+        };
+      } else {
+        list.push({
+          ...c,
+          id: callId || `omni-${Date.now()}-${cleanPhone}`,
+          studentName: displayName,
+          contactNumber: c.to_number || c.phone_number || c.to || `+91${cleanPhone}`,
+          email: '—',
+          program: '—',
+          course: cleanCourse(c.target_course || c.course),
+          preferredState: '—',
+          preferredCity: '—',
+          leadStatus: finalStatus,
+          interestLevel: levelForStatus(finalStatus),
+          final_status: finalStatus,
+          finalStatus: finalStatus,
+          counselorRequired: 'No',
+          callbackRequired,
+          callDate: c.time_of_call || c.call_date || c.callDate || new Date().toISOString(),
+          callDuration: c.call_duration || c.duration || '—',
+          duration: c.call_duration || c.duration || '—',
+          callOutcome: outcome,
+          summary: c.interest_details || c.sentiment_analysis_details || c.summary || '',
+          notes: c.interest_details || 'Not provided',
+          entranceExam: '—',
+          educationStatus: '—',
+          recordingUrl: c.recording_url || c.recordingUrl || '—',
+          internal_recording_url: c.internal_recording_url || '',
+          transferStatus: 'No',
+          preferredUniversity: displayCollege || '—',
+          universitiesDiscussed: displayCollege || '—',
+          sentiment: c.sentiment_score || c.sentiment || 'Neutral',
+          botName: c.bot_name || c.botName || '—'
+        });
+      }
     });
 
     return list;
@@ -1712,10 +1925,10 @@ export default function App() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
                 <div>
                   <h3 style={{ fontSize: '1.15rem', fontWeight: '800', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-primary)' }}>
-                    🎓 Saved College Bots ({universities.length})
+                    🎓 Saved Colleges ({universities.length})
                   </h3>
                   <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-                    Select a college for sequence calling or click <b>Delete</b> to remove unwanted colleges.
+                    Manage your colleges below — edit details and courses, or delete unwanted ones. College and course for calling are picked in Step 2.
                   </p>
                 </div>
 
@@ -1725,7 +1938,7 @@ export default function App() {
                     style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }}
                     onClick={() => setShowManageColleges(prev => !prev)}
                   >
-                    <Trash2 size={15} /> {showManageColleges ? 'Hide Delete Grid' : 'Manage & Delete Colleges'}
+                    <Trash2 size={15} /> {showManageColleges ? 'Hide Colleges' : 'Manage Colleges'}
                   </button>
 
                   <button className="btn btn-primary" style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }} onClick={() => { resetCollegeForm(); setShowCollegeModal(true); }}>
@@ -1738,18 +1951,17 @@ export default function App() {
               {showManageColleges && (
                 <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
                   <div style={{ fontSize: '0.78rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.75rem', letterSpacing: '0.05em' }}>
-                    Click <b style={{ color: '#ef4444' }}>DELETE</b> on any card to permanently remove a college:
+                    Click <b>EDIT</b> to update details/courses, <b style={{ color: '#ef4444' }}>DELETE</b> to permanently remove a college:
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '0.85rem' }}>
                     {universities.map(uni => {
-                      const isSelected = selectedUniversity === uni.id;
                       return (
                         <div
                           key={uni.id}
                           style={{
-                            backgroundColor: isSelected ? 'rgba(99, 102, 241, 0.08)' : 'var(--bg-card)',
-                            border: isSelected ? '2px solid var(--accent)' : '1px solid var(--border)',
+                            backgroundColor: 'var(--bg-card)',
+                            border: '1px solid var(--border)',
                             borderRadius: '10px',
                             padding: '0.9rem',
                             display: 'flex',
@@ -1763,12 +1975,17 @@ export default function App() {
                               <h4 style={{ fontSize: '0.95rem', fontWeight: '700', color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
                                 🎓 {uni.name}
                               </h4>
-                              {isSelected && (
-                                <span style={{ fontSize: '0.65rem', backgroundColor: 'var(--accent)', color: 'white', padding: '0.1rem 0.4rem', borderRadius: '4px', fontWeight: 'bold' }}>
-                                  SELECTED
-                                </span>
-                              )}
                             </div>
+
+                            {Array.isArray(uni.courses) && uni.courses.length > 0 && (
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', margin: '0.3rem 0' }}>
+                                {uni.courses.map(course => (
+                                  <span key={course} style={{ fontSize: '0.7rem', fontWeight: '700', backgroundColor: 'rgba(99, 102, 241, 0.12)', color: '#818cf8', padding: '0.15rem 0.5rem', borderRadius: '20px', border: '1px solid rgba(99, 102, 241, 0.25)' }}>
+                                    📚 {course}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
 
                             {uni.place && (
                               <p style={{ fontSize: '0.78rem', color: '#818cf8', margin: '0.15rem 0', fontWeight: '600' }}>
@@ -1793,19 +2010,7 @@ export default function App() {
                             </p>
                           </div>
 
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.85rem', paddingTop: '0.65rem', borderTop: '1px solid var(--border)', gap: '0.4rem', flexWrap: 'wrap' }}>
-                            <button
-                              type="button"
-                              className={`btn ${isSelected ? 'btn-primary' : 'btn-secondary'}`}
-                              style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem' }}
-                              onClick={() => {
-                                setSelectedUniversity(uni.id);
-                                addToast(`Selected ${uni.name} for sequence calling.`, 'info');
-                              }}
-                            >
-                              {isSelected ? '✓ Selected Bot' : 'Select Bot'}
-                            </button>
-
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: '0.85rem', paddingTop: '0.65rem', borderTop: '1px solid var(--border)', gap: '0.4rem', flexWrap: 'wrap' }}>
                             <div style={{ display: 'flex', gap: '0.35rem' }}>
                               <button
                                 type="button"
@@ -1962,6 +2167,55 @@ export default function App() {
                           Name is optional. Phone requires 10-digits.
                         </span>
                       </div>
+
+                      {/* Recently uploaded files — reload any sheet to call with another college */}
+                      {recentFiles.length > 0 && (
+                        <div style={{ borderTop: '1px solid var(--border)', marginTop: '1rem', paddingTop: '0.9rem' }}>
+                          <div style={{ fontSize: '0.8rem', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-secondary)', marginBottom: '0.6rem' }}>
+                            📁 Recent Files ({recentFiles.length}) — reload to call again
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', maxHeight: '220px', overflowY: 'auto', paddingRight: '0.25rem' }}>
+                            {recentFiles.map(f => (
+                              <div
+                                key={f.id}
+                                style={{
+                                  display: 'flex', alignItems: 'center', gap: '0.65rem',
+                                  padding: '0.55rem 0.75rem', borderRadius: '8px',
+                                  border: '1px solid var(--border)', backgroundColor: 'var(--bg-card)'
+                                }}
+                              >
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontWeight: '700', fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    📄 {f.fileName}
+                                  </div>
+                                  <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                                    <b style={{ color: '#818cf8' }}>{f.count} contacts</b>
+                                    {f.fileSize ? ` • ${f.fileSize}` : ''}
+                                    {f.uploadedAt && !isNaN(new Date(f.uploadedAt).getTime()) ? ` • ${new Date(f.uploadedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${new Date(f.uploadedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}` : ''}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="btn btn-primary"
+                                  style={{ fontSize: '0.76rem', padding: '0.35rem 0.8rem', flexShrink: 0 }}
+                                  onClick={() => handleLoadRecentFile(f)}
+                                >
+                                  <Upload size={13} /> Load
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-danger-outline"
+                                  style={{ fontSize: '0.74rem', padding: '0.3rem 0.55rem', flexShrink: 0 }}
+                                  onClick={() => handleDeleteRecentFile(f.id)}
+                                  title={`Remove ${f.fileName} from history`}
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -2031,6 +2285,142 @@ export default function App() {
                       </div>
                     </div>
                   )}
+                  {/* RECENT NUMBERS — re-call past numbers while entering new ones */}
+                  {recentContacts.length > 0 && (
+                  <div style={{ borderTop: '1px solid var(--border)', marginTop: '1.25rem', paddingTop: '1rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                      <h4 style={{ fontSize: '0.95rem', fontWeight: '700', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        🕘 Recent Numbers ({recentContacts.length})
+                      </h4>
+                      <button
+                        className="btn btn-danger-outline"
+                        style={{ padding: '0.3rem 0.7rem', fontSize: '0.78rem' }}
+                        onClick={() => {
+                          setRecentContacts([]);
+                          setRecentChecked([]);
+                          setRecentPage(0);
+                          try { localStorage.removeItem('vv_recent_contacts'); } catch (e) {}
+                          addToast('Recent contacts history cleared.', 'info');
+                        }}
+                      >
+                        <Trash2 size={13} /> Clear History
+                      </button>
+                    </div>
+
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '0 0 0.75rem' }}>
+                      Tick numbers to call again — loaded into Step 2 where you pick the college (same or different) and stage them.
+                    </p>
+
+                    <div style={{ position: 'relative', marginBottom: '0.75rem', maxWidth: '380px' }}>
+                      <Search size={15} style={{ position: 'absolute', left: '0.8rem', top: '0.8rem', color: 'var(--text-muted)' }} />
+                      <input
+                        className="form-input"
+                        value={recentSearch}
+                        onChange={(e) => { setRecentSearch(e.target.value); setRecentPage(0); }}
+                        placeholder="Search name or number..."
+                        style={{ paddingLeft: '2.3rem' }}
+                      />
+                    </div>
+
+                    <div style={{ maxHeight: '260px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.4rem', paddingRight: '0.25rem' }}>
+                      {(() => {
+                        const __filtered = recentContacts.filter(r => {
+                          const q = recentSearch.trim().toLowerCase();
+                          if (!q) return true;
+                          return `${r.name || ''} ${r.phone || ''} ${r.universityName || ''}`.toLowerCase().includes(q);
+                        });
+                        const __totalPages = Math.max(1, Math.ceil(__filtered.length / RECENT_PAGE_SIZE));
+                        const __page = Math.min(recentPage, __totalPages - 1);
+                        return __filtered.slice(__page * RECENT_PAGE_SIZE, __page * RECENT_PAGE_SIZE + RECENT_PAGE_SIZE).map(r => {
+                          const key = String(r.formattedPhone || r.phone || '').replace(/\D/g, '').slice(-10);
+                          const checked = recentChecked.includes(key);
+                          return (
+                            <div
+                              key={key}
+                              style={{
+                                display: 'flex', alignItems: 'center', gap: '0.65rem',
+                                padding: '0.5rem 0.75rem', borderRadius: '8px',
+                                border: checked ? '1px solid var(--accent)' : '1px solid var(--border)',
+                                backgroundColor: checked ? 'rgba(99, 102, 241, 0.07)' : 'var(--bg-card)'
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => setRecentChecked(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])}
+                                style={{ width: '16px', height: '16px', accentColor: 'var(--accent)', cursor: 'pointer', flexShrink: 0 }}
+                              />
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontWeight: '700', fontSize: '0.88rem' }}>
+                                  {r.name ? `👤 ${r.name}` : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Generic Recipient</span>}
+                                </div>
+                                <div style={{ fontSize: '0.78rem', color: '#a5b4fc', fontFamily: 'var(--mono)' }}>{r.formattedPhone || r.phone}</div>
+                              </div>
+                              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                                {r.universityName && (
+                                  <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    🎓 {r.universityName}
+                                  </div>
+                                )}
+                                {r.usedAt && !isNaN(new Date(r.usedAt).getTime()) && (
+                                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                    {new Date(r.usedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} {new Date(r.usedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                                  </div>
+                                )}
+                              </div>
+                              <button
+                                type="button"
+                                className="btn btn-secondary"
+                                style={{ fontSize: '0.74rem', padding: '0.3rem 0.6rem', flexShrink: 0 }}
+                                onClick={() => handleLoadRecentToTemp([r])}
+                                title="Load this contact into Step 2"
+                              >
+                                <Plus size={13} /> Re-add
+                              </button>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+
+                    {/* Recent-numbers pages */}
+                    {(() => {
+                      const __q = recentSearch.trim().toLowerCase();
+                      const __n = recentContacts.filter(r => !__q || `${r.name || ''} ${r.phone || ''} ${r.universityName || ''}`.toLowerCase().includes(__q)).length;
+                      const __tp = Math.max(1, Math.ceil(__n / RECENT_PAGE_SIZE));
+                      const __p = Math.min(recentPage, __tp - 1);
+                      if (__tp <= 1) return null;
+                      const __selectPage = () => {
+                        const __items = recentContacts
+                          .filter(r => !__q || `${r.name || ''} ${r.phone || ''} ${r.universityName || ''}`.toLowerCase().includes(__q))
+                          .slice(__p * RECENT_PAGE_SIZE, __p * RECENT_PAGE_SIZE + RECENT_PAGE_SIZE);
+                        const __keys = __items.map(r => String(r.formattedPhone || r.phone || '').replace(/\D/g, '').slice(-10));
+                        setRecentChecked(prev => Array.from(new Set([...prev, ...__keys])));
+                      };
+                      return (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.6rem', flexWrap: 'wrap' }}>
+                          <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem' }} disabled={__p === 0} onClick={() => setRecentPage(__p - 1)}>← Prev</button>
+                          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Page {__p + 1} of {__tp} ({__n} contacts)</span>
+                          <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem' }} disabled={__p >= __tp - 1} onClick={() => setRecentPage(__p + 1)}>Next →</button>
+                          <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem' }} onClick={__selectPage}>Select this page</button>
+                        </div>
+                      );
+                    })()}
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', borderTop: '1px solid var(--border)', paddingTop: '1rem', marginTop: '1rem' }}>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                        {recentChecked.length > 0 ? `${recentChecked.length} selected` : 'Tick one or more contacts'}
+                      </span>
+                      <button
+                        className="btn btn-primary"
+                        disabled={recentChecked.length === 0}
+                        onClick={() => handleLoadRecentToTemp(recentContacts.filter(r => recentChecked.includes(String(r.formattedPhone || r.phone || '').replace(/\D/g, '').slice(-10))))}
+                      >
+                        <CheckCircle size={16} /> Load Selected into Step 2 ({recentChecked.length})
+                      </button>
+                    </div>
+                  </div>
+                )}
                 </div>
 
                 {/* STEP 2 & 3: SELECT UNIVERSITY & DELAY (SHOWN IF TEMP CONTACTS ARE LOADED) */}
@@ -2065,8 +2455,9 @@ export default function App() {
                           value={selectedUniversity}
                           onChange={(e) => {
                             setSelectedUniversity(e.target.value);
+                            setSelectedCourse('');
                             const picked = universities.find(u => u.id === e.target.value);
-                            if (picked) addToast(`Selected ${picked.name} for sequence calling.`, 'info');
+                            if (picked) addToast(`Selected ${picked.name} for sequence calling.`, 'success');
                           }}
                           style={{ flex: '2 1 280px', minWidth: '220px', padding: '0.65rem 0.9rem', fontSize: '0.92rem', fontWeight: '600', cursor: 'pointer' }}
                         >
@@ -2118,6 +2509,35 @@ export default function App() {
                           );
                         }
                         return null;
+                      })()}
+
+                      {/* Course picker (courses added on the college) */}
+                      {(() => {
+                        const sel = universities.find(u => u.id === selectedUniversity);
+                        const courses = sel && Array.isArray(sel.courses) ? sel.courses : [];
+                        return (
+                          <div style={{ marginTop: '1rem' }}>
+                            <label className="form-label" style={{ marginBottom: '0.5rem', display: 'block' }}>
+                              Select Course {courses.length > 0 ? `(${courses.length} available)` : ''}:
+                            </label>
+                            <select
+                              className="form-input"
+                              value={selectedCourse}
+                              onChange={(e) => setSelectedCourse(e.target.value)}
+                              style={{ maxWidth: '420px', padding: '0.6rem 0.9rem', fontSize: '0.9rem', fontWeight: '600', cursor: 'pointer' }}
+                            >
+                              <option value="">📚 General — no specific course (agent asks caller)</option>
+                              {courses.map(course => (
+                                <option key={course} value={course}>📚 {course}</option>
+                              ))}
+                            </select>
+                            {courses.length === 0 && (
+                              <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
+                                No courses added for {sel ? sel.name : 'this college'} yet — add them via Edit on its card. The agent will ask the caller instead.
+                              </p>
+                            )}
+                          </div>
+                        );
                       })()}
                     </div>
 
@@ -2201,6 +2621,7 @@ export default function App() {
                               <th>Mobile Number</th>
                               <th>Student Name</th>
                               <th>Target University</th>
+                              <th>Course</th>
                               <th>University ID</th>
                               <th>Staged Status</th>
                               <th style={{ textAlign: 'center' }}>Remove</th>
@@ -2224,6 +2645,9 @@ export default function App() {
                                   <span className="college-badge">
                                     🎓 {c.universityName || 'Vidyavision'}
                                   </span>
+                                </td>
+                                <td style={{ fontSize: '0.85rem', fontWeight: '600' }}>
+                                  {c.course ? `📚 ${c.course}` : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>General</span>}
                                 </td>
                                 <td style={{ fontFamily: 'var(--mono)', fontSize: '0.85rem' }}>
                                   #{c.agentId || 'N/A'}
@@ -2253,6 +2677,9 @@ export default function App() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                             Selected University: <b>{universities.find(u => u.id === selectedUniversity)?.name || 'Vidyavision'}</b>
+                          </span>
+                          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                            Course: <b>{selectedCourse || stagedContacts[0]?.course || 'General'}</b>
                           </span>
                           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                             Call Buffer Delay: <b>{callDelay !== '' ? `${callDelay} seconds` : '2 seconds (Default)'}</b>
@@ -3995,6 +4422,17 @@ export default function App() {
                       placeholder="Gandipet, Hyderabad"
                     />
                   </div>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Available Courses</label>
+                  <input
+                    className="form-input"
+                    value={collegeForm.courses}
+                    onChange={(e) => setCollegeForm(prev => ({ ...prev, courses: e.target.value }))}
+                    placeholder="B.Tech CSE, B.Tech ECE, MBA"
+                  />
+                  <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>Comma-separated — e.g. B.Tech CSE, MBA. Shown below the college name and selectable in Step 2.</span>
                 </div>
 
                 <div className="form-group">

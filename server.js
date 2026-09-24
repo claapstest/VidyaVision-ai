@@ -39,6 +39,7 @@ const DEFAULT_COLLEGES = [
     place: 'Hyderabad, Telangana',
     agentId: 257941,
     languages: 'Telugu, English, Hindi, Tamil, Malayalam',
+    courses: ['B.Tech CSE', 'B.Tech ECE', 'B.Tech IT', 'MBA'],
     status: 'active',
     websiteUrl: 'https://vidyavision.com/admissions',
     description: 'Multilingual south-region admission outreach.'
@@ -49,6 +50,7 @@ const DEFAULT_COLLEGES = [
     place: 'Visakhapatnam & Hyderabad',
     agentId: 257941,
     languages: 'English, Hindi',
+    courses: ['B.Tech CSE', 'B.Tech ECE', 'MBA'],
     status: 'active',
     websiteUrl: 'https://applications.gitam.edu',
     description: 'GITAM admission queries and course catalog details.'
@@ -59,6 +61,7 @@ const DEFAULT_COLLEGES = [
     place: 'Vijayawada & Hyderabad',
     agentId: 257941,
     languages: 'English, Hindi',
+    courses: ['B.Tech CSE', 'B.Tech ECE', 'MBA'],
     status: 'active',
     websiteUrl: 'https://kluniversity.in/admissions',
     description: 'KL University admission inquiries and course selection.'
@@ -69,6 +72,7 @@ const DEFAULT_COLLEGES = [
     place: 'Hyderabad, Telangana',
     agentId: 257941,
     languages: 'English, Hindi',
+    courses: ['MBA', 'BBA', 'B.Tech CSE'],
     status: 'active',
     websiteUrl: 'https://ifheindia.org/admissions',
     description: 'ICFAI IFHE Hyderabad admissions wing.'
@@ -79,6 +83,7 @@ const DEFAULT_COLLEGES = [
     place: 'Sangareddy, Telangana',
     agentId: 257941,
     languages: 'Telugu, English, Hindi',
+    courses: ['B.Tech CSE', 'B.Tech ECE', 'MBA'],
     status: 'active',
     websiteUrl: 'https://mnrindia.org/admissions',
     description: 'MNR University medical, engineering & general admissions.'
@@ -432,13 +437,29 @@ function resolveFinalCallStatus(item) {
 
   // 7. Explicit Interest
   const interestedKeywords = ['interested in college', 'looking for college', 'want admission', 'want to join', 'tell me fees', 'send details', 'send application', 'send the application', 'send me the application', 'application link', 'admission link', 'application of', 'fee structure', 'which college', 'which course', 'want to take admission', 'looking for admission', 'connect me with counselor'];
-  if (leadStatus === 'INTERESTED' || leadStatus === 'HOT LEAD' || leadStatus === 'QUALIFIED' || leadStatus.includes('HOT') || interestLevel === 'HIGH' || interestLevel === 'INTERESTED' || interestedKeywords.some(kw => fullText.includes(kw))) {
+  // Interest must come from the CALLER's speech — never the agent's greeting.
+  const __userParts = [];
+  if (Array.isArray(item.interactions)) {
+    item.interactions.forEach(t => {
+      if (t && t.user_query && String(t.user_query).trim()) __userParts.push(String(t.user_query).trim());
+    });
+  }
+  const __conv = item.call_conversation || item.transcript || item.conversation || '';
+  if (typeof __conv === 'string' && __conv) {
+    __conv.replace(/<br\s*\/?>/gi, '\n').split('\n').forEach(line => {
+      const __m = line.match(/^\s*user\s*:(.*)$/i);
+      if (__m && __m[1].trim()) __userParts.push(__m[1].trim());
+    });
+  }
+  const __userText = __userParts.join(' ').toLowerCase();
+  const __interestText = __userText || fullText;
+  if (leadStatus === 'INTERESTED' || leadStatus === 'HOT LEAD' || leadStatus === 'QUALIFIED' || leadStatus.includes('HOT') || interestLevel === 'HIGH' || interestLevel === 'INTERESTED' || interestedKeywords.some(kw => __interestText.includes(kw))) {
     return CALL_OUTCOME_STATUS.INTERESTED;
   }
 
   // 8. Answered call fallback: if completed without positive interest, mark NOT_INTERESTED
   if (lowerCallStatus === 'completed' || outcome.includes('COMPLETED') || outcome.includes('ANSWERED')) {
-    if (interestLevel === 'MEDIUM' || String(item.sentiment || '').toLowerCase() === 'positive') {
+    if (__userText && (interestLevel === 'MEDIUM' || String(item.sentiment || '').toLowerCase() === 'positive')) {
       return CALL_OUTCOME_STATUS.INTERESTED;
     }
     return CALL_OUTCOME_STATUS.NOT_INTERESTED;
@@ -664,6 +685,26 @@ function extractTranscriptText(callRecord) {
   return String(raw || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').trim();
 }
 
+// USER's own speech only (agent greetings like "Are you interested...?" must
+// never count as the caller's interest). Falls back to '' when unknown.
+function extractUserSpeech(callRecord) {
+  if (!callRecord) return '';
+  const parts = [];
+  if (Array.isArray(callRecord.interactions)) {
+    callRecord.interactions.forEach(t => {
+      if (t && t.user_query && String(t.user_query).trim()) parts.push(String(t.user_query).trim());
+    });
+  }
+  const conv = callRecord.call_conversation || callRecord.transcript || callRecord.conversation || '';
+  if (typeof conv === 'string' && conv) {
+    conv.replace(/<br\s*\/?>/gi, '\n').split('\n').forEach(line => {
+      const m = line.match(/^\s*user\s*:(.*)$/i);
+      if (m && m[1].trim()) parts.push(m[1].trim());
+    });
+  }
+  return parts.join(' ').toLowerCase();
+}
+
 // Intelligent Post-Call Interest & Preference Analyzer (Strict real call data)
 function analyzeCallInterest(callRecord) {
   if (!callRecord) return { interestStatus: 'PENDING', college: '—', course: '—', details: 'No call data recorded' };
@@ -697,7 +738,21 @@ function analyzeCallInterest(callRecord) {
     };
   }
 
+  // 1b. Answered but the caller said NOTHING (hung up mid-greeting):
+  // that is NOT interest, no matter what the agent said.
+  const userText = extractUserSpeech(callRecord);
+  if (!userText && (status === 'completed' || fullText.length > 0)) {
+    return {
+      interestStatus: CALL_OUTCOME_STATUS.NOT_INTERESTED,
+      final_status: CALL_OUTCOME_STATUS.NOT_INTERESTED,
+      college: 'Not Mentioned in Call',
+      course: 'Not Mentioned in Call',
+      details: `${name} hung up without responding during the call.`
+    };
+  }
+
   // 2. Specific outcome keywords for mutually exclusive classification
+  // (negative outcomes read the whole conversation; INTEREST reads user speech only)
   const wrongNumberKeywords = [
     'wrong number', 'wrong person', 'invalid number', 'not the right person', 
     'wrong contact', 'not my number', 'mistaken number', 'incorrect number', 'does not belong'
@@ -812,7 +867,8 @@ function analyzeCallInterest(callRecord) {
     else if (fullText.includes('mech') || fullText.includes('mechanical')) course = 'B.Tech Mech';
     else if (fullText.includes('civil')) course = 'B.Tech Civil';
 
-    const isExplicitlyInterested = interestedKeywords.some(kw => fullText.includes(kw)) ||
+    const interestText = userText || fullText;
+    const isExplicitlyInterested = interestedKeywords.some(kw => interestText.includes(kw)) ||
       String(callRecord.interestLevel || callRecord.interest_level || '').toUpperCase() === 'HIGH' ||
       String(callRecord.leadStatus || callRecord.lead_status || '').toUpperCase() === 'INTERESTED';
 
@@ -867,13 +923,31 @@ function enrichCallWithInterest(callRecord) {
       out.details = `${out.details} [College corrected to ${target.collegeName} from campaign record. Apply: ${target.applicationUrl}]`;
       out.interest_details = out.details;
     }
+    if (target.course && (!out.target_course || out.target_course === 'Not Mentioned in Call')) {
+      out.target_course = target.course;
+    }
+    if (target.course && (!out.course || out.course === 'Not Mentioned in Call')) {
+      out.course = target.course;
+    }
     if (!out.studentName) out.studentName = target.name || out.studentName;
     return out;
   };
 
   // Manual overrides (e.g. APPLICATION_SENT after WhatsApp) win over transcript analysis
   const manual = (cleanPhone && CALL_INTERESTS[cleanPhone]) || (callId && CALL_INTERESTS[callId]);
-  if (manual && manual.interestStatus) {
+  // ...unless a NEWER call with a real transcript exists: fresh evidence beats a
+  // stale saved status (e.g. old Submitted must not resurrect onto a hang-up).
+  let useFresh = false;
+  if (manual && manual.interestStatus && manual.updatedAt) {
+    const callTime = new Date(callRecord.time_of_call || callRecord.call_date || 0).getTime();
+    const manualTime = new Date(manual.updatedAt).getTime();
+    const hasFreshTranscript = (typeof callRecord.call_conversation === 'string' && callRecord.call_conversation.trim())
+      || (Array.isArray(callRecord.interactions) && callRecord.interactions.length > 0);
+    if (!isNaN(callTime) && !isNaN(manualTime) && callTime > manualTime && hasFreshTranscript) {
+      useFresh = true;
+    }
+  }
+  if (manual && manual.interestStatus && !useFresh) {
     const status = manual.interestStatus;
     const analyzed = analyzeCallInterest(callRecord);
     return applyTargetMemory({
@@ -1085,6 +1159,14 @@ function handleQueueContactFinished(contact, isAnswered, statusText, durationStr
   CURRENT_CALL = null;
   broadcastQueueUpdate();
 
+  if (isAnswered) {
+    // Push fresh data immediately so the dashboard shows this call at once:
+    // re-check Omni (late transcript/analysis) and re-poll Sheets.
+    pollGoogleSheets().catch(() => {});
+    setTimeout(() => { pollCallsOnce().catch(() => {}); }, 10000);
+    setTimeout(() => { pollCallsOnce().catch(() => {}); }, 30000);
+  }
+
   // Schedule next contact after delay (enforcing minimum 5s buffer for OmniDimension channel cooldown)
   if (CAMPAIGN_STATE.isRunning && !CAMPAIGN_STATE.isPaused) {
     const effectiveDelay = Math.max(CAMPAIGN_STATE.delayMs, 5000);
@@ -1099,11 +1181,20 @@ async function pollCallsOnce() {
   if (!calls || !Array.isArray(calls)) return;
 
   // Process pending call dispatches to capture status changes (completed/no-answer/ringing/in-progress)
+  // NOTE: match only logs NEWER than the dispatch — the logs endpoint returns
+  // history, and a stale completed record for a redialed number must not
+  // instantly "complete" the fresh dispatch.
   for (const [phone, pending] of PENDING_CALLS.entries()) {
-    const matchedCall = calls.find(c => {
+    const candidates = calls.filter(c => {
       const cPhone = c.to_number || c.phone_number || c.to || '';
       return cPhone === phone;
-    });
+    }).filter(c => {
+      const t = new Date(c.time_of_call || 0).getTime();
+      if (isNaN(t)) return true;
+      return t >= pending.dispatchTime - 5 * 60 * 1000;
+    }).sort((a, b) => new Date(b.time_of_call || 0).getTime() - new Date(a.time_of_call || 0).getTime());
+
+    const matchedCall = candidates[0];
 
     if (matchedCall) {
       const rawStatus = matchedCall.call_status || matchedCall.status || '';
@@ -1121,6 +1212,9 @@ async function pollCallsOnce() {
             handleQueueContactFinished(queueContact, true, 'completed', formattedDuration);
           } else {
             addLog('success', `Call to "${pending.fullName}" (${phone}) COMPLETED. Duration: ${formattedDuration}.`);
+            pollGoogleSheets().catch(() => {});
+            setTimeout(() => { pollCallsOnce().catch(() => {}); }, 10000);
+            setTimeout(() => { pollCallsOnce().catch(() => {}); }, 30000);
           }
           // Auto-send WhatsApp admission link when transcript shows INTERESTED
           maybeAutoSendWhatsApp(matchedCall, pending).catch(() => {});
@@ -1244,10 +1338,11 @@ async function processNextInQueue() {
     const collegeName = CAMPAIGN_STATE.universityName || 'Vidyavision AI';
     const collegePlace = CAMPAIGN_STATE.collegePlace || '';
     const applicationUrl = CAMPAIGN_STATE.applicationUrl || '';
+    const targetCourse = contact.course || CAMPAIGN_STATE.course || '';
     const studentName = contact.name || 'Student';
     // Explicit self-introduction line so the agent always says the selected
     // college name first, even if its dashboard prompt is generic.
-    const agentIntro = `You are calling from ${collegeName}${collegePlace ? `, ${collegePlace}` : ''}. Introduce yourself as calling from ${collegeName} and answer only about ${collegeName} admissions unless the caller asks about other colleges.`;
+    const agentIntro = `You are calling from ${collegeName}${collegePlace ? `, ${collegePlace}` : ''}${targetCourse ? ` about ${targetCourse} admissions` : ''}. Introduce yourself as calling from ${collegeName} and answer only about ${collegeName} admissions unless the caller asks about other colleges.`;
     const dispatchPayload = {
       agent_id: activeAgentId,
       to_number: contact.formattedPhone,
@@ -1259,6 +1354,8 @@ async function processNextInQueue() {
         university_name: collegeName,
         target_college: collegeName,
         college_place: collegePlace,
+        target_course: targetCourse,
+        course: targetCourse,
         application_url: applicationUrl,
         admission_link: applicationUrl,
         whatsapp_link: applicationUrl,
@@ -1271,6 +1368,8 @@ async function processNextInQueue() {
         university_name: collegeName,
         target_college: collegeName,
         college_place: collegePlace,
+        target_course: targetCourse,
+        course: targetCourse,
         application_url: applicationUrl,
         admission_link: applicationUrl,
         whatsapp_link: applicationUrl,
@@ -1429,10 +1528,13 @@ app.get('/api/colleges', async (req, res) => {
 
 app.post('/api/colleges', async (req, res) => {
   try {
-    const { name, place, websiteUrl, description, agentId, languages, id } = req.body;
+    const { name, place, websiteUrl, description, agentId, languages, courses, id } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, error: 'College name is required.' });
     }
+    const normCourses = (v) => Array.isArray(v)
+      ? v.map(x => String(x).trim()).filter(Boolean)
+      : String(v || '').split(',').map(x => x.trim()).filter(Boolean);
 
     const currentList = await loadColleges();
 
@@ -1449,6 +1551,7 @@ app.post('/api/colleges', async (req, res) => {
         place: place !== undefined ? String(place).trim() || 'India' : existing.place,
         agentId: agentId ? Number(agentId) : existing.agentId,
         languages: languages !== undefined ? String(languages).trim() || existing.languages : existing.languages,
+        courses: courses !== undefined ? normCourses(courses) : (existing.courses || []),
         websiteUrl: websiteUrl !== undefined ? String(websiteUrl).trim() : existing.websiteUrl,
         description: description !== undefined ? String(description).trim() : existing.description,
         updatedAt: new Date().toISOString()
@@ -1467,6 +1570,7 @@ app.post('/api/colleges', async (req, res) => {
       place: place ? place.trim() : 'India',
       agentId: Number(agentId) || getAgentId(),
       languages: languages && String(languages).trim() ? String(languages).trim() : 'English, Hindi, Telugu',
+      courses: normCourses(courses),
       status: 'active',
       websiteUrl: websiteUrl ? websiteUrl.trim() : '',
       description: description ? description.trim() : '',
@@ -1506,7 +1610,7 @@ app.delete('/api/colleges/:id', async (req, res) => {
 
 // 1. Batch & Sequential Calling API
 app.post('/api/queue/start', (req, res) => {
-  const { contacts, delaySeconds, agentId, universityName, universityId, collegePlace, applicationUrl } = req.body;
+  const { contacts, delaySeconds, agentId, universityName, universityId, collegePlace, applicationUrl, course } = req.body;
 
   if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
     addLog('error', 'Batch call failed: No contacts provided.');
@@ -1527,6 +1631,7 @@ app.post('/api/queue/start', (req, res) => {
         name: c.name ? String(c.name).trim() : '',
         universityId: universityId ? String(universityId) : '',
         universityName: universityName ? String(universityName) : '',
+        course: (c.course ? String(c.course).trim() : '') || (course ? String(course).trim() : ''),
         status: 'queued',
         duration: '—',
         reason: ''
@@ -1555,7 +1660,8 @@ app.post('/api/queue/start', (req, res) => {
     universityId: universityId ? String(universityId) : '',
     universityName: universityName ? String(universityName) : 'Vidyavision AI Admission Assistant',
     collegePlace: collegePlace ? String(collegePlace) : '',
-    applicationUrl: applicationUrl ? String(applicationUrl) : ''
+    applicationUrl: applicationUrl ? String(applicationUrl) : '',
+    course: course ? String(course).trim() : ''
   };
 
   const universityDisplay = CAMPAIGN_STATE.universityName;
@@ -1568,7 +1674,8 @@ app.post('/api/queue/start', (req, res) => {
     name: ct.name || '',
     collegeName: CAMPAIGN_STATE.universityName || '',
     universityId: CAMPAIGN_STATE.universityId || '',
-    applicationUrl: CAMPAIGN_STATE.applicationUrl || ''
+    applicationUrl: CAMPAIGN_STATE.applicationUrl || '',
+    course: ct.course || CAMPAIGN_STATE.course || ''
   }));
 
   // Kick off sequential execution

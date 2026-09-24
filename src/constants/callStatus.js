@@ -178,6 +178,30 @@ export function resolveCallFinalStatus(item) {
     String(outcome)
   ).toLowerCase();
 
+  // Caller-only speech: agent greetings ("Are you interested...?") must never
+  // count as the caller's interest.
+  const userParts = [];
+  if (Array.isArray(item.interactions)) {
+    item.interactions.forEach(t => {
+      if (t && t.user_query && String(t.user_query).trim()) userParts.push(String(t.user_query).trim());
+    });
+  }
+  const convStr = item.call_conversation || item.transcript || item.conversation || '';
+  if (typeof convStr === 'string' && convStr) {
+    convStr.replace(/<br\s*\/?>/gi, '\n').split('\n').forEach(line => {
+      const m = line.match(/^\s*user\s*:(.*)$/i);
+      if (m && m[1].trim()) userParts.push(m[1].trim());
+    });
+  }
+  const userText = userParts.join(' ').toLowerCase();
+  const interestText = userText || fullText;
+
+  // 1b. Answered but the caller said NOTHING (hung up mid-greeting) = Not Interested
+  const lowerCallStatusPre = String(item.call_status || item.status || '').toLowerCase().trim();
+  if (!userText && (lowerCallStatusPre === 'completed' || fullText.length > 0) && !directStatus) {
+    return CALL_OUTCOME_STATUS.NOT_INTERESTED;
+  }
+
   // 2. Calls Not Answered
   const lowerOutcome = outcome.toLowerCase();
   const lowerCallStatus = String(item.call_status || item.status || '').toLowerCase().trim();
@@ -251,10 +275,11 @@ export function resolveCallFinalStatus(item) {
   }
 
   // 8. Explicitly Interested (Strict check: verified interest, hot lead, or explicit affirmative)
+  // Matched against the CALLER's speech only — never the agent's greeting.
   if (
     leadStatus === 'INTERESTED' || leadStatus === 'HOT LEAD' || leadStatus === 'QUALIFIED' ||
     leadStatus.includes('HOT') || interestLevel === 'HIGH' || interestLevel === 'INTERESTED' ||
-    EXPLICIT_INTEREST_KEYWORDS.some(kw => fullText.includes(kw))
+    EXPLICIT_INTEREST_KEYWORDS.some(kw => interestText.includes(kw))
   ) {
     return CALL_OUTCOME_STATUS.INTERESTED;
   }
@@ -262,8 +287,8 @@ export function resolveCallFinalStatus(item) {
   // 9. If answered and transcript/summary exists without positive interest
   // DO NOT blindly mark as INTERESTED!
   if (lowerCallStatus === 'completed' || outcome.includes('COMPLETED') || outcome.includes('ANSWERED')) {
-    // If interestLevel is Medium or has positive sentiment, it can qualify as interested
-    if (interestLevel === 'MEDIUM' || String(item.sentiment || '').toLowerCase() === 'positive') {
+    // Positive signal needs the CALLER's own words — agent-only speech is a hang-up
+    if (userText && (interestLevel === 'MEDIUM' || String(item.sentiment || '').toLowerCase() === 'positive')) {
       return CALL_OUTCOME_STATUS.INTERESTED;
     }
     // Otherwise it is neutral/not interested, not "Interested"
