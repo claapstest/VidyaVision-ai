@@ -6,6 +6,7 @@
 
 export const CALL_OUTCOME_STATUS = Object.freeze({
   INTERESTED: 'INTERESTED',
+  APPLICATION_SENT: 'APPLICATION_SENT',
   CALLBACK: 'CALLBACK',
   ALREADY_APPLIED: 'ALREADY_APPLIED',
   ALREADY_JOINED: 'ALREADY_JOINED',
@@ -24,6 +25,16 @@ export const STATUS_DISPLAY_CONFIG = Object.freeze({
     icon: '🟢',
     class: 'completed',
     description: 'Prospect confirmed explicit interest in admissions / course offerings.'
+  },
+  [CALL_OUTCOME_STATUS.APPLICATION_SENT]: {
+    key: CALL_OUTCOME_STATUS.APPLICATION_SENT,
+    label: 'Application Sent',
+    color: '#06b6d4',
+    bg: 'rgba(6, 182, 212, 0.15)',
+    border: '#0891b2',
+    icon: '📩',
+    class: 'application-sent',
+    description: 'College application link sent to student via WhatsApp.'
   },
   [CALL_OUTCOME_STATUS.CALLBACK]: {
     key: CALL_OUTCOME_STATUS.CALLBACK,
@@ -99,6 +110,11 @@ const WRONG_NUMBER_KEYWORDS = [
   'does not belong', 'fake number', 'out of service'
 ];
 
+const APPLICATION_SENT_KEYWORDS = [
+  'application sent', 'app sent', 'whatsapp sent', 'sent application link',
+  'sent app link', 'application link sent', 'sent link via whatsapp', 'sent application form'
+];
+
 const ALREADY_JOINED_KEYWORDS = [
   'already joined', 'already enrolled', 'already taken admission', 'already admitted',
   'already taken', 'joined another college', 'joined college', 'joined university',
@@ -127,7 +143,9 @@ const NOT_INTERESTED_KEYWORDS = [
 
 const EXPLICIT_INTEREST_KEYWORDS = [
   'interested in college', 'looking for college', 'want admission', 'want to join',
-  'tell me fees', 'send details', 'fee structure', 'which college', 'which course',
+  'tell me fees', 'send details', 'send application', 'send the application',
+  'send me the application', 'application link', 'admission link', 'application of',
+  'fee structure', 'which college', 'which course',
   'want to take admission', 'looking for admission', 'interested in b.tech',
   'interested in mba', 'interested in computer science', 'provide details',
   'send information', 'connect me with counselor', 'connect with counselor'
@@ -135,17 +153,6 @@ const EXPLICIT_INTEREST_KEYWORDS = [
 
 /**
  * Resolves the single, primary, mutually exclusive final outcome status for any call record.
- * Follows strict priority order:
- * 1. Pre-computed/structured final_status if valid enum
- * 2. Unanswered / Failed / Busy / Canceled
- * 3. Wrong Number / Invalid
- * 4. Already Joined
- * 5. Already Applied
- * 6. Callback Requested
- * 7. Not Interested
- * 8. Explicitly Interested
- * 9. Fallback: NOT_ANSWERED for un-contacted, or NOT_INTERESTED for answered without positive interest.
- * (Crucial: Answered calls DO NOT blindly become "Interested")
  */
 export function resolveCallFinalStatus(item) {
   if (!item) return CALL_OUTCOME_STATUS.NOT_ANSWERED;
@@ -196,7 +203,16 @@ export function resolveCallFinalStatus(item) {
     return CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID;
   }
 
-  // 4. Already Joined
+  // 4. Application Sent (via WhatsApp / Counselor Action)
+  if (
+    leadStatus.includes('APPLICATION_SENT') || leadStatus.includes('APPLICATION SENT') || leadStatus.includes('APP SENT') || leadStatus.includes('WHATSAPP SENT') ||
+    outcome.includes('APPLICATION_SENT') || outcome.includes('APPLICATION SENT') ||
+    APPLICATION_SENT_KEYWORDS.some(kw => fullText.includes(kw))
+  ) {
+    return CALL_OUTCOME_STATUS.APPLICATION_SENT;
+  }
+
+  // 5. Already Joined
   if (
     leadStatus.includes('ALREADY_JOINED') || leadStatus.includes('ALREADY JOINED') || leadStatus.includes('ENROLLED') ||
     outcome.includes('ALREADY_JOINED') || outcome.includes('ALREADY JOINED') ||
@@ -205,7 +221,7 @@ export function resolveCallFinalStatus(item) {
     return CALL_OUTCOME_STATUS.ALREADY_JOINED;
   }
 
-  // 5. Already Applied
+  // 6. Already Applied
   if (
     leadStatus.includes('ALREADY_APPLIED') || leadStatus.includes('ALREADY APPLIED') ||
     outcome.includes('ALREADY_APPLIED') || outcome.includes('ALREADY APPLIED') ||
@@ -214,7 +230,7 @@ export function resolveCallFinalStatus(item) {
     return CALL_OUTCOME_STATUS.ALREADY_APPLIED;
   }
 
-  // 6. Callback
+  // 7. Callback
   if (
     callbackReq === 'yes' || callbackReq === 'true' ||
     leadStatus.includes('CALLBACK') || leadStatus.includes('CALL_BACK') || leadStatus.includes('CALL BACK') ||

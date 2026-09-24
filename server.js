@@ -14,15 +14,121 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 5000;
-const API_KEY = process.env.OMNIDIM_API_KEY;
-const AGENT_ID = Number(process.env.AGENT_ID || 232228);
+
+function getApiKey() {
+  dotenv.config();
+  return process.env.OMNIDIM_API_KEY || 'W3Qa8QnVpS0uq5GY7eOKX5V8b3tMG9oOJdFLP23_k-c';
+}
+
+function getAgentId() {
+  dotenv.config();
+  return Number(process.env.AGENT_ID || 257941);
+}
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const REGISTRATIONS_FILE = path.join(DATA_DIR, 'registrations.json');
 const INTERESTS_FILE = path.join(DATA_DIR, 'call_interests.json');
+const COLLEGES_FILE = path.join(DATA_DIR, 'colleges.json');
 const GOOGLE_SHEETS_CACHE_FILE = path.join(DATA_DIR, 'google_sheets_cache.json');
+const CALL_TARGETS_FILE = path.join(DATA_DIR, 'call_targets.json');
+
+const DEFAULT_COLLEGES = [
+  {
+    id: 'vidyavision',
+    name: 'Vidyavision AI Assistant',
+    place: 'Hyderabad, Telangana',
+    agentId: 257941,
+    languages: 'Telugu, English, Hindi, Tamil, Malayalam',
+    status: 'active',
+    websiteUrl: 'https://vidyavision.com/admissions',
+    description: 'Multilingual south-region admission outreach.'
+  },
+  {
+    id: 'gitam',
+    name: 'GITAM University',
+    place: 'Visakhapatnam & Hyderabad',
+    agentId: 257941,
+    languages: 'English, Hindi',
+    status: 'active',
+    websiteUrl: 'https://applications.gitam.edu',
+    description: 'GITAM admission queries and course catalog details.'
+  },
+  {
+    id: 'kl',
+    name: 'KL University',
+    place: 'Vijayawada & Hyderabad',
+    agentId: 257941,
+    languages: 'English, Hindi',
+    status: 'active',
+    websiteUrl: 'https://kluniversity.in/admissions',
+    description: 'KL University admission inquiries and course selection.'
+  },
+  {
+    id: 'icfai',
+    name: 'ICFAI Foundation for Higher Education',
+    place: 'Hyderabad, Telangana',
+    agentId: 257941,
+    languages: 'English, Hindi',
+    status: 'active',
+    websiteUrl: 'https://ifheindia.org/admissions',
+    description: 'ICFAI IFHE Hyderabad admissions wing.'
+  },
+  {
+    id: 'mnr',
+    name: 'MNR University',
+    place: 'Sangareddy, Telangana',
+    agentId: 257941,
+    languages: 'Telugu, English, Hindi',
+    status: 'active',
+    websiteUrl: 'https://mnrindia.org/admissions',
+    description: 'MNR University medical, engineering & general admissions.'
+  }
+];
+
+async function loadColleges() {
+  try {
+    const raw = await fs.readFile(COLLEGES_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+  } catch {}
+  return DEFAULT_COLLEGES;
+}
+
+async function saveColleges(colleges) {
+  try {
+    await fs.writeFile(COLLEGES_FILE, JSON.stringify(colleges, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Failed to save colleges file:', err);
+  }
+}
 
 let CALL_INTERESTS = {};
+
+// Phone -> campaign target memory (persists across restarts): which college +
+// staged name each number was called with. Written at dispatch, read when
+// enriching logs so old calls keep their exact college/name forever.
+let CALL_TARGETS = {};
+
+async function loadTargets() {
+  try {
+    const raw = await fs.readFile(CALL_TARGETS_FILE, 'utf8');
+    CALL_TARGETS = JSON.parse(raw);
+  } catch {
+    CALL_TARGETS = {};
+  }
+}
+
+function rememberCallTarget(formattedPhone, info) {
+  const digits = String(formattedPhone || '').replace(/\D/g, '');
+  const key = digits.length === 10 ? digits : digits.slice(-10);
+  if (!key) return;
+  CALL_TARGETS[key] = { ...(CALL_TARGETS[key] || {}), ...info, updatedAt: new Date().toISOString() };
+  fs.writeFile(CALL_TARGETS_FILE, JSON.stringify(CALL_TARGETS, null, 2), 'utf8').catch(() => {});
+}
+
+function getCallTarget(cleanPhone) {
+  return (cleanPhone && CALL_TARGETS[cleanPhone]) || null;
+}
 
 async function loadInterests() {
   try {
@@ -113,6 +219,12 @@ async function initDb() {
     } catch {
       await saveInterests();
       console.log('Created empty call interests database file.');
+    }
+    try {
+      await fs.access(COLLEGES_FILE);
+    } catch {
+      await saveColleges(DEFAULT_COLLEGES);
+      console.log('Created initial colleges database file.');
     }
   } catch (err) {
     console.error('Failed to initialize database folder/file:', err);
@@ -238,6 +350,7 @@ async function fetchSheetRawData() {
 // Product-level status enum schema
 const CALL_OUTCOME_STATUS = Object.freeze({
   INTERESTED: 'INTERESTED',
+  APPLICATION_SENT: 'APPLICATION_SENT',
   CALLBACK: 'CALLBACK',
   ALREADY_APPLIED: 'ALREADY_APPLIED',
   ALREADY_JOINED: 'ALREADY_JOINED',
@@ -287,6 +400,12 @@ function resolveFinalCallStatus(item) {
     return CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID;
   }
 
+  // 2b. Application Sent (WhatsApp admission link already sent / confirmed)
+  const appSentKeywords = ['application sent', 'app sent', 'whatsapp sent', 'sent application link', 'sent app link', 'sent link via whatsapp', 'application link sent', 'admission link sent'];
+  if (leadStatus.includes('APPLICATION_SENT') || leadStatus.includes('APPLICATION SENT') || leadStatus.includes('APP SENT') || leadStatus.includes('WHATSAPP SENT') || outcome.includes('APPLICATION_SENT') || outcome.includes('APPLICATION SENT') || appSentKeywords.some(kw => fullText.includes(kw))) {
+    return CALL_OUTCOME_STATUS.APPLICATION_SENT;
+  }
+
   // 3. Already Joined
   const alreadyJoinedKeywords = ['already joined', 'already enrolled', 'already taken admission', 'already admitted', 'already taken', 'joined another college', 'joined college', 'joined university', 'currently studying in another college', 'enrolled in another', 'joined degree'];
   if (leadStatus.includes('ALREADY_JOINED') || leadStatus.includes('ALREADY JOINED') || leadStatus.includes('ENROLLED') || outcome.includes('ALREADY_JOINED') || outcome.includes('ALREADY JOINED') || alreadyJoinedKeywords.some(kw => fullText.includes(kw))) {
@@ -312,7 +431,7 @@ function resolveFinalCallStatus(item) {
   }
 
   // 7. Explicit Interest
-  const interestedKeywords = ['interested in college', 'looking for college', 'want admission', 'want to join', 'tell me fees', 'send details', 'fee structure', 'which college', 'which course', 'want to take admission', 'looking for admission', 'connect me with counselor'];
+  const interestedKeywords = ['interested in college', 'looking for college', 'want admission', 'want to join', 'tell me fees', 'send details', 'send application', 'send the application', 'send me the application', 'application link', 'admission link', 'application of', 'fee structure', 'which college', 'which course', 'want to take admission', 'looking for admission', 'connect me with counselor'];
   if (leadStatus === 'INTERESTED' || leadStatus === 'HOT LEAD' || leadStatus === 'QUALIFIED' || leadStatus.includes('HOT') || interestLevel === 'HIGH' || interestLevel === 'INTERESTED' || interestedKeywords.some(kw => fullText.includes(kw))) {
     return CALL_OUTCOME_STATUS.INTERESTED;
   }
@@ -391,7 +510,7 @@ function normalizeRow(row, headers) {
 
   let id = findValue(['call id', 'call_id']) || findValue(['lead id', 'lead_id']);
 
-  const final_status = resolveFinalCallStatus({
+  let final_status = resolveFinalCallStatus({
     callOutcome,
     leadStatus,
     interestLevel,
@@ -402,6 +521,27 @@ function normalizeRow(row, headers) {
     call_status: callOutcome
   });
 
+  let effectiveLeadStatus = leadStatus;
+
+  // Manual overrides (e.g. APPLICATION_SENT after WhatsApp) so dashboard calculus updates
+  const cleanPhone = contactNumber.replace(/\D/g, '').slice(-10);
+  const manual = (cleanPhone && CALL_INTERESTS[cleanPhone]) || (id && CALL_INTERESTS[id]);
+  if (manual && manual.interestStatus) {
+    final_status = manual.interestStatus;
+    effectiveLeadStatus = manual.interestStatus;
+  }
+
+  // Campaign target memory: exact college this number was called with
+  const target = getCallTarget(cleanPhone);
+  let effectivePreferredUniversity = preferredUniversity;
+  let effectiveDiscussed = universitiesDiscussed;
+  if (target && target.collegeName && (!preferredUniversity || preferredUniversity === '—')) {
+    effectivePreferredUniversity = target.collegeName;
+  }
+  if (target && target.collegeName && (!universitiesDiscussed || universitiesDiscussed === '—')) {
+    effectiveDiscussed = target.collegeName;
+  }
+
   return {
     id,
     studentName,
@@ -411,7 +551,7 @@ function normalizeRow(row, headers) {
     course,
     preferredState,
     preferredCity,
-    leadStatus,
+    leadStatus: effectiveLeadStatus,
     interestLevel,
     final_status,
     finalStatus: final_status,
@@ -420,14 +560,14 @@ function normalizeRow(row, headers) {
     callDate,
     callOutcome,
     questionsAsked,
-    universitiesDiscussed,
+    universitiesDiscussed: effectiveDiscussed,
     summary,
     notes,
     entranceExam,
     educationStatus,
     recordingUrl,
     transferStatus,
-    preferredUniversity,
+    preferredUniversity: effectivePreferredUniversity,
     sentiment,
     botName,
     rawFields
@@ -461,6 +601,8 @@ loadCache().then(cached => {
     lastSheetsDataJson = JSON.stringify(cached);
   }
 }).catch(() => {});
+loadInterests().catch(() => {});
+loadTargets().catch(() => {});
 
 async function pollGoogleSheets() {
   const spreadsheetId = process.env.GOOGLE_SPREADSHEET_ID;
@@ -587,10 +729,12 @@ function analyzeCallInterest(callRecord) {
     'not required', 'bad timing', 'stop calling'
   ];
 
-  // 3. Explicit Interest keywords
+  // 3. Explicit Interest keywords (user asking for application/admission link counts as interest)
   const interestedKeywords = [
-    'interested in college', 'looking for college', 'want admission', 'want to join', 
-    'tell me fees', 'send details', 'fee structure', 'which college', 'which course', 
+    'interested in college', 'looking for college', 'want admission', 'want to join',
+    'tell me fees', 'send details', 'send application', 'send the application',
+    'send me the application', 'send admission', 'application link', 'admission link',
+    'application of', 'send me application link', 'fee structure', 'which college', 'which course',
     'b.tech', 'btech', 'cse', 'ece', 'mba', 'computer science', 'information technology'
   ];
 
@@ -634,12 +778,37 @@ function analyzeCallInterest(callRecord) {
       detailsStr = `${name} stated NOT interested in college admissions during call.`;
     }
   } else {
-    // Check if course spoken in transcript
+    // Detect college name spoken in transcript (misspellings included: geetham = gitam)
+    const collegeHints = [
+      ['geetham', 'GITAM University'],
+      ['gitam', 'GITAM University'],
+      ['kl university', 'KL University'],
+      ['klu', 'KL University'],
+      ['woxsen', 'Woxsen University'],
+      ['icfai', 'ICFAI Foundation for Higher Education'],
+      ['ifhe', 'ICFAI Foundation for Higher Education'],
+      ['vidyavision', 'Vidyavision AI Assistant'],
+      ['cbit', 'CBIT Hyderabad'],
+      ['vit', 'VIT Vellore'],
+      ['srm', 'SRM University'],
+      ['manipal', 'Manipal University'],
+      ['amrita', 'Amrita University'],
+      ['bits', 'BITS Pilani'],
+      ['jntu', 'JNTU Hyderabad']
+    ];
+    for (const [hint, label] of collegeHints) {
+      if (fullText.includes(hint)) { college = label; break; }
+    }
+
+    // Check if course spoken in transcript (bare "ai"/"it" need word boundaries:
+    // "application" must NOT match AI, "with/visit" must NOT match IT)
+    const hasStandaloneAI = /\bai\b/.test(fullText);
+    const hasStandaloneIT = /\bit\b/.test(fullText);
     if (fullText.includes('cse') || fullText.includes('computer science')) course = 'B.Tech CSE';
-    else if (fullText.includes('ai') || fullText.includes('data science') || fullText.includes('machine learning') || fullText.includes('aiml')) course = 'AI & Data Science';
+    else if (fullText.includes('data science') || fullText.includes('machine learning') || fullText.includes('aiml') || fullText.includes('artificial intelligence') || hasStandaloneAI) course = 'AI & Data Science';
     else if (fullText.includes('ece') || fullText.includes('electronics')) course = 'B.Tech ECE';
     else if (fullText.includes('mba') || fullText.includes('management')) course = 'MBA';
-    else if (fullText.includes('it') || fullText.includes('information technology')) course = 'B.Tech IT';
+    else if (hasStandaloneIT || fullText.includes('information technology')) course = 'B.Tech IT';
     else if (fullText.includes('mech') || fullText.includes('mechanical')) course = 'B.Tech Mech';
     else if (fullText.includes('civil')) course = 'B.Tech Civil';
 
@@ -649,7 +818,11 @@ function analyzeCallInterest(callRecord) {
 
     if (isExplicitlyInterested) {
       finalStatus = CALL_OUTCOME_STATUS.INTERESTED;
-      if (course !== 'Not Mentioned in Call') {
+      if (college !== 'Not Mentioned in Call' && course !== 'Not Mentioned in Call') {
+        detailsStr = `${name} expressed interest in ${course} at ${college} during call.`;
+      } else if (college !== 'Not Mentioned in Call') {
+        detailsStr = `${name} asked for the ${college} application during call.`;
+      } else if (course !== 'Not Mentioned in Call') {
         detailsStr = `${name} expressed interest in ${course} during call.`;
       } else {
         detailsStr = `${name} confirmed interest in college admission during call.`;
@@ -671,8 +844,59 @@ function analyzeCallInterest(callRecord) {
 }
 
 function enrichCallWithInterest(callRecord) {
+  const phone = String(callRecord.to_number || callRecord.phone_number || callRecord.contactNumber || callRecord.to || callRecord.phone || '').replace(/\D/g, '');
+  const cleanPhone = phone.length === 10 ? phone : phone.slice(-10);
+  const callId = String(callRecord.id || callRecord.call_id || '').trim();
+
+  const applyTargetMemory = (out, manualEntry) => {
+    // Campaign target memory: exact college + staged name this number was
+    // called with (survives restarts; transcript-detected college still wins).
+    const target = getCallTarget(cleanPhone);
+    if (!target) return out;
+    const targetNewer = manualEntry?.updatedAt && target.updatedAt
+      && new Date(target.updatedAt).getTime() > new Date(manualEntry.updatedAt).getTime();
+    if ((!out.college || /Not Mentioned|Invalid Contact/.test(out.college)) || targetNewer) {
+      // Newer campaign record corrects a stale saved college (e.g. number
+      // re-called under a different college).
+      out.college = target.collegeName || out.college;
+    }
+    if ((!out.target_college || /Not Mentioned|Invalid Contact/.test(out.target_college)) || targetNewer) {
+      out.target_college = target.collegeName || out.target_college;
+    }
+    if (targetNewer && out.details && target.applicationUrl) {
+      out.details = `${out.details} [College corrected to ${target.collegeName} from campaign record. Apply: ${target.applicationUrl}]`;
+      out.interest_details = out.details;
+    }
+    if (!out.studentName) out.studentName = target.name || out.studentName;
+    return out;
+  };
+
+  // Manual overrides (e.g. APPLICATION_SENT after WhatsApp) win over transcript analysis
+  const manual = (cleanPhone && CALL_INTERESTS[cleanPhone]) || (callId && CALL_INTERESTS[callId]);
+  if (manual && manual.interestStatus) {
+    const status = manual.interestStatus;
+    const analyzed = analyzeCallInterest(callRecord);
+    return applyTargetMemory({
+      ...callRecord,
+      ...analyzed,
+      final_status: status,
+      finalStatus: status,
+      interest_status: status,
+      interestStatus: status,
+      leadStatus: status,
+      lead_status: status,
+      college: manual.college || analyzed.college,
+      course: manual.course && !/�/.test(manual.course) ? manual.course : analyzed.course,
+      details: manual.details || manual.notes || analyzed.details,
+      target_college: manual.college || analyzed.college,
+      target_course: manual.course && !/�/.test(manual.course) ? manual.course : analyzed.course,
+      interest_details: manual.details || manual.notes || analyzed.details,
+      summary: manual.notes ? `${callRecord.summary || ''} [Notes: ${manual.notes}]` : callRecord.summary
+    }, manual);
+  }
+
   const interestData = analyzeCallInterest(callRecord);
-  return {
+  return applyTargetMemory({
     ...callRecord,
     ...interestData,
     final_status: interestData.interestStatus,
@@ -681,7 +905,121 @@ function enrichCallWithInterest(callRecord) {
     target_college: interestData.college,
     target_course: interestData.course,
     interest_details: interestData.details
-  };
+  }, null);
+}
+
+function buildAdmissionMessage({ studentName, collegeName, applicationUrl }) {
+  const name = (studentName || 'Student').trim() || 'Student';
+  const college = (collegeName || 'our college').trim() || 'our college';
+  const link = (applicationUrl || '').trim();
+  return (
+    `Hi ${name}! Thanks for your interest in ${college} (via VidyaVision AI call).` +
+    (link ? `\nApply here: ${link}` : '') +
+    `\nReply to this message if you need help with courses, fees, or counselling.`
+  );
+}
+
+async function sendWhatsAppViaOmni({ toNumber, message, collegeName }) {
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error('OMNIDIM_API_KEY missing');
+  const endpoints = [
+    'https://backend.omnidim.io/api/v1/messages/send',
+    'https://backend.omnidim.io/api/v1/whatsapp/send',
+    'https://omnidim.io/api/v1/messages/send',
+    'https://omnidim.io/api/v1/whatsapp/send'
+  ];
+  const payloads = [
+    { to_number: toNumber, message, channel: 'whatsapp', college: collegeName },
+    { to: toNumber, body: message, channel: 'whatsapp' },
+    { phone_number: toNumber, message, type: 'whatsapp' }
+  ];
+  let lastError = null;
+  for (const url of endpoints) {
+    for (const body of payloads) {
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...body, agent_id: getAgentId() })
+        });
+        const text = await res.text().catch(() => '');
+        if (res.ok) return { ok: true, endpoint: url, response: text.slice(0, 500) };
+        lastError = new Error(`${url} -> HTTP ${res.status}: ${text.slice(0, 300)}`);
+      } catch (err) {
+        lastError = err;
+      }
+    }
+  }
+  throw lastError || new Error('WhatsApp send failed (no OmniDimension messaging endpoint available)');
+}
+
+async function maybeAutoSendWhatsApp(matchedCall, pending) {
+  try {
+    const enriched = enrichCallWithInterest(matchedCall || {});
+    if (enriched.interestStatus !== CALL_OUTCOME_STATUS.INTERESTED) return null;
+    const rawPhone = matchedCall.to_number || matchedCall.phone_number || matchedCall.to || pending?.phone || '';
+    const digits = String(rawPhone).replace(/\D/g, '');
+    const cleanPhone = digits.length === 10 ? digits : digits.slice(-10);
+    if (!cleanPhone) return null;
+    // Skip only if the stored APPLICATION_SENT entry is newer than this call
+    // (stale entries from older calls must still trigger a fresh WhatsApp send).
+    const existing = CALL_INTERESTS[cleanPhone];
+    if (existing?.interestStatus === CALL_OUTCOME_STATUS.APPLICATION_SENT && existing.updatedAt) {
+      try {
+        const callTime = new Date(matchedCall.time_of_call || matchedCall.call_date || 0).getTime();
+        if (!isNaN(callTime) && new Date(existing.updatedAt).getTime() >= callTime) return null;
+      } catch {}
+    }
+
+    const studentName = matchedCall.name || matchedCall.student_name || matchedCall.fullName || pending?.fullName || 'Student';
+    // Prefer the college actually named in the transcript (e.g. user asked for
+    // GITAM while campaign ran under Vidyavision) with its own admission link.
+    let collegeName = pending?.collegeName || CAMPAIGN_STATE.universityName || enriched.target_college || 'our college';
+    let applicationUrl = pending?.applicationUrl || CAMPAIGN_STATE.applicationUrl || '';
+    const transcriptCollege = enriched.target_college || enriched.college;
+    if (transcriptCollege && transcriptCollege !== 'Not Mentioned in Call' && !/invalid|already|not interested/i.test(transcriptCollege)) {
+      try {
+        const colleges = await loadColleges();
+        const hit = colleges.find(c => c.name.toLowerCase() === transcriptCollege.toLowerCase());
+        if (hit) {
+          collegeName = hit.name;
+          applicationUrl = hit.websiteUrl || applicationUrl;
+        } else {
+          collegeName = transcriptCollege;
+        }
+      } catch {}
+    }
+    const message = buildAdmissionMessage({ studentName, collegeName, applicationUrl });
+    const toNumber = rawPhone.startsWith('+') ? rawPhone : `+91${cleanPhone}`;
+
+    let sendResult = 'logged';
+    try {
+      const sent = await sendWhatsAppViaOmni({ toNumber, message, collegeName });
+      sendResult = `sent via ${sent.endpoint}`;
+      addLog('success', `WhatsApp admission link sent to ${toNumber} for ${collegeName} (${sendResult}).`);
+    } catch (err) {
+      addLog('warning', `WhatsApp API not reachable for ${toNumber} (${err.message}). Admission link saved as APPLICATION_SENT so dashboard still updates.`);
+    }
+
+    const entry = {
+      interestStatus: CALL_OUTCOME_STATUS.APPLICATION_SENT,
+      college: collegeName,
+      course: enriched.target_course || 'Not Mentioned in Call',
+      notes: `${message} [${sendResult}]`,
+      details: `${studentName} showed interest; admission link shared via WhatsApp (${sendResult}).`,
+      studentName,
+      applicationUrl,
+      updatedAt: new Date().toISOString()
+    };
+    CALL_INTERESTS[cleanPhone] = entry;
+    const callId = String(matchedCall.id || matchedCall.call_id || '').trim();
+    if (callId) CALL_INTERESTS[callId] = entry;
+    await saveInterests();
+    return entry;
+  } catch (err) {
+    console.error('maybeAutoSendWhatsApp failed:', err);
+    return null;
+  }
 }
 
 // WebSocket Server Setup
@@ -701,13 +1039,14 @@ let lastCallsJson = '';
 let pollInterval = null;
 
 async function fetchCallsFromOmni() {
-  if (!API_KEY) {
+  const apiKey = getApiKey();
+  if (!apiKey) {
     return null;
   }
   const target = `https://backend.omnidim.io/api/v1/calls/logs?pageno=1&pagesize=50`;
   try {
     const response = await fetch(target, {
-      headers: { Authorization: `Bearer ${API_KEY}` }
+      headers: { Authorization: `Bearer ${apiKey}` }
     });
     if (!response.ok) {
       const errText = await response.text();
@@ -783,6 +1122,8 @@ async function pollCallsOnce() {
           } else {
             addLog('success', `Call to "${pending.fullName}" (${phone}) COMPLETED. Duration: ${formattedDuration}.`);
           }
+          // Auto-send WhatsApp admission link when transcript shows INTERESTED
+          maybeAutoSendWhatsApp(matchedCall, pending).catch(() => {});
         } else if (['failed', 'canceled', 'busy', 'no-answer', 'no_answer'].includes(currentStatus)) {
           const displayStatus = currentStatus.replace('_', ' ');
           PENDING_CALLS.delete(phone);
@@ -889,23 +1230,52 @@ async function processNextInQueue() {
 
   const nameDisplay = contact.name ? `"${contact.name}"` : 'Not provided';
   const universityDisplay = CAMPAIGN_STATE.universityName || 'Vidyavision AI Admission Assistant';
-  const activeAgentId = CAMPAIGN_STATE.agentId || AGENT_ID;
+  const activeAgentId = CAMPAIGN_STATE.agentId || getAgentId();
+  const apiKey = getApiKey();
   addLog('info', `Sequential Dialing [${nextIndex + 1}/${CAMPAIGN_STATE.totalCount}] using ${universityDisplay} (Agent ID: ${activeAgentId}): Initiating call to ${contact.formattedPhone} (Name: ${nameDisplay})...`);
 
-  if (!API_KEY) {
+  if (!apiKey) {
     addLog('error', 'OMNIDIM_API_KEY is missing! Call dispatch aborted.');
     handleQueueContactFinished(contact, false, 'api_key_missing', '0:00');
     return;
   }
 
   try {
+    const collegeName = CAMPAIGN_STATE.universityName || 'Vidyavision AI';
+    const collegePlace = CAMPAIGN_STATE.collegePlace || '';
+    const applicationUrl = CAMPAIGN_STATE.applicationUrl || '';
+    const studentName = contact.name || 'Student';
+    // Explicit self-introduction line so the agent always says the selected
+    // college name first, even if its dashboard prompt is generic.
+    const agentIntro = `You are calling from ${collegeName}${collegePlace ? `, ${collegePlace}` : ''}. Introduce yourself as calling from ${collegeName} and answer only about ${collegeName} admissions unless the caller asks about other colleges.`;
     const dispatchPayload = {
       agent_id: activeAgentId,
       to_number: contact.formattedPhone,
       call_context: {
-        student_name: contact.name || '',
-        name: contact.name || '',
-        user_name: contact.name || ''
+        student_name: studentName,
+        name: studentName,
+        user_name: studentName,
+        college_name: collegeName,
+        university_name: collegeName,
+        target_college: collegeName,
+        college_place: collegePlace,
+        application_url: applicationUrl,
+        admission_link: applicationUrl,
+        whatsapp_link: applicationUrl,
+        agent_intro: agentIntro,
+        agent_identity: agentIntro
+      },
+      dynamic_variables: {
+        student_name: studentName,
+        college_name: collegeName,
+        university_name: collegeName,
+        target_college: collegeName,
+        college_place: collegePlace,
+        application_url: applicationUrl,
+        admission_link: applicationUrl,
+        whatsapp_link: applicationUrl,
+        agent_intro: agentIntro,
+        agent_identity: agentIntro
       }
     };
 
@@ -913,7 +1283,7 @@ async function processNextInQueue() {
     const dispatchResponse = await fetch(targetUrl, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${API_KEY}`,
+        'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(dispatchPayload)
@@ -925,6 +1295,10 @@ async function processNextInQueue() {
       addLog('info', `Call dispatched to ${contact.formattedPhone}. Monitoring call status until answered or ended...`);
       PENDING_CALLS.set(contact.formattedPhone, {
         fullName: contact.name || contact.formattedPhone,
+        phone: contact.formattedPhone,
+        collegeName: CAMPAIGN_STATE.universityName || '',
+        universityId: CAMPAIGN_STATE.universityId || contact.universityId || '',
+        applicationUrl: CAMPAIGN_STATE.applicationUrl || '',
         dispatchTime: Date.now(),
         lastStatus: 'dispatched',
         queueContactId: contact.id
@@ -1015,16 +1389,27 @@ server.on('upgrade', (req, socket, head) => {
 
 // Helper to validate and format Indian mobile number
 function validateAndFormatMobile(mobile) {
-  const cleanMobile = String(mobile || '').replace(/\D/g, '');
-  if (cleanMobile.length === 10 && cleanMobile[0] !== '0') {
-    return `+91${cleanMobile}`;
+  if (!mobile) return null;
+  const str = String(mobile).trim();
+  const clean = str.replace(/\D/g, '');
+  if (clean.length === 10 && clean[0] !== '0') {
+    return `+91${clean}`;
+  }
+  if (clean.length === 11 && clean[0] === '0' && clean[1] !== '0') {
+    return `+91${clean.slice(1)}`;
+  }
+  if (clean.length === 12 && clean.startsWith('91')) {
+    return `+${clean}`;
+  }
+  if (str.startsWith('+') && clean.length >= 10 && clean.length <= 15) {
+    return `+${clean}`;
   }
   return null;
 }
 
 // Initial status logs
-console.log(`[INFO] OmniDimension Server Ready. Agent ID: ${AGENT_ID}`);
-if (!API_KEY) {
+console.log(`[INFO] OmniDimension Server Ready. Agent ID: ${getAgentId()}`);
+if (!getApiKey()) {
   console.error('[ERROR] OMNIDIM_API_KEY is not defined in .env! Call dispatches will fail.');
 } else {
   console.log('[INFO] OMNIDIM_API_KEY authenticated successfully.');
@@ -1032,9 +1417,96 @@ if (!API_KEY) {
 
 // REST Endpoints
 
+// 0. Colleges Management API (GET, POST, DELETE)
+app.get('/api/colleges', async (req, res) => {
+  try {
+    const list = await loadColleges();
+    res.json({ success: true, data: list, colleges: list });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/colleges', async (req, res) => {
+  try {
+    const { name, place, websiteUrl, description, agentId, languages, id } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, error: 'College name is required.' });
+    }
+
+    const currentList = await loadColleges();
+
+    // Edit mode: update existing college in place (keeps id, createdAt, status)
+    if (id) {
+      const idx = currentList.findIndex(c => c.id === id);
+      if (idx === -1) {
+        return res.status(404).json({ success: false, error: 'College not found.' });
+      }
+      const existing = currentList[idx];
+      currentList[idx] = {
+        ...existing,
+        name: name.trim(),
+        place: place !== undefined ? String(place).trim() || 'India' : existing.place,
+        agentId: agentId ? Number(agentId) : existing.agentId,
+        languages: languages !== undefined ? String(languages).trim() || existing.languages : existing.languages,
+        websiteUrl: websiteUrl !== undefined ? String(websiteUrl).trim() : existing.websiteUrl,
+        description: description !== undefined ? String(description).trim() : existing.description,
+        updatedAt: new Date().toISOString()
+      };
+      await saveColleges(currentList);
+      broadcast({ type: 'colleges', data: currentList });
+
+      addLog('success', `Updated college: "${currentList[idx].name}" (${id})`);
+      return res.json({ success: true, college: currentList[idx], colleges: currentList, data: currentList });
+    }
+
+    const newId = `college-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const newCollege = {
+      id: newId,
+      name: name.trim(),
+      place: place ? place.trim() : 'India',
+      agentId: Number(agentId) || getAgentId(),
+      languages: languages && String(languages).trim() ? String(languages).trim() : 'English, Hindi, Telugu',
+      status: 'active',
+      websiteUrl: websiteUrl ? websiteUrl.trim() : '',
+      description: description ? description.trim() : '',
+      createdAt: new Date().toISOString()
+    };
+
+    const updatedList = [newCollege, ...currentList];
+    await saveColleges(updatedList);
+    broadcast({ type: 'colleges', data: updatedList });
+
+    addLog('success', `Added new college: "${newCollege.name}" (Agent ID: ${newCollege.agentId})`);
+    res.json({ success: true, college: newCollege, colleges: updatedList, data: updatedList });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/colleges/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const currentList = await loadColleges();
+    const target = currentList.find(c => c.id === id);
+    if (!target) {
+      return res.status(404).json({ success: false, error: 'College not found.' });
+    }
+
+    const updatedList = currentList.filter(c => c.id !== id);
+    await saveColleges(updatedList);
+    broadcast({ type: 'colleges', data: updatedList });
+
+    addLog('warning', `Deleted college: "${target.name}" (${id})`);
+    res.json({ success: true, deletedId: id, colleges: updatedList, data: updatedList });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // 1. Batch & Sequential Calling API
 app.post('/api/queue/start', (req, res) => {
-  const { contacts, delaySeconds, agentId, universityName } = req.body;
+  const { contacts, delaySeconds, agentId, universityName, universityId, collegePlace, applicationUrl } = req.body;
 
   if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
     addLog('error', 'Batch call failed: No contacts provided.');
@@ -1053,6 +1525,8 @@ app.post('/api/queue/start', (req, res) => {
         phone: c.phone,
         formattedPhone: formatted,
         name: c.name ? String(c.name).trim() : '',
+        universityId: universityId ? String(universityId) : '',
+        universityName: universityName ? String(universityName) : '',
         status: 'queued',
         duration: '—',
         reason: ''
@@ -1061,8 +1535,8 @@ app.post('/api/queue/start', (req, res) => {
   });
 
   if (parsedQueue.length === 0) {
-    addLog('error', 'Batch call failed: No valid 10-digit Indian phone numbers found in list.');
-    return res.status(400).json({ error: 'No valid 10-digit mobile numbers found in submission.' });
+    addLog('error', 'Batch call failed: No valid phone numbers found in list.');
+    return res.status(400).json({ error: 'No valid mobile numbers found in submission.' });
   }
 
   // Reset campaign state
@@ -1077,14 +1551,25 @@ app.post('/api/queue/start', (req, res) => {
     unansweredCount: 0,
     delayMs: (Number(delaySeconds) || 2) * 1000,
     currentContactIndex: -1,
-    agentId: agentId ? Number(agentId) : null,
-    universityName: universityName ? String(universityName) : 'Vidyavision AI Admission Assistant'
+    agentId: agentId ? Number(agentId) : getAgentId(),
+    universityId: universityId ? String(universityId) : '',
+    universityName: universityName ? String(universityName) : 'Vidyavision AI Admission Assistant',
+    collegePlace: collegePlace ? String(collegePlace) : '',
+    applicationUrl: applicationUrl ? String(applicationUrl) : ''
   };
 
   const universityDisplay = CAMPAIGN_STATE.universityName;
-  const activeAgentId = CAMPAIGN_STATE.agentId || AGENT_ID;
+  const activeAgentId = CAMPAIGN_STATE.agentId || getAgentId();
   addLog('success', `Campaign initialized for ${universityDisplay} (Agent ID: ${activeAgentId}) with ${parsedQueue.length} contacts! Starting sequential calling...`);
   broadcastQueueUpdate();
+
+  // Remember which college + name each number was called with (persists restarts)
+  parsedQueue.forEach(ct => rememberCallTarget(ct.formattedPhone, {
+    name: ct.name || '',
+    collegeName: CAMPAIGN_STATE.universityName || '',
+    universityId: CAMPAIGN_STATE.universityId || '',
+    applicationUrl: CAMPAIGN_STATE.applicationUrl || ''
+  }));
 
   // Kick off sequential execution
   processNextInQueue();
@@ -1201,11 +1686,12 @@ app.post('/api/calls/interest', async (req, res) => {
 
   const updatedEntry = {
     interestStatus: interestStatus || 'PENDING',
-    college: college && college.trim() ? college.trim() : (['NOT_INTERESTED', 'WRONG_NUMBER', 'ALREADY_JOINED', 'ALREADY_APPLIED'].includes(interestStatus) ? interestStatus.replace('_', ' ') : 'Not Mentioned in Call'),
-    course: course && course.trim() ? course.trim() : (['NOT_INTERESTED', 'WRONG_NUMBER', 'ALREADY_JOINED', 'ALREADY_APPLIED'].includes(interestStatus) ? interestStatus.replace('_', ' ') : 'Not Mentioned in Call'),
+    college: college && college.trim() ? college.trim() : (['NOT_INTERESTED', 'WRONG_NUMBER', 'ALREADY_JOINED', 'ALREADY_APPLIED', 'APPLICATION_SENT'].includes(interestStatus) ? interestStatus.replace('_', ' ') : 'Not Mentioned in Call'),
+    course: course && course.trim() ? course.trim() : (['NOT_INTERESTED', 'WRONG_NUMBER', 'ALREADY_JOINED', 'ALREADY_APPLIED', 'APPLICATION_SENT'].includes(interestStatus) ? interestStatus.replace('_', ' ') : 'Not Mentioned in Call'),
     notes: notes ? String(notes).trim() : '',
     details: notes && notes.trim() ? notes.trim() : (() => {
       const name = studentName || 'Student';
+      if (interestStatus === 'APPLICATION_SENT') return `${name} was sent the college application link via WhatsApp.`;
       if (interestStatus === 'CALLBACK') return `${name} requested a callback to discuss admission details later.`;
       if (interestStatus === 'ALREADY_JOINED') return `${name} stated already joined/enrolled in another institution.`;
       if (interestStatus === 'ALREADY_APPLIED') return `${name} stated already submitted admission application.`;
@@ -1230,6 +1716,59 @@ app.post('/api/calls/interest', async (req, res) => {
   }
 
   res.json({ success: true, data: updatedEntry });
+});
+
+// 10b. Manually send WhatsApp admission link (retry button / post-call action)
+app.post('/api/calls/send-whatsapp', async (req, res) => {
+  try {
+    const { phone, studentName, collegeName, universityId, applicationUrl } = req.body;
+    const digits = String(phone || '').replace(/\D/g, '');
+    const cleanPhone = digits.length === 10 ? digits : digits.slice(-10);
+    if (!cleanPhone) return res.status(400).json({ success: false, error: 'Valid phone number is required.' });
+
+    let resolvedCollege = (collegeName || '').trim();
+    let resolvedUrl = (applicationUrl || '').trim();
+    if (!resolvedCollege || !resolvedUrl) {
+      const colleges = await loadColleges();
+      const match = colleges.find(c =>
+        (universityId && c.id === universityId) ||
+        (resolvedCollege && c.name.toLowerCase() === resolvedCollege.toLowerCase())
+      ) || colleges.find(c => c.id === universityId) || colleges[0];
+      if (match) {
+        if (!resolvedCollege) resolvedCollege = match.name;
+        if (!resolvedUrl) resolvedUrl = match.websiteUrl || '';
+      }
+    }
+    if (!resolvedCollege) resolvedCollege = CAMPAIGN_STATE.universityName || 'our college';
+    if (!resolvedUrl) resolvedUrl = CAMPAIGN_STATE.applicationUrl || '';
+
+    const message = buildAdmissionMessage({ studentName, collegeName: resolvedCollege, applicationUrl: resolvedUrl });
+    const toNumber = `+91${cleanPhone}`;
+    let sendResult = 'logged';
+    try {
+      const sent = await sendWhatsAppViaOmni({ toNumber, message, collegeName: resolvedCollege });
+      sendResult = `sent via ${sent.endpoint}`;
+    } catch (err) {
+      sendResult = `provider pending (${err.message})`;
+    }
+
+    const entry = {
+      interestStatus: CALL_OUTCOME_STATUS.APPLICATION_SENT,
+      college: resolvedCollege,
+      course: CALL_INTERESTS[cleanPhone]?.course || 'Not Mentioned in Call',
+      notes: `${message} [${sendResult}]`,
+      details: `${studentName || 'Student'} was sent the ${resolvedCollege} application link via WhatsApp (${sendResult}).`,
+      studentName: studentName || CALL_INTERESTS[cleanPhone]?.studentName || 'Student',
+      applicationUrl: resolvedUrl,
+      updatedAt: new Date().toISOString()
+    };
+    CALL_INTERESTS[cleanPhone] = entry;
+    await saveInterests();
+    addLog('success', `WhatsApp admission link for "${resolvedCollege}" recorded for ${toNumber} (${sendResult}). Dashboard updated to APPLICATION_SENT.`);
+    res.json({ success: true, data: entry, sendResult, message });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // Get call analytics from Google Sheets (Primary Source of Truth)

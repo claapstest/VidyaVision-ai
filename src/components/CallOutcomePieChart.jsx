@@ -5,13 +5,14 @@ import { PieChart as PieIcon, CheckCircle2 } from 'lucide-react';
 export default function CallOutcomePieChart({
   statusCounts = {},
   selectedStatus = null,
-  onSelectStatus = () => {}
+  onSelectStatus = () => { }
 }) {
   const [hoveredStatus, setHoveredStatus] = useState(null);
 
-  // The 7 final outcome statuses in order
+  // The 8 final outcome statuses in order
   const outcomeOrder = [
     CALL_OUTCOME_STATUS.INTERESTED,
+    CALL_OUTCOME_STATUS.APPLICATION_SENT,
     CALL_OUTCOME_STATUS.CALLBACK,
     CALL_OUTCOME_STATUS.ALREADY_APPLIED,
     CALL_OUTCOME_STATUS.ALREADY_JOINED,

@@ -72,40 +72,60 @@ export default function App() {
   const [tempContacts, setTempContacts] = useState([]);
   const [tempInputMode, setTempInputMode] = useState(''); // 'manual' | 'bulk' | 'excel'
   const [selectedUniversity, setSelectedUniversity] = useState('vidyavision');
+  const [uniSearchDialer, setUniSearchDialer] = useState('');
+  const [uniSearchDashboard, setUniSearchDashboard] = useState('');
   const [showLogs, setShowLogs] = useState(false);
 
-  const universities = [
+  const DEFAULT_COLLEGES = [
     {
       id: 'vidyavision',
-      name: 'Vidyavision',
-      agentId: 239791,
+      name: 'Vidyavision AI Assistant',
+      place: 'Hyderabad, Telangana',
+      agentId: 257941,
       languages: 'Telugu, English, Hindi, Tamil, Malayalam',
       status: 'active',
+      websiteUrl: 'https://vidyavision.com/admissions',
       description: 'Multilingual south-region admission outreach.'
     },
     {
       id: 'gitam',
       name: 'GITAM University',
-      agentId: 241269,
+      place: 'Visakhapatnam & Hyderabad',
+      agentId: 257941,
       languages: 'English, Hindi',
       status: 'active',
+      websiteUrl: 'https://applications.gitam.edu',
       description: 'GITAM admission queries and course catalog details.'
     },
     {
       id: 'kl',
       name: 'KL University',
-      agentId: 241252,
+      place: 'Vijayawada & Hyderabad',
+      agentId: 257941,
       languages: 'English, Hindi',
       status: 'active',
+      websiteUrl: 'https://kluniversity.in/admissions',
       description: 'KL University admission inquiries and course selection.'
     },
     {
-      id: 'mit_vishwaprayag',
-      name: 'MIT Vishwaprayag University',
-      agentId: null,
-      languages: 'Marathi, Hindi, English',
-      status: 'inactive',
-      description: 'MIT Vishwaprayag University admissions (currently inactive).'
+      id: 'icfai',
+      name: 'ICFAI Foundation for Higher Education',
+      place: 'Hyderabad, Telangana',
+      agentId: 257941,
+      languages: 'English, Hindi',
+      status: 'active',
+      websiteUrl: 'https://ifheindia.org/admissions',
+      description: 'ICFAI IFHE Hyderabad admissions wing.'
+    },
+    {
+      id: 'mnr',
+      name: 'MNR University',
+      place: 'Sangareddy, Telangana',
+      agentId: 257941,
+      languages: 'Telugu, English, Hindi',
+      status: 'active',
+      websiteUrl: 'https://mnrindia.org/admissions',
+      description: 'MNR University medical, engineering & general admissions.'
     }
   ];
 
@@ -138,7 +158,18 @@ export default function App() {
   // Dashboard Filters: 'ALL' | 'ANSWERED' | 'UNANSWERED' | 'INTERESTED' | 'NOT_INTERESTED'
   const [dashboardFilter, setDashboardFilter] = useState('ALL');
   const [dashboardSearch, setDashboardSearch] = useState('');
-  const [dashboardUniversityFilter, setDashboardUniversityFilter] = useState('ALL');
+  const [dashboardUniversityFilter, setDashboardUniversityFilter] = useState(['ALL']);
+  // Multi-select scope: ['ALL'] (or empty) = all colleges; otherwise selected college ids
+  const toggleUniScope = (id) => {
+    setDashboardUniversityFilter(prev => {
+      const list = prev.includes('ALL') ? [] : [...prev];
+      if (list.includes(id)) {
+        const next = list.filter(x => x !== id);
+        return next.length === 0 ? ['ALL'] : next;
+      }
+      return [...list, id];
+    });
+  };
 
   // Date and status filters
   const [dateFilter, setDateFilter] = useState('ALL');
@@ -150,10 +181,189 @@ export default function App() {
   // Transcript Modal State
   const [selectedCall, setSelectedCall] = useState(null);
   const [editingInterestStatus, setEditingInterestStatus] = useState('PENDING');
+  const [showCollegeModal, setShowCollegeModal] = useState(false);
+  const [showManageColleges, setShowManageColleges] = useState(true);
+  const [isSavingCollege, setIsSavingCollege] = useState(false);
   const [editingCollege, setEditingCollege] = useState('');
   const [editingCourse, setEditingCourse] = useState('');
   const [editingNotes, setEditingNotes] = useState('');
   const [isSavingInterest, setIsSavingInterest] = useState(false);
+  const [deletingCollegeId, setDeletingCollegeId] = useState('');
+  const [editingCollegeId, setEditingCollegeId] = useState('');
+  const [collegeForm, setCollegeForm] = useState({
+    name: '',
+    place: '',
+    websiteUrl: '',
+    description: '',
+    agentId: '257941',
+    languages: 'English, Hindi, Telugu'
+  });
+
+  const getInitialColleges = () => {
+    try {
+      const cached = localStorage.getItem('vv_colleges_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return DEFAULT_COLLEGES;
+  };
+
+  const [universities, setUniversities] = useState(getInitialColleges);
+
+  // Dashboard multi-select scope helpers (after universities is defined)
+  const isAllUniScope = dashboardUniversityFilter.includes('ALL') || dashboardUniversityFilter.length === 0;
+  const uniScopeLabel = isAllUniScope
+    ? 'All Universities'
+    : dashboardUniversityFilter.length === 1
+      ? ((universities.find(u => u.id === dashboardUniversityFilter[0]) || {}).name || dashboardUniversityFilter[0])
+      : `${dashboardUniversityFilter.length} Colleges`;
+
+  const syncColleges = (items) => {
+    if (Array.isArray(items) && items.length > 0) {
+      setUniversities(items);
+      try {
+        localStorage.setItem('vv_colleges_cache', JSON.stringify(items));
+      } catch (e) {}
+    }
+  };
+
+  const fetchColleges = async () => {
+    try {
+      const res = await fetch('/api/colleges');
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.data)) {
+        syncColleges(data.data);
+      }
+    } catch (err) {
+      console.error('Failed to load colleges:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchColleges();
+  }, []);
+
+  const resetCollegeForm = () => {
+    setCollegeForm({
+      name: '',
+      place: '',
+      websiteUrl: '',
+      description: '',
+      agentId: '257941',
+      languages: 'English, Hindi, Telugu'
+    });
+    setEditingCollegeId('');
+  };
+
+  const handleEditCollege = (college) => {
+    if (!college) return;
+    setCollegeForm({
+      name: college.name || '',
+      place: college.place || '',
+      websiteUrl: college.websiteUrl || '',
+      description: college.description || '',
+      agentId: String(college.agentId || 257941),
+      languages: college.languages || 'English, Hindi, Telugu'
+    });
+    setEditingCollegeId(college.id);
+    setShowCollegeModal(true);
+  };
+
+  const handleSaveCollege = async (e) => {
+    if (e) e.preventDefault();
+    if (isSavingCollege) return;
+    if (!collegeForm.name.trim()) {
+      addToast('College name is required.', 'error');
+      return;
+    }
+
+    setIsSavingCollege(true);
+    const savedName = collegeForm.name.trim();
+    let resData = null;
+    let fetchSuccess = false;
+
+    try {
+      const res = await fetch('/api/colleges', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: editingCollegeId || undefined,
+          name: savedName,
+          place: collegeForm.place.trim(),
+          websiteUrl: collegeForm.websiteUrl.trim(),
+          description: collegeForm.description.trim(),
+          agentId: Number(collegeForm.agentId) || 257941,
+          languages: (collegeForm.languages || '').trim() || 'English, Hindi, Telugu'
+        })
+      });
+
+      resData = await res.json();
+      fetchSuccess = res.ok && resData && resData.success;
+    } catch (err) {
+      console.error('Fetch error saving college:', err);
+      addToast('Network error saving college. Please try again.', 'error');
+      setIsSavingCollege(false);
+      return;
+    }
+
+    if (fetchSuccess) {
+      addToast(editingCollegeId ? `College "${savedName}" updated successfully!` : `College "${savedName}" added successfully!`, 'success');
+      if (Array.isArray(resData.colleges)) {
+        setUniversities(resData.colleges);
+      }
+      setShowCollegeModal(false);
+      resetCollegeForm();
+    } else {
+      addToast((resData && resData.error) || 'Failed to save college.', 'error');
+    }
+
+    setIsSavingCollege(false);
+  };
+
+  const handleDeleteCollege = async (college) => {
+    if (!college || deletingCollegeId) return;
+    const confirmed = window.confirm(`Delete ${college.name}? Existing call history stays, but this college will be removed from selectors.`);
+    if (!confirmed) return;
+
+    setDeletingCollegeId(college.id);
+    let resData = null;
+    let deleteSuccess = false;
+
+    try {
+      const res = await fetch(`/api/colleges/${encodeURIComponent(college.id)}`, { method: 'DELETE' });
+      resData = await res.json();
+      deleteSuccess = res.ok && resData && resData.success;
+    } catch (err) {
+      console.error('Network error deleting college:', err);
+      addToast('Network error deleting college.', 'error');
+      setDeletingCollegeId('');
+      return;
+    }
+
+    if (deleteSuccess) {
+      if (Array.isArray(resData.colleges)) {
+        setUniversities(resData.colleges);
+      }
+      setStagedContacts(prev => prev.filter(c => c.universityId !== college.id));
+      if (selectedUniversity === college.id) {
+        const fallback = (resData.colleges && resData.colleges[0]?.id) || 'ALL';
+        setSelectedUniversity(fallback);
+      }
+      if (dashboardUniversityFilter.includes(college.id)) {
+        setDashboardUniversityFilter(prev => {
+          const next = prev.filter(x => x !== college.id);
+          return next.length === 0 ? ['ALL'] : next;
+        });
+      }
+      addToast(`${college.name} deleted.`, 'success');
+    } else {
+      addToast((resData && resData.error) || 'Failed to delete college.', 'error');
+    }
+
+    setDeletingCollegeId('');
+  };
 
   const logsEndRef = useRef(null);
   const wsRef = useRef(null);
@@ -168,11 +378,22 @@ export default function App() {
     }, 4500);
   };
 
-  // Indian Phone Validator (10 digits, no leading 0)
+  // Flexible Phone Validator (10-digit Indian, leading 0, 91 prefix, or international format)
   const validatePhone = (num) => {
-    const clean = String(num || '').replace(/\D/g, '');
+    if (!num) return null;
+    const str = String(num).trim();
+    const clean = str.replace(/\D/g, '');
     if (clean.length === 10 && clean[0] !== '0') {
       return `+91${clean}`;
+    }
+    if (clean.length === 11 && clean[0] === '0' && clean[1] !== '0') {
+      return `+91${clean.slice(1)}`;
+    }
+    if (clean.length === 12 && clean.startsWith('91')) {
+      return `+${clean}`;
+    }
+    if (str.startsWith('+') && clean.length >= 10 && clean.length <= 15) {
+      return `+${clean}`;
     }
     return null;
   };
@@ -201,6 +422,8 @@ export default function App() {
             setSheetsCalls(msg.data);
             setLastSyncedTime(new Date());
             setSheetsSyncError(null);
+          } else if (msg.type === 'colleges') {
+            syncColleges(msg.data);
           } else if (msg.type === 'queue_update') {
             if (msg.data.campaignState) setCampaignState(msg.data.campaignState);
             if (msg.data.queue) setActiveQueue(msg.data.queue);
@@ -296,7 +519,7 @@ export default function App() {
     setTempInputMode('manual');
     setSinglePhone('');
     setSingleName('');
-    addToast(`Contact loaded! Please select University Bot below to stage it.`, 'info');
+    addToast(`Contact loaded! Please select University Bot below to stage it.`, 'success');
   };
 
   // Handle Bulk Paste Input
@@ -344,7 +567,7 @@ export default function App() {
       setTempContacts(newItems);
       setTempInputMode('bulk');
       setBulkText('');
-      addToast(`Imported ${newItems.length} contacts! Select university and delay below.`, 'info');
+      addToast(`Imported ${newItems.length} contacts! Select university and delay below.`, 'success');
     }
   };
 
@@ -407,7 +630,7 @@ export default function App() {
             count: parsedContacts.length,
             uploadedAt: new Date().toLocaleTimeString()
           });
-          addToast(`Imported ${parsedContacts.length} contacts from ${file.name}! Select settings below.`, 'info');
+          addToast(`Imported ${parsedContacts.length} contacts from ${file.name}! Select settings below.`, 'success');
         }
       } catch (err) {
         console.error(err);
@@ -464,7 +687,7 @@ export default function App() {
       return;
     }
     if (uni.status === 'inactive') {
-      addToast('MIT Vishwaprayag bot is currently inactive and cannot be staged.', 'error');
+      addToast(`${uni.name} bot is currently inactive and cannot be staged.`, 'error');
       return;
     }
 
@@ -502,7 +725,10 @@ export default function App() {
           contacts: stagedContacts.map(c => ({ phone: c.phone, name: c.name })),
           delaySeconds: callDelay !== '' ? callDelay : 2,
           agentId: uni.agentId,
-          universityName: uni.name
+          universityId: uni.id,
+          universityName: uni.name,
+          collegePlace: uni.place || uni.location || '',
+          applicationUrl: uni.websiteUrl || uni.applicationUrl || uni.admissionLink || ''
         })
       });
 
@@ -577,8 +803,8 @@ export default function App() {
   // Helper to extract full transcript text as a string
   const getTranscriptText = (call) => {
     if (!call) return '';
-    
-    // 1. If call_conversation is an array of objects
+
+    // 1. If call_conversation is an array of objects (user_query / bot_response turns)
     if (Array.isArray(call.call_conversation)) {
       return call.call_conversation.map(turn => {
         let lines = [];
@@ -591,14 +817,33 @@ export default function App() {
         return lines.join('\n');
       }).filter(Boolean).join('\n');
     }
-    
+
+    // 1b. OmniDimension returns call_conversation as a "<br/>"-separated string
+    if (typeof call.call_conversation === 'string' && call.call_conversation.trim()) {
+      return call.call_conversation;
+    }
+
+    // 1c. Fall back to interactions array (per-turn user_query / bot_response)
+    if (Array.isArray(call.interactions) && call.interactions.length > 0) {
+      return call.interactions.map(turn => {
+        let lines = [];
+        if (turn.user_query && String(turn.user_query).trim()) {
+          lines.push(`User: ${String(turn.user_query).trim()}`);
+        }
+        if (turn.bot_response && String(turn.bot_response).trim()) {
+          lines.push(`Bot: ${String(turn.bot_response).trim()}`);
+        }
+        return lines.join('\n');
+      }).filter(Boolean).join('\n');
+    }
+
     // 2. Otherwise extract from string fields
-    const rawText = call.full_conversation || 
-                    call.transcript || 
-                    call.conversation || 
-                    (call.rawFields && call.rawFields.full_conversation) || 
-                    '';
-                    
+    const rawText = call.full_conversation ||
+      call.transcript ||
+      call.conversation ||
+      (call.rawFields && call.rawFields.full_conversation) ||
+      '';
+
     return String(rawText).replace(/\s*\|\s*/g, '\n').trim();
   };
 
@@ -615,7 +860,8 @@ export default function App() {
           if (match) {
             const speaker = match[1].trim();
             const content = match[2].trim();
-            const isAgent = speaker.toLowerCase().includes('agent') || speaker.toLowerCase().includes('assistant');
+            const lowerSpeaker = speaker.toLowerCase();
+            const isAgent = lowerSpeaker.includes('agent') || lowerSpeaker.includes('assistant') || lowerSpeaker.includes('llm') || lowerSpeaker.includes('bot');
 
             return (
               <div key={idx} className="transcript-message">
@@ -709,7 +955,7 @@ export default function App() {
     const phone = matched.formattedPhone || matched.to_number || matched.phone_number || matched.to || matched.phone || c.formattedPhone || c.phone || '';
     const name = matched.name || matched.fullName || matched.student_name || c.name || (phone ? `Recipient (${phone})` : 'Recipient');
     const status = (matched.call_status || matched.status || c.status || '').toLowerCase();
-    
+
     // Extract transcript & conversation text from all possible properties
     const rawTranscript = String(matched.call_conversation || matched.transcript || matched.conversation || c.call_conversation || c.transcript || c.conversation || matched.summary || matched.call_summary || '').trim();
     const hasTranscript = rawTranscript.length > 0;
@@ -736,39 +982,39 @@ export default function App() {
     const transcriptLower = rawTranscript.toLowerCase();
 
     const wrongNumberKeywords = [
-      'wrong number', 'wrong person', 'invalid number', 'not the right person', 
+      'wrong number', 'wrong person', 'invalid number', 'not the right person',
       'wrong contact', 'not my number', 'mistaken number', 'incorrect number', 'does not belong'
     ];
 
     const alreadyJoinedKeywords = [
-      'already joined', 'already enrolled', 'already taken admission', 'already admitted', 
-      'already taken', 'joined another college', 'joined college', 'joined university', 
+      'already joined', 'already enrolled', 'already taken admission', 'already admitted',
+      'already taken', 'joined another college', 'joined college', 'joined university',
       'currently studying in another college', 'enrolled in another'
     ];
 
     const alreadyAppliedKeywords = [
-      'already applied', 'applied already', 'application submitted', 'submitted application', 
-      'already submitted form', 'form already submitted', 'already filled application', 
+      'already applied', 'applied already', 'application submitted', 'submitted application',
+      'already submitted form', 'form already submitted', 'already filled application',
       'filled application', 'applied online', 'application pending'
     ];
 
     const callbackKeywords = [
-      'callback', 'call back', 'call later', 'call me later', 'call tomorrow', 
-      'reach out later', 'talk later', 'busy right now call later', 'contact later', 
+      'callback', 'call back', 'call later', 'call me later', 'call tomorrow',
+      'reach out later', 'talk later', 'busy right now call later', 'contact later',
       'call again', 'schedule a call', 'call after'
     ];
 
     const notInterestedKeywords = [
-      'not interested', 'no interest', 'dont call', "don't call", 'do not call', 
-      'no thanks', 'not looking', 'reject', 'cancel', 'not planning', 'no need', 
-      'doing a job', 'doing job', 'working', 'already working', 'doing work', 
-      'im working', "i'm working", 'im doing a job', "i'm doing a job", 'employed', 
+      'not interested', 'no interest', 'dont call', "don't call", 'do not call',
+      'no thanks', 'not looking', 'reject', 'cancel', 'not planning', 'no need',
+      'doing a job', 'doing job', 'working', 'already working', 'doing work',
+      'im working', "i'm working", 'im doing a job', "i'm doing a job", 'employed',
       'not required', 'bad timing', 'stop calling'
     ];
 
     const interestedKeywords = [
-      'interested in college', 'looking for college', 'want admission', 'want to join', 
-      'tell me fees', 'send details', 'fee structure', 'which college', 'which course', 
+      'interested in college', 'looking for college', 'want admission', 'want to join',
+      'tell me fees', 'send details', 'fee structure', 'which college', 'which course',
       'b.tech', 'btech', 'cse', 'ece', 'mba', 'computer science', 'information technology'
     ];
 
@@ -869,6 +1115,9 @@ export default function App() {
 
   // Mutually exclusive predicate helpers to guarantee zero double counting
   const isInterested = (item) => resolveCallFinalStatus(item) === CALL_OUTCOME_STATUS.INTERESTED;
+  const isApplicationSent = (item) => resolveCallFinalStatus(item) === CALL_OUTCOME_STATUS.APPLICATION_SENT;
+  // Transcript verdict: showed interest in the call (or got the application link) or not
+  const isInterestedLead = (item) => isInterested(item) || isApplicationSent(item);
   const isCallback = (item) => resolveCallFinalStatus(item) === CALL_OUTCOME_STATUS.CALLBACK;
   const isNotInterested = (item) => resolveCallFinalStatus(item) === CALL_OUTCOME_STATUS.NOT_INTERESTED;
   const isAlreadyJoined = (item) => resolveCallFinalStatus(item) === CALL_OUTCOME_STATUS.ALREADY_JOINED;
@@ -910,7 +1159,7 @@ export default function App() {
           const start = startCustom ? new Date(startCustom) : null;
           const end = endCustom ? new Date(endCustom) : null;
           if (end) end.setHours(23, 59, 59, 999);
-          
+
           if (start && end) return callDate >= start && callDate <= end;
           if (start) return callDate >= start;
           if (end) return callDate <= end;
@@ -1047,9 +1296,7 @@ export default function App() {
   // Export Filtered Records to Excel (respects active university scope and dashboard filters)
   const handleExportFilteredCsv = () => {
     const workbook = XLSX.utils.book_new();
-    const activeScopeName = dashboardUniversityFilter === 'ALL'
-      ? 'All Universities'
-      : getUniversityName(dashboardUniversityFilter);
+    const activeScopeName = uniScopeLabel;
 
     // Scoped calls based on university and date filter
     const scopedCalls = dateFilteredCalls;
@@ -1065,6 +1312,7 @@ export default function App() {
       const tot = list.length;
       const ans = list.filter(isAnswered).length;
       const int = list.filter(isInterested).length;
+      const appSent = list.filter(isApplicationSent).length;
       const cb = list.filter(isCallback).length;
       const aa = list.filter(isAlreadyApplied).length;
       const aj = list.filter(isAlreadyJoined).length;
@@ -1080,6 +1328,7 @@ export default function App() {
         'Calls Answered': ans,
         'Calls Not Answered': una,
         'Interested': int,
+        'Application Sent': appSent,
         'Callback': cb,
         'Already Applied': aa,
         'Already Joined': aj,
@@ -1094,9 +1343,14 @@ export default function App() {
       getUniSummaryRow(`Active Scope (${activeScopeName})`, scopedCalls)
     ];
 
-    if (dashboardUniversityFilter === 'ALL') {
+    if (isAllUniScope) {
       universities.forEach(u => {
         summaryRows.push(getUniSummaryRow(u.name, scopedCalls.filter(c => getCallUniversityId(c) === u.id)));
+      });
+    } else {
+      dashboardUniversityFilter.forEach(id => {
+        const u = universities.find(x => x.id === id);
+        if (u) summaryRows.push(getUniSummaryRow(u.name, scopedCalls.filter(c => getCallUniversityId(c) === u.id)));
       });
     }
 
@@ -1116,6 +1370,7 @@ export default function App() {
 
     // 3. Final Status Categories Sheets (strictly mutually exclusive)
     appendOutcomeSheet("Interested", scopedCalls.filter(isInterested), "No interested leads recorded.");
+    appendOutcomeSheet("Application Sent", scopedCalls.filter(isApplicationSent), "No WhatsApp application links sent yet.");
     appendOutcomeSheet("Callback", scopedCalls.filter(isCallback), "No callback requests recorded.");
     appendOutcomeSheet("Already Applied", scopedCalls.filter(isAlreadyApplied), "No already-applied records.");
     appendOutcomeSheet("Already Joined", scopedCalls.filter(isAlreadyJoined), "No already-joined records.");
@@ -1134,7 +1389,10 @@ export default function App() {
     setSelectedCall(callItem);
   };
 
-  // Merge Google Sheets data with live outbound call logs from OmniDimension to ensure unanswered calls are tracked
+  // Merge Google Sheets data with live outbound call logs from OmniDimension.
+  // Omni records carry the REAL transcript/status/duration/recording, so map them
+  // directly (plus the staged name + exact campaign college from the dial queue)
+  // instead of placeholder rows.
   const mergedCalls = React.useMemo(() => {
     const list = [...sheetsCalls];
     const existingIds = new Set(sheetsCalls.map(c => String(c.id || '').trim()).filter(Boolean));
@@ -1143,60 +1401,97 @@ export default function App() {
       return p.length === 10 ? p : p.slice(-10);
     }).filter(Boolean));
 
+    // Staged/campaign queue lookup by phone: staged name + exact college called with
+    const queueByPhone = new Map();
+    activeQueue.forEach(q => {
+      const p = String(q.formattedPhone || q.phone || '').replace(/\D/g, '');
+      const key = p.length === 10 ? p : p.slice(-10);
+      if (key && !queueByPhone.has(key)) queueByPhone.set(key, q);
+    });
+
+    const cleanCourse = (v) => (!v || v === 'Not Mentioned in Call' || v === 'Invalid Contact' || v === 'Already Enrolled' || v === 'Already Applied' || v === 'Not Interested') ? '—' : v;
+    const cleanCollege = (v) => (!v || v === 'Not Mentioned in Call' || v === 'Invalid Contact') ? '' : v;
+    // Primary Status is the badge; Interest Level is the pure transcript verdict
+    const levelForStatus = (s) => s === CALL_OUTCOME_STATUS.INTERESTED || s === CALL_OUTCOME_STATUS.APPLICATION_SENT
+      ? 'Interested'
+      : 'Not Interested';
+
     calls.forEach(c => {
       const callId = String(c.call_id || c.id || '').trim();
       const phone = String(c.to_number || c.phone_number || c.to || '').replace(/\D/g, '');
       const cleanPhone = phone.length === 10 ? phone : phone.slice(-10);
       if (!cleanPhone) return;
-      
-      const isAlreadyInSheets = (callId && existingIds.has(callId)) || (cleanPhone && existingPhones.has(cleanPhone));
-      
-      if (!isAlreadyInSheets) {
-        const status = (c.call_status || c.status || '').toLowerCase();
-        const isCompleted = status === 'completed';
-        
-        let outcome = 'No-Answer';
-        if (status === 'completed') outcome = 'Answered';
-        else if (status === 'busy') outcome = 'Busy';
-        else if (status === 'failed') outcome = 'Failed';
-        else if (status === 'canceled') outcome = 'Canceled';
-        
-        const finalStatus = isCompleted ? CALL_OUTCOME_STATUS.NOT_INTERESTED : CALL_OUTCOME_STATUS.NOT_ANSWERED;
 
-        list.push({
-          id: callId || `omni-${Date.now()}-${cleanPhone}`,
-          studentName: c.name || c.studentName || c.fullName || (c.call_context && (c.call_context.student_name || c.call_context.name)) || `Recipient (${c.to_number || c.phone || ''})`,
-          contactNumber: c.to_number || c.phone_number || c.to || '',
-          email: '—',
-          program: '—',
-          course: '—',
-          preferredState: '—',
-          preferredCity: '—',
-          leadStatus: isCompleted ? 'PENDING' : 'NO_ANSWER',
-          interestLevel: isCompleted ? 'PENDING' : 'NO_ANSWER',
-          final_status: finalStatus,
-          finalStatus: finalStatus,
-          counselorRequired: 'No',
-          callbackRequired: 'No',
-          callDate: c.call_date || c.callDate || new Date().toISOString(),
-          callOutcome: outcome,
-          summary: isCompleted ? 'Call completed. Syncing details...' : `Call was not answered (${outcome}).`,
-          notes: 'Not provided',
-          entranceExam: '—',
-          educationStatus: '—',
-          recordingUrl: c.recording_url || c.recordingUrl || '—',
-          transferStatus: 'No',
-          preferredUniversity: '—',
-          sentiment: 'Neutral',
-          botName: c.botName || '—'
-        });
-      }
+      const isAlreadyInSheets = (callId && existingIds.has(callId)) || (cleanPhone && existingPhones.has(cleanPhone));
+      if (isAlreadyInSheets) return;
+
+      const queueMatch = queueByPhone.get(cleanPhone) || null;
+      const status = (c.call_status || c.status || '').toLowerCase();
+      const isCompleted = status === 'completed';
+
+      let outcome = 'No-Answer';
+      if (status === 'completed') outcome = 'Answered';
+      else if (status === 'busy') outcome = 'Busy';
+      else if (status === 'failed') outcome = 'Failed';
+      else if (status === 'canceled') outcome = 'Canceled';
+
+      // Staged dialer name wins (Omni user_name is the account holder, not the student)
+      const displayName = queueMatch?.name
+        || (c.call_context && (c.call_context.student_name || c.call_context.name))
+        || c.name || c.studentName || c.fullName
+        || `Recipient (${c.to_number || c.phone_number || c.to || cleanPhone})`;
+
+      // Exact college called with: staged campaign college first, then transcript analysis
+      const displayCollege = queueMatch?.universityName
+        || cleanCollege(c.target_college) || cleanCollege(c.college)
+        || cleanCollege(c.preferredUniversity) || '';
+
+      const finalStatus = c.final_status || c.finalStatus || c.interestStatus
+        || (isCompleted ? CALL_OUTCOME_STATUS.NOT_INTERESTED : CALL_OUTCOME_STATUS.NOT_ANSWERED);
+
+      const cbReq = c.extracted_variables?.callback_requested;
+      const callbackRequired = (cbReq && !/not provided|no|—/i.test(String(cbReq))) ? 'Yes' : 'No';
+
+      list.push({
+        ...c,
+        id: callId || `omni-${Date.now()}-${cleanPhone}`,
+        studentName: displayName,
+        contactNumber: c.to_number || c.phone_number || c.to || `+91${cleanPhone}`,
+        email: '—',
+        program: '—',
+        course: cleanCourse(c.target_course || c.course),
+        preferredState: '—',
+        preferredCity: '—',
+        leadStatus: finalStatus,
+        interestLevel: levelForStatus(finalStatus),
+        final_status: finalStatus,
+        finalStatus: finalStatus,
+        counselorRequired: 'No',
+        callbackRequired,
+        callDate: c.time_of_call || c.call_date || c.callDate || new Date().toISOString(),
+        callDuration: c.call_duration || c.duration || '—',
+        duration: c.call_duration || c.duration || '—',
+        callOutcome: outcome,
+        summary: c.interest_details || c.sentiment_analysis_details || c.summary || '',
+        notes: c.interest_details || 'Not provided',
+        entranceExam: '—',
+        educationStatus: '—',
+        recordingUrl: c.recording_url || c.recordingUrl || '—',
+        internal_recording_url: c.internal_recording_url || '',
+        transferStatus: 'No',
+        preferredUniversity: displayCollege || '—',
+        universitiesDiscussed: displayCollege || '—',
+        sentiment: c.sentiment_score || c.sentiment || 'Neutral',
+        botName: c.bot_name || c.botName || '—'
+      });
     });
 
     return list;
-  }, [sheetsCalls, calls]);
+  }, [sheetsCalls, calls, activeQueue]);
 
-  // Dynamic Call University ID Helper: checks against configured universities array
+  // Dynamic Call University ID Helper: checks against configured universities array.
+  // Exact staged/transcript college wins; fuzzy scan checks specific colleges
+  // before the generic Vidyavision fallback (its name appears in every note).
   const getCallUniversityId = (c) => {
     if (!c) return 'vidyavision';
     const bot = String(c.botName || c.bot_name || (c.rawFields && c.rawFields.bot_name) || '').toLowerCase();
@@ -1206,10 +1501,22 @@ export default function App() {
     const notes = String(c.notes || c.additional_notes || '').toLowerCase();
     const combined = `${bot} ${prefUni} ${discussed} ${summary} ${notes}`;
 
+    // 1. Exact college name match on the explicit fields
     for (const u of universities) {
+      const uname = u.name.toLowerCase().trim();
+      if ((prefUni && prefUni === uname) || (discussed && discussed === uname)) return u.id;
+    }
+
+    // 2. Fuzzy scan: specific colleges first, generic fallback last
+    const ordered = [...universities].sort((a, b) => {
+      const aGen = a.id === 'vidyavision' || /vidyavision|vision/.test(a.id) ? 1 : 0;
+      const bGen = b.id === 'vidyavision' || /vidyavision|vision/.test(b.id) ? 1 : 0;
+      return aGen - bGen;
+    });
+    for (const u of ordered) {
       const uName = u.name.toLowerCase().replace('university', '').trim();
       const uId = u.id.toLowerCase();
-      if (combined.includes(uId) || combined.includes(uName)) {
+      if ((uId.length >= 3 && combined.includes(uId)) || (uName.length >= 3 && combined.includes(uName))) {
         return u.id;
       }
     }
@@ -1222,6 +1529,7 @@ export default function App() {
       total: 0,
       answered: 0,
       interested: 0,
+      applicationSent: 0,
       callback: 0,
       notInterested: 0,
       alreadyJoined: 0,
@@ -1248,6 +1556,7 @@ export default function App() {
       else stats.ALL.answered++;
 
       if (outcome === CALL_OUTCOME_STATUS.INTERESTED) stats.ALL.interested++;
+      else if (outcome === CALL_OUTCOME_STATUS.APPLICATION_SENT) stats.ALL.applicationSent++;
       else if (outcome === CALL_OUTCOME_STATUS.CALLBACK) stats.ALL.callback++;
       else if (outcome === CALL_OUTCOME_STATUS.ALREADY_APPLIED) stats.ALL.alreadyApplied++;
       else if (outcome === CALL_OUTCOME_STATUS.ALREADY_JOINED) stats.ALL.alreadyJoined++;
@@ -1263,6 +1572,7 @@ export default function App() {
       else stats[uid].answered++;
 
       if (outcome === CALL_OUTCOME_STATUS.INTERESTED) stats[uid].interested++;
+      else if (outcome === CALL_OUTCOME_STATUS.APPLICATION_SENT) stats[uid].applicationSent++;
       else if (outcome === CALL_OUTCOME_STATUS.CALLBACK) stats[uid].callback++;
       else if (outcome === CALL_OUTCOME_STATUS.ALREADY_APPLIED) stats[uid].alreadyApplied++;
       else if (outcome === CALL_OUTCOME_STATUS.ALREADY_JOINED) stats[uid].alreadyJoined++;
@@ -1275,10 +1585,10 @@ export default function App() {
     return stats;
   }, [mergedCalls, universities]);
 
-  // Filter mergedCalls by top-level selected university first
+  // Filter mergedCalls by selected universities (multi-select scope)
   const universityFilteredCalls = React.useMemo(() => {
-    if (dashboardUniversityFilter === 'ALL') return mergedCalls;
-    return mergedCalls.filter(c => getCallUniversityId(c) === dashboardUniversityFilter);
+    if (dashboardUniversityFilter.includes('ALL') || dashboardUniversityFilter.length === 0) return mergedCalls;
+    return mergedCalls.filter(c => dashboardUniversityFilter.includes(getCallUniversityId(c)));
   }, [mergedCalls, dashboardUniversityFilter]);
 
   // Date Filtered Calls (Base subset for dashboard, using university-filtered base)
@@ -1289,6 +1599,7 @@ export default function App() {
   const answeredCount = dateFilteredCalls.filter(isAnswered).length;
   const unansweredCount = dateFilteredCalls.filter(isUnanswered).length;
   const interestedCount = dateFilteredCalls.filter(isInterested).length;
+  const applicationSentCount = dateFilteredCalls.filter(isApplicationSent).length;
   const callbackCount = dateFilteredCalls.filter(isCallback).length;
   const alreadyAppliedCount = dateFilteredCalls.filter(isAlreadyApplied).length;
   const alreadyJoinedCount = dateFilteredCalls.filter(isAlreadyJoined).length;
@@ -1303,6 +1614,8 @@ export default function App() {
     switch (dashboardFilter) {
       case CALL_OUTCOME_STATUS.INTERESTED:
         return dateFilteredCalls.filter(isInterested);
+      case CALL_OUTCOME_STATUS.APPLICATION_SENT:
+        return dateFilteredCalls.filter(isApplicationSent);
       case CALL_OUTCOME_STATUS.CALLBACK:
         return dateFilteredCalls.filter(isCallback);
       case CALL_OUTCOME_STATUS.ALREADY_APPLIED:
@@ -1394,10 +1707,147 @@ export default function App() {
               <p>Upload a list of student contacts, select their target university bot, and set sequence call delays. The bots will call each student sequentially.</p>
             </div>
 
+            {/* College Management & Delete Header Section */}
+            <div className="card" style={{ borderLeft: '4px solid var(--accent)', background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.05) 0%, rgba(241, 101, 34, 0.03) 100%)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+                <div>
+                  <h3 style={{ fontSize: '1.15rem', fontWeight: '800', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-primary)' }}>
+                    🎓 Saved College Bots ({universities.length})
+                  </h3>
+                  <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                    Select a college for sequence calling or click <b>Delete</b> to remove unwanted colleges.
+                  </p>
+                </div>
+
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    className={`btn ${showManageColleges ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }}
+                    onClick={() => setShowManageColleges(prev => !prev)}
+                  >
+                    <Trash2 size={15} /> {showManageColleges ? 'Hide Delete Grid' : 'Manage & Delete Colleges'}
+                  </button>
+
+                  <button className="btn btn-primary" style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }} onClick={() => { resetCollegeForm(); setShowCollegeModal(true); }}>
+                    <Plus size={15} /> Add New College
+                  </button>
+                </div>
+              </div>
+
+              {/* Saved Colleges Cards Grid with Delete Buttons */}
+              {showManageColleges && (
+                <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: '0.78rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.75rem', letterSpacing: '0.05em' }}>
+                    Click <b style={{ color: '#ef4444' }}>DELETE</b> on any card to permanently remove a college:
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '0.85rem' }}>
+                    {universities.map(uni => {
+                      const isSelected = selectedUniversity === uni.id;
+                      return (
+                        <div
+                          key={uni.id}
+                          style={{
+                            backgroundColor: isSelected ? 'rgba(99, 102, 241, 0.08)' : 'var(--bg-card)',
+                            border: isSelected ? '2px solid var(--accent)' : '1px solid var(--border)',
+                            borderRadius: '10px',
+                            padding: '0.9rem',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justify: 'space-between',
+                            boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+                          }}
+                        >
+                          <div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.35rem' }}>
+                              <h4 style={{ fontSize: '0.95rem', fontWeight: '700', color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                                🎓 {uni.name}
+                              </h4>
+                              {isSelected && (
+                                <span style={{ fontSize: '0.65rem', backgroundColor: 'var(--accent)', color: 'white', padding: '0.1rem 0.4rem', borderRadius: '4px', fontWeight: 'bold' }}>
+                                  SELECTED
+                                </span>
+                              )}
+                            </div>
+
+                            {uni.place && (
+                              <p style={{ fontSize: '0.78rem', color: '#818cf8', margin: '0.15rem 0', fontWeight: '600' }}>
+                                📍 {uni.place}
+                              </p>
+                            )}
+
+                            {uni.websiteUrl && (
+                              <p style={{ fontSize: '0.73rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '0.2rem' }}>
+                                🔗 {uni.websiteUrl}
+                              </p>
+                            )}
+
+                            {uni.description && (
+                              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.35rem', fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                                "{uni.description}"
+                              </p>
+                            )}
+
+                            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
+                              🕒 Created: {uni.createdAt ? new Date(uni.createdAt).toLocaleString() : '—'}
+                            </p>
+                          </div>
+
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.85rem', paddingTop: '0.65rem', borderTop: '1px solid var(--border)', gap: '0.4rem', flexWrap: 'wrap' }}>
+                            <button
+                              type="button"
+                              className={`btn ${isSelected ? 'btn-primary' : 'btn-secondary'}`}
+                              style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem' }}
+                              onClick={() => {
+                                setSelectedUniversity(uni.id);
+                                addToast(`Selected ${uni.name} for sequence calling.`, 'info');
+                              }}
+                            >
+                              {isSelected ? '✓ Selected Bot' : 'Select Bot'}
+                            </button>
+
+                            <div style={{ display: 'flex', gap: '0.35rem' }}>
+                              <button
+                                type="button"
+                                className="btn btn-secondary"
+                                style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem', fontWeight: '700' }}
+                                onClick={() => handleEditCollege(uni)}
+                                title={`Edit ${uni.name} details and link`}
+                              >
+                                ✏️ Edit
+                              </button>
+
+                            <button
+                              type="button"
+                              className="btn btn-danger-outline"
+                              style={{
+                                fontSize: '0.75rem',
+                                padding: '0.3rem 0.65rem',
+                                color: '#ef4444',
+                                borderColor: 'rgba(239, 68, 68, 0.5)',
+                                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                                fontWeight: '700'
+                              }}
+                              disabled={deletingCollegeId === uni.id}
+                              onClick={() => handleDeleteCollege(uni)}
+                              title={`Delete ${uni.name}`}
+                            >
+                              <Trash2 size={13} /> {deletingCollegeId === uni.id ? 'Deleting...' : 'Delete'}
+                            </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* If campaign is NOT running, show the progressive setup steps */}
             {!campaignState.isRunning && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                
+
                 {/* STEP 1: UPLOAD DATA CARD */}
                 <div className="card" style={{ borderLeft: '4px solid var(--accent)' }}>
                   <h3 style={{ fontSize: '1.15rem', fontWeight: '700', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -1455,7 +1905,7 @@ export default function App() {
                               </div>
 
                               <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                                Extracted: <b style={{ color: '#818cf8' }}>{tempContacts.length || (uploadedFileInfo && uploadedFileInfo.count) || 0} Contacts</b> 
+                                Extracted: <b style={{ color: '#818cf8' }}>{tempContacts.length || (uploadedFileInfo && uploadedFileInfo.count) || 0} Contacts</b>
                                 {uploadedFileInfo && ` • Size: ${uploadedFileInfo.fileSize} • Uploaded at ${uploadedFileInfo.uploadedAt}`}
                               </p>
                             </div>
@@ -1596,42 +2046,79 @@ export default function App() {
                       </button>
                     </div>
 
-                    {/* University Card Grid */}
+                    {/* University Selector (searchable dropdown — scales to many colleges) */}
                     <div style={{ marginBottom: '1.5rem' }}>
-                      <label className="form-label" style={{ marginBottom: '0.75rem', display: 'block' }}>Select Target University:</label>
-                      <div className="university-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
-                        {universities.map((uni) => {
-                          const isSelected = selectedUniversity === uni.id;
-                          const isActive = uni.status === 'active';
-                          return (
-                            <div
-                              key={uni.id}
-                              className={`university-card ${isSelected ? 'selected' : ''} ${!isActive ? 'inactive' : ''}`}
-                              onClick={() => setSelectedUniversity(uni.id)}
-                            >
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
-                                <GraduationCap size={22} style={{ color: isSelected ? 'var(--accent)' : 'var(--text-muted)' }} />
-                                <span className={`status-badge-mini ${uni.status}`}>
-                                  {uni.status.toUpperCase()}
-                                </span>
-                              </div>
-                              <h4 className="university-card-title">{uni.name}</h4>
-                              <p className="university-card-desc">{uni.description}</p>
-                              <div className="university-card-meta">
-                                <span>🗣️ {uni.languages}</span>
-                              </div>
-                            </div>
-                          );
-                        })}
+                      <label className="form-label" style={{ marginBottom: '0.75rem', display: 'block' }}>Select Target University ({universities.length}):</label>
+                      <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                        <div style={{ position: 'relative', flex: '1 1 260px', minWidth: '220px', maxWidth: '420px' }}>
+                          <Search size={15} style={{ position: 'absolute', left: '0.8rem', top: '0.8rem', color: 'var(--text-muted)' }} />
+                          <input
+                            className="form-input"
+                            value={uniSearchDialer}
+                            onChange={(e) => setUniSearchDialer(e.target.value)}
+                            placeholder={`Search ${universities.length} colleges...`}
+                            style={{ paddingLeft: '2.3rem' }}
+                          />
+                        </div>
+                        <select
+                          className="form-input"
+                          value={selectedUniversity}
+                          onChange={(e) => {
+                            setSelectedUniversity(e.target.value);
+                            const picked = universities.find(u => u.id === e.target.value);
+                            if (picked) addToast(`Selected ${picked.name} for sequence calling.`, 'info');
+                          }}
+                          style={{ flex: '2 1 280px', minWidth: '220px', padding: '0.65rem 0.9rem', fontSize: '0.92rem', fontWeight: '600', cursor: 'pointer' }}
+                        >
+                          {universities
+                            .filter(u => {
+                              const q = uniSearchDialer.trim().toLowerCase();
+                              if (!q) return true;
+                              return `${u.name} ${u.place || ''} ${u.languages || ''}`.toLowerCase().includes(q);
+                            })
+                            .map((uni) => (
+                              <option key={uni.id} value={uni.id}>
+                                🎓 {uni.name}{uni.place ? ` — ${uni.place}` : ''}{uni.status === 'inactive' ? ' (inactive)' : ''}
+                              </option>
+                            ))}
+                        </select>
                       </div>
 
+                      {/* Selected college summary */}
+                      {(() => {
+                        const sel = universities.find(u => u.id === selectedUniversity);
+                        if (!sel) return <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '0.6rem' }}>No college matches your search. Clear search or add a new college above.</p>;
+                        return (
+                          <div style={{ marginTop: '0.75rem', padding: '0.75rem 1rem', borderRadius: '10px', border: sel.status === 'inactive' ? '1px solid rgba(244,63,94,0.4)' : '1px solid var(--border)', backgroundColor: 'var(--bg-card)', display: 'flex', gap: '0.75rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                            <GraduationCap size={22} style={{ color: 'var(--accent)', flexShrink: 0, marginTop: '0.15rem' }} />
+                            <div style={{ flex: 1, minWidth: '200px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                <strong style={{ fontSize: '0.95rem' }}>{sel.name}</strong>
+                                <span className={`status-badge-mini ${sel.status || 'active'}`}>{(sel.status || 'active').toUpperCase()}</span>
+                              </div>
+                              {sel.place && <p style={{ fontSize: '0.8rem', color: '#818cf8', margin: '0.15rem 0', fontWeight: '600' }}>📍 {sel.place}</p>}
+                              {sel.websiteUrl && <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', margin: '0.1rem 0' }}>🔗 {sel.websiteUrl}</p>}
+                              {sel.description && <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '0.25rem 0 0', fontStyle: 'italic' }}>"{sel.description}"</p>}
+                              <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', margin: '0.25rem 0 0' }}>🗣️ {sel.languages || 'English, Hindi, Telugu'} • 🤖 Agent #{sel.agentId || 257941}</p>
+                              <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: '0.15rem 0 0' }}>🕒 Created: {sel.createdAt ? new Date(sel.createdAt).toLocaleString() : '—'}</p>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
                       {/* Inactive University warning message */}
-                      {selectedUniversity === 'mit_vishwaprayag' && (
-                        <div style={{ marginTop: '1rem', backgroundColor: 'var(--error-glow)', border: '1px solid rgba(244, 63, 94, 0.2)', padding: '0.75rem 1rem', borderRadius: '8px', color: '#fb7185', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
-                          <AlertCircle size={16} />
-                          <span><b>MIT Vishwaprayag University</b> is currently offline/inactive. Please select an active university to proceed with staging.</span>
-                        </div>
-                      )}
+                      {(() => {
+                        const sel = universities.find(u => u.id === selectedUniversity);
+                        if (sel && sel.status === 'inactive') {
+                          return (
+                            <div style={{ marginTop: '1rem', backgroundColor: 'var(--error-glow)', border: '1px solid rgba(244, 63, 94, 0.2)', padding: '0.75rem 1rem', borderRadius: '8px', color: '#fb7185', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+                              <AlertCircle size={16} />
+                              <span><b>{sel.name}</b> is currently offline/inactive. Please select an active university to proceed with staging.</span>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
                     </div>
 
                     {/* Step 3: Call Buffer Delay - Hide for Single Number input */}
@@ -1672,7 +2159,7 @@ export default function App() {
                       <button
                         className="btn btn-primary"
                         onClick={handleStageTempContacts}
-                        disabled={selectedUniversity === 'mit_vishwaprayag' || (tempInputMode !== 'manual' && callDelay === '')}
+                        disabled={(universities.find(u => u.id === selectedUniversity)?.status === 'inactive') || (tempInputMode !== 'manual' && callDelay === '')}
                       >
                         <CheckCircle size={16} /> Stage Contacts for Calling
                       </button>
@@ -1771,7 +2258,7 @@ export default function App() {
                             Call Buffer Delay: <b>{callDelay !== '' ? `${callDelay} seconds` : '2 seconds (Default)'}</b>
                           </span>
                         </div>
-                        
+
                         <button
                           className="btn btn-primary"
                           style={{ padding: '0.75rem 2rem', fontSize: '1rem' }}
@@ -1791,7 +2278,7 @@ export default function App() {
             {/* ACTIVE CAMPAIGN DASHBOARD - Displays when calling campaign is active */}
             {campaignState.isRunning && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                
+
                 {/* Active Campaign Info Header Panel */}
                 <div className="card" style={{ borderLeft: '5px solid var(--accent)', background: 'linear-gradient(135deg, rgba(241, 101, 34, 0.04) 0%, rgba(99, 102, 241, 0.04) 100%)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
@@ -2030,51 +2517,102 @@ export default function App() {
               </div>
             )}
 
-            {/* Top-Level University Scope Selector */}
+            {/* Top-Level University Scope Selector (searchable dropdown — scales to many colleges) */}
             <div style={{ marginBottom: '1.75rem', backgroundColor: 'rgba(27, 59, 111, 0.02)', padding: '1.25rem', borderRadius: '14px', border: '1px solid var(--border)' }}>
               <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.75rem', display: 'block' }}>
-                Filter Dashboard by University
+                Filter Dashboard by University ({universities.length + 1})
               </label>
-              
-              <div className="dashboard-uni-grid">
-                
-                {/* All Universities */}
-                <div
-                  className={`dashboard-uni-card ${dashboardUniversityFilter === 'ALL' ? 'active' : ''}`}
-                  onClick={() => setDashboardUniversityFilter('ALL')}
-                >
-                  <div className="dashboard-uni-card-header">
-                    <span className="uni-circle all">
-                      <GraduationCap size={16} style={{ color: dashboardUniversityFilter === 'ALL' ? 'var(--accent)' : 'var(--text-muted)' }} />
-                    </span>
-                    <span className="uni-count-badge">{uniStats.ALL.total}</span>
-                  </div>
-                  <h4 className="dashboard-uni-card-title">All Universities</h4>
-                  <p className="dashboard-uni-card-subtitle">Aggregate metrics across all configured universities</p>
+
+              <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                <div style={{ position: 'relative', flex: '1 1 240px', minWidth: '200px', maxWidth: '380px' }}>
+                  <Search size={15} style={{ position: 'absolute', left: '0.8rem', top: '0.8rem', color: 'var(--text-muted)' }} />
+                  <input
+                    className="form-input"
+                    value={uniSearchDashboard}
+                    onChange={(e) => setUniSearchDashboard(e.target.value)}
+                    placeholder={`Search ${universities.length} colleges...`}
+                    style={{ paddingLeft: '2.3rem' }}
+                  />
                 </div>
-
-                {/* Dynamically configured universities */}
-                {universities.map(u => {
-                  const isSelected = dashboardUniversityFilter === u.id;
-                  const uStat = uniStats[u.id] || { total: 0 };
-                  return (
-                    <div
-                      key={u.id}
-                      className={`dashboard-uni-card ${isSelected ? 'active' : ''}`}
-                      onClick={() => setDashboardUniversityFilter(u.id)}
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className={`btn ${isAllUniScope ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ padding: '0.55rem 0.9rem', fontSize: '0.82rem' }}
+                    onClick={() => setDashboardUniversityFilter(['ALL'])}
+                  >
+                    🌐 All ({uniStats.ALL.total})
+                  </button>
+                  {!isAllUniScope && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ padding: '0.55rem 0.9rem', fontSize: '0.82rem' }}
+                      onClick={() => { setDashboardUniversityFilter(['ALL']); setUniSearchDashboard(''); }}
                     >
-                      <div className="dashboard-uni-card-header">
-                        <span className={`uni-circle ${u.id}`}>
-                          <GraduationCap size={16} style={{ color: isSelected ? 'var(--accent)' : 'var(--text-muted)' }} />
-                        </span>
-                        <span className="uni-count-badge">{uStat.total}</span>
-                      </div>
-                      <h4 className="dashboard-uni-card-title">{u.name}</h4>
-                      <p className="dashboard-uni-card-subtitle">{u.languages || u.description || 'Outreach campaign'}</p>
-                    </div>
-                  );
-                })}
+                      Clear ({dashboardUniversityFilter.length} selected)
+                    </button>
+                  )}
+                </div>
+              </div>
 
+              {/* Multi-select college checkboxes (tick 1, 2 or more) */}
+              <div style={{ marginTop: '0.75rem', maxHeight: '190px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.35rem', paddingRight: '0.25rem' }}>
+                {universities
+                  .filter(u => {
+                    const q = uniSearchDashboard.trim().toLowerCase();
+                    if (!q) return true;
+                    return `${u.name} ${u.place || ''} ${u.languages || ''}`.toLowerCase().includes(q);
+                  })
+                  .map(u => {
+                    const count = (uniStats[u.id] || { total: 0 }).total;
+                    const checked = !isAllUniScope && dashboardUniversityFilter.includes(u.id);
+                    return (
+                      <label
+                        key={u.id}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '0.6rem',
+                          padding: '0.5rem 0.75rem', borderRadius: '8px', cursor: 'pointer',
+                          border: checked ? '1px solid var(--accent)' : '1px solid var(--border)',
+                          backgroundColor: checked ? 'rgba(99, 102, 241, 0.08)' : 'var(--bg-card)',
+                          fontSize: '0.85rem'
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleUniScope(u.id)}
+                          style={{ width: '16px', height: '16px', accentColor: 'var(--accent)', cursor: 'pointer' }}
+                        />
+                        <span style={{ fontWeight: checked ? '700' : '500', flex: 1 }}>
+                          🎓 {u.name}{u.place ? <span style={{ color: '#818cf8', fontWeight: '600' }}> — {u.place}</span> : ''}
+                        </span>
+                        <span className="uni-count-badge">{count}</span>
+                      </label>
+                    );
+                  })}
+                {universities.filter(u => {
+                  const q = uniSearchDashboard.trim().toLowerCase();
+                  if (!q) return true;
+                  return `${u.name} ${u.place || ''} ${u.languages || ''}`.toLowerCase().includes(q);
+                }).length === 0 && (
+                  <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>No colleges match your search.</p>
+                )}
+              </div>
+
+              {/* Selected scope summary */}
+              <div style={{ marginTop: '0.75rem', fontSize: '0.83rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <GraduationCap size={15} style={{ color: 'var(--accent)' }} />
+                {isAllUniScope ? (
+                  <span>Showing aggregate metrics across <b>{universities.length}</b> colleges • <b>{uniStats.ALL.total}</b> total calls</span>
+                ) : dashboardUniversityFilter.length === 1 ? (() => {
+                  const sel = universities.find(u => u.id === dashboardUniversityFilter[0]);
+                  const count = (uniStats[dashboardUniversityFilter[0]] || { total: 0 }).total;
+                  if (!sel) return <span>Unknown scope</span>;
+                  return <span>Showing <b>{sel.name}</b>{sel.place ? ` (${sel.place})` : ''} • <b>{count}</b> calls • 🗣️ {sel.languages || 'English, Hindi, Telugu'}</span>;
+                })() : (
+                  <span>Showing combined analytics for <b>{dashboardUniversityFilter.length} colleges</b> • <b>{totalDispatchedCount}</b> calls in scope</span>
+                )}
               </div>
             </div>
 
@@ -2146,6 +2684,24 @@ export default function App() {
                 <div className="metric-value" style={{ color: '#4ade80' }}>{interestedCount}</div>
                 <div className="metric-footer" style={{ color: '#86efac' }}>
                   {totalDispatchedCount > 0 ? `${Math.round((interestedCount / totalDispatchedCount) * 100)}% of Dispatched` : 'Explicitly interested'}
+                </div>
+              </div>
+
+              {/* Card 4b: CYAN - Application Sent via WhatsApp */}
+              <div
+                className={`metric-card ${dashboardFilter === CALL_OUTCOME_STATUS.APPLICATION_SENT ? 'active-metric-card' : ''}`}
+                style={{ borderColor: dashboardFilter === CALL_OUTCOME_STATUS.APPLICATION_SENT ? '#06b6d4' : 'rgba(6, 182, 212, 0.3)' }}
+                onClick={() => setDashboardFilter(CALL_OUTCOME_STATUS.APPLICATION_SENT)}
+              >
+                <div className="metric-header">
+                  <span className="metric-title" style={{ color: '#06b6d4' }}>📩 Application Sent</span>
+                  <div className="metric-icon" style={{ backgroundColor: 'rgba(6, 182, 212, 0.18)', color: '#06b6d4' }}>
+                    <FileCheck size={20} />
+                  </div>
+                </div>
+                <div className="metric-value" style={{ color: '#06b6d4' }}>{applicationSentCount}</div>
+                <div className="metric-footer" style={{ color: '#67e8f9' }}>
+                  {totalDispatchedCount > 0 ? `${Math.round((applicationSentCount / totalDispatchedCount) * 100)}% of Dispatched` : 'WhatsApp link sent'}
                 </div>
               </div>
 
@@ -2256,21 +2812,21 @@ export default function App() {
 
             {/* Admission Conversion Funnel & Call Outcome Distribution Row */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.25rem', marginTop: '1.25rem' }}>
-              
+
               {/* 1. Admission Conversion Funnel & Pipeline Card (Dynamic Title & 9 Mutually Exclusive Steps) */}
               <div className="card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                   <h2 className="card-title" style={{ fontSize: '1rem', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <Activity size={18} style={{ color: 'var(--accent)' }} />
-                    {dashboardUniversityFilter === 'ALL'
+                    {isAllUniScope
                       ? 'Admission Conversion Funnel & Pipeline'
-                      : `${getUniversityName(dashboardUniversityFilter)} Admission Conversion Funnel & Pipeline`}
+                      : `${uniScopeLabel} Admission Conversion Funnel & Pipeline`}
                   </h2>
                   <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>Click any step to filter</span>
                 </div>
-                
+
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', width: '100%' }}>
-                  
+
                   {/* Step 1: Total Dispatched */}
                   <div
                     onClick={() => setDashboardFilter('ALL')}
@@ -2566,6 +3122,7 @@ export default function App() {
               <CallOutcomePieChart
                 statusCounts={{
                   [CALL_OUTCOME_STATUS.INTERESTED]: interestedCount,
+                  [CALL_OUTCOME_STATUS.APPLICATION_SENT]: applicationSentCount,
                   [CALL_OUTCOME_STATUS.CALLBACK]: callbackCount,
                   [CALL_OUTCOME_STATUS.ALREADY_APPLIED]: alreadyAppliedCount,
                   [CALL_OUTCOME_STATUS.ALREADY_JOINED]: alreadyJoinedCount,
@@ -2589,7 +3146,7 @@ export default function App() {
                   Click any university row to toggle scope filter
                 </span>
               </div>
-              
+
               <div className="calls-table-container">
                 <table className="calls-table" style={{ fontSize: '0.85rem' }}>
                   <thead>
@@ -2598,6 +3155,7 @@ export default function App() {
                       <th style={{ textAlign: 'center' }}>Total</th>
                       <th style={{ textAlign: 'center', color: '#2dd4bf' }}>Answered</th>
                       <th style={{ textAlign: 'center', color: '#4ade80' }}>Interested</th>
+                      <th style={{ textAlign: 'center', color: '#06b6d4' }}>App Sent</th>
                       <th style={{ textAlign: 'center', color: '#fbbf24' }}>Callback</th>
                       <th style={{ textAlign: 'center', color: '#38bdf8' }}>Already Applied</th>
                       <th style={{ textAlign: 'center', color: '#a855f7' }}>Already Joined</th>
@@ -2609,11 +3167,12 @@ export default function App() {
                   </thead>
                   <tbody>
                     {universities.map(u => {
-                      const isSelected = dashboardUniversityFilter === u.id;
+                      const isSelected = !isAllUniScope && dashboardUniversityFilter.includes(u.id);
                       const data = uniStats[u.id] || {
                         total: 0,
                         answered: 0,
                         interested: 0,
+                        applicationSent: 0,
                         callback: 0,
                         alreadyApplied: 0,
                         alreadyJoined: 0,
@@ -2625,7 +3184,8 @@ export default function App() {
                       return (
                         <tr
                           key={u.id}
-                          onClick={() => setDashboardUniversityFilter(isSelected ? 'ALL' : u.id)}
+                          onClick={() => toggleUniScope(u.id)}
+                          title="Click to add/remove this college from the analytics scope"
                           style={{
                             cursor: 'pointer',
                             backgroundColor: isSelected ? 'rgba(99, 102, 241, 0.08)' : undefined,
@@ -2638,6 +3198,7 @@ export default function App() {
                           <td style={{ textAlign: 'center', fontWeight: '700' }}>{data.total}</td>
                           <td style={{ textAlign: 'center', color: '#2dd4bf', fontWeight: '600' }}>{data.answered}</td>
                           <td style={{ textAlign: 'center', color: '#4ade80', fontWeight: '700' }}>{data.interested}</td>
+                          <td style={{ textAlign: 'center', color: '#06b6d4', fontWeight: '700' }}>{data.applicationSent || 0}</td>
                           <td style={{ textAlign: 'center', color: '#fbbf24', fontWeight: '700' }}>{data.callback}</td>
                           <td style={{ textAlign: 'center', color: '#38bdf8', fontWeight: '600' }}>{data.alreadyApplied}</td>
                           <td style={{ textAlign: 'center', color: '#a855f7', fontWeight: '600' }}>{data.alreadyJoined}</td>
@@ -2657,10 +3218,10 @@ export default function App() {
 
             {/* Filtered Data Section */}
             <div className="card" style={{ marginTop: '1.5rem', padding: '1.5rem' }}>
-              
+
               {/* Dropdown Filters Toolbar */}
               <div style={{ borderBottom: '1px solid var(--border)', paddingBottom: '1rem', marginBottom: '1.25rem', display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                
+
                 {/* 1. Date Range Filter */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                   <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Date Range</label>
@@ -2717,6 +3278,7 @@ export default function App() {
                     <option value="ALL">All Outcomes & Statuses</option>
                     <optgroup label="Primary Final Outcomes">
                       <option value={CALL_OUTCOME_STATUS.INTERESTED}>Interested</option>
+                      <option value={CALL_OUTCOME_STATUS.APPLICATION_SENT}>Application Sent</option>
                       <option value={CALL_OUTCOME_STATUS.CALLBACK}>Callback</option>
                       <option value={CALL_OUTCOME_STATUS.ALREADY_APPLIED}>Already Applied</option>
                       <option value={CALL_OUTCOME_STATUS.ALREADY_JOINED}>Already Joined</option>
@@ -2755,7 +3317,7 @@ export default function App() {
                 </div>
 
                 {/* Clear Button */}
-                {(dashboardFilter !== 'ALL' || dateFilter !== 'ALL' || statusFilter !== 'ALL' || dashboardSearch.trim() || dashboardUniversityFilter !== 'ALL') && (
+                {(dashboardFilter !== 'ALL' || dateFilter !== 'ALL' || statusFilter !== 'ALL' || dashboardSearch.trim() || !isAllUniScope) && (
                   <button
                     className="btn btn-secondary"
                     style={{ padding: '0.45rem 0.85rem', fontSize: '0.82rem', height: 'fit-content' }}
@@ -2766,7 +3328,7 @@ export default function App() {
                       setCustomEndDate('');
                       setStatusFilter('ALL');
                       setDashboardSearch('');
-                      setDashboardUniversityFilter('ALL');
+                      setDashboardUniversityFilter(['ALL']);
                       addToast('Reset filters.', 'info');
                     }}
                   >
@@ -2783,6 +3345,7 @@ export default function App() {
                     {dashboardFilter === 'ALL' && 'All Call Recipient History'}
                     {dashboardFilter === 'ANSWERED' && 'Recipient List: Answered Calls'}
                     {dashboardFilter === CALL_OUTCOME_STATUS.INTERESTED && '🟢 Interested Students (Qualified List)'}
+                    {dashboardFilter === CALL_OUTCOME_STATUS.APPLICATION_SENT && '📩 Application Sent via WhatsApp'}
                     {dashboardFilter === CALL_OUTCOME_STATUS.CALLBACK && '📞 Callback Requested List'}
                     {dashboardFilter === CALL_OUTCOME_STATUS.ALREADY_APPLIED && '📝 Already Applied Leads'}
                     {dashboardFilter === CALL_OUTCOME_STATUS.ALREADY_JOINED && '🎓 Already Joined / Enrolled Elsewhere'}
@@ -2831,10 +3394,9 @@ export default function App() {
                         <th>Student Profile</th>
                         <th>University</th>
                         <th>Call Date & Duration</th>
-                        <th>Primary Status</th>
+                        <th>Application Status</th>
                         <th>Interest Level</th>
                         <th>Counsellor Follow-up</th>
-                        <th>Callback Time</th>
                         <th>Academic Preferences</th>
                         <th>Actions</th>
                       </tr>
@@ -2847,27 +3409,10 @@ export default function App() {
                         const uniId = getCallUniversityId(call);
                         const uniDisplayName = getUniversityName(uniId);
                         const isCounselorReq = isCounselorFollowupRequired(call);
-                        const callbackTimeVal = getCallbackTime(call);
                         const rawDuration = call.callDuration || call.duration || (call.rawFields && call.rawFields.call_duration_in_seconds);
-                        
-                        const rowClass = isHot
-                          ? 'row-hot'
-                          : primaryStatus === CALL_OUTCOME_STATUS.INTERESTED
-                          ? 'row-interested'
-                          : primaryStatus === CALL_OUTCOME_STATUS.CALLBACK
-                          ? 'row-callback'
-                          : primaryStatus === CALL_OUTCOME_STATUS.ALREADY_APPLIED
-                          ? 'row-already-applied'
-                          : primaryStatus === CALL_OUTCOME_STATUS.ALREADY_JOINED
-                          ? 'row-already-joined'
-                          : primaryStatus === CALL_OUTCOME_STATUS.NOT_INTERESTED
-                          ? 'row-not-interested'
-                          : (primaryStatus === CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID || primaryStatus === 'WRONG_NUMBER')
-                          ? 'row-wrong-number'
-                          : 'row-unanswered';
 
                         return (
-                          <tr key={call.id} className={rowClass}>
+                          <tr key={call.id}>
                             {/* 1. Student Profile */}
                             <td>
                               <div style={{ fontWeight: '700', fontSize: '0.92rem', color: 'var(--text-primary)' }}>{call.studentName}</div>
@@ -2903,41 +3448,57 @@ export default function App() {
                               </div>
                             </td>
 
-                            {/* 4. Primary Final Outcome Status */}
+                            {/* 4. Application Status (WhatsApp admission link state) */}
                             <td>
-                              <span
-                                className={`status-pill ${statusInfo.class}`}
-                                style={{
-                                  fontSize: '0.74rem',
-                                  fontWeight: '800',
-                                  width: 'fit-content',
-                                  backgroundColor: statusInfo.bg,
-                                  color: statusInfo.color,
-                                  border: `1px solid ${statusInfo.border || statusInfo.color}40`,
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '0.35rem'
-                                }}
-                              >
-                                <span>{statusInfo.icon}</span>
-                                <span>{statusInfo.label}</span>
-                              </span>
+                              {primaryStatus === CALL_OUTCOME_STATUS.APPLICATION_SENT ? (
+                                <span
+                                  style={{
+                                    fontSize: '0.74rem',
+                                    fontWeight: '800',
+                                    width: 'fit-content',
+                                    backgroundColor: 'rgba(6, 182, 212, 0.15)',
+                                    color: '#06b6d4',
+                                    border: '1px solid rgba(6, 182, 212, 0.25)',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.35rem',
+                                    padding: '0.25rem 0.65rem',
+                                    borderRadius: '6px'
+                                  }}
+                                >
+                                  <span>📩</span>
+                                  <span>Submitted</span>
+                                </span>
+                              ) : (
+                                <span
+                                  style={{
+                                    fontSize: '0.74rem',
+                                    fontWeight: '800',
+                                    width: 'fit-content',
+                                    backgroundColor: 'rgba(148, 163, 184, 0.15)',
+                                    color: '#94a3b8',
+                                    border: '1px solid rgba(148, 163, 184, 0.25)',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.35rem',
+                                    padding: '0.25rem 0.65rem',
+                                    borderRadius: '6px'
+                                  }}
+                                >
+                                  <span>⏳</span>
+                                  <span>Pending</span>
+                                </span>
+                              )}
                             </td>
 
-                            {/* 5. Interest Level */}
+                            {/* 5. Interest Level (pure transcript verdict) */}
                             <td>
                               <span style={{
                                 fontSize: '0.82rem',
                                 fontWeight: '700',
-                                color: String(call.interestLevel || '').toLowerCase().includes('high')
-                                  ? '#4ade80'
-                                  : String(call.interestLevel || '').toLowerCase().includes('medium')
-                                  ? '#fbbf24'
-                                  : String(call.interestLevel || '').toLowerCase().includes('low')
-                                  ? '#f87171'
-                                  : 'var(--text-secondary)'
+                                color: isInterestedLead(call) ? '#4ade80' : '#f87171'
                               }}>
-                                {call.interestLevel || '—'}
+                                {isInterestedLead(call) ? 'Interested' : 'Not Interested'}
                               </span>
                             </td>
 
@@ -2963,33 +3524,7 @@ export default function App() {
                               )}
                             </td>
 
-                            {/* 7. Callback Time */}
-                            <td>
-                              {callbackTimeVal ? (
-                                <span style={{
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '0.25rem',
-                                  fontSize: '0.74rem',
-                                  fontWeight: '600',
-                                  color: '#fbbf24',
-                                  backgroundColor: 'rgba(251, 191, 36, 0.1)',
-                                  padding: '0.2rem 0.5rem',
-                                  borderRadius: '4px',
-                                  border: '1px solid rgba(251, 191, 36, 0.25)'
-                                }}>
-                                  🕒 {callbackTimeVal}
-                                </span>
-                              ) : primaryStatus === CALL_OUTCOME_STATUS.CALLBACK || String(call.callbackRequired || '').toLowerCase().includes('yes') ? (
-                                <span style={{ fontSize: '0.74rem', color: '#fbbf24', fontWeight: '600' }}>
-                                  🕒 Requested
-                                </span>
-                              ) : (
-                                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>—</span>
-                              )}
-                            </td>
-
-                            {/* 8. Academic Preferences */}
+                            {/* 7. Academic Preferences */}
                             <td>
                               <div style={{ fontSize: '0.85rem', fontWeight: '600' }}>{call.program || '—'}</div>
                               <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
@@ -2997,7 +3532,7 @@ export default function App() {
                               </div>
                             </td>
 
-                            {/* 9. Actions */}
+                            {/* 8. Actions */}
                             <td>
                               <button
                                 className={`btn-detail ${isHot ? 'hot' : statusInfo.class}`}
@@ -3122,19 +3657,19 @@ export default function App() {
         const leadStatus = selectedCall.leadStatus || selectedCall.lead_status || '—';
         const interestLevel = selectedCall.interestLevel || selectedCall.interest_level || '—';
         const callOutcome = selectedCall.callOutcome || selectedCall.call_status || selectedCall.status || '—';
-        
+
         // Date parsing safety
         const rawDate = selectedCall.callDate || selectedCall.call_date || selectedCall.time_of_call || selectedCall.create_date || '—';
-        const callDate = rawDate !== '—' && !isNaN(new Date(rawDate).getTime()) 
-          ? new Date(rawDate).toLocaleString() 
+        const callDate = rawDate !== '—' && !isNaN(new Date(rawDate).getTime())
+          ? new Date(rawDate).toLocaleString()
           : rawDate;
-          
+
         const program = selectedCall.program || selectedCall.program_type || '—';
         const course = selectedCall.course || selectedCall.preferred_course || '—';
         const preferredState = selectedCall.preferredState || selectedCall.preferred_state || '—';
         const preferredCity = selectedCall.preferredCity || selectedCall.preferred_city || '—';
         const entranceExam = selectedCall.entranceExam || selectedCall.entrance_exam || '—';
-        
+
         const counselorRequired = selectedCall.counselorRequired || selectedCall.counselor_required || '—';
         const callbackRequired = selectedCall.callbackRequired || selectedCall.callback_required || '—';
         const universitiesDiscussed = selectedCall.universitiesDiscussed || selectedCall.universities_discussed || '—';
@@ -3143,17 +3678,22 @@ export default function App() {
         const notes = selectedCall.notes || selectedCall.additional_notes || '—';
 
         // Extra vital fields with fallback checks
-        const recordingUrl = selectedCall.recordingUrl || selectedCall.recording_url || (selectedCall.rawFields && selectedCall.rawFields.recording_url) || '';
+        // Prefer the absolute internal_recording_url; Omni also returns a relative
+        // /api/v1/recording/... path which needs the dashboard host prefix to play.
+        let recordingUrl = selectedCall.internal_recording_url || selectedCall.recordingUrl || selectedCall.recording_url || (selectedCall.rawFields && selectedCall.rawFields.recording_url) || '';
+        if (recordingUrl && String(recordingUrl).startsWith('/api/')) {
+          recordingUrl = `https://omnidim.io${recordingUrl}`;
+        }
         const transferStatus = selectedCall.transferStatus || selectedCall.call_transfered_status || (selectedCall.rawFields && selectedCall.rawFields.call_transfered_status) || '—';
         const preferredUniversity = selectedCall.preferredUniversity || selectedCall.preferred_university || (selectedCall.rawFields && selectedCall.rawFields.preferred_university) || '—';
         const sentiment = selectedCall.sentiment || (selectedCall.rawFields && selectedCall.rawFields.sentiment) || '—';
         const botName = selectedCall.botName || selectedCall.bot_name || (selectedCall.rawFields && selectedCall.rawFields.bot_name) || '—';
         const callDuration = selectedCall.callDuration || selectedCall.duration || selectedCall.call_duration_in_seconds || (selectedCall.rawFields && selectedCall.rawFields.call_duration_in_seconds) || '—';
-        
+
         const isHot = String(leadStatus).toUpperCase().includes('HOT');
         const primaryStatus = getPrimaryCallStatus(selectedCall);
         const modalStatusInfo = getStatusDisplay(primaryStatus);
-        
+
         return (
           <div className="modal-overlay" onClick={() => setSelectedCall(null)}>
             <div className="modal-content" style={{ maxWidth: '820px', width: '90%' }} onClick={e => e.stopPropagation()}>
@@ -3168,13 +3708,13 @@ export default function App() {
               </div>
 
               <div className="modal-body" style={{ maxHeight: '70vh', overflowY: 'auto', padding: '1.5rem 0' }}>
-                
+
                 {/* Sections Grid */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                  
+
                   {/* Row 1: Student Info & Lead Qualification */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '1.25rem' }}>
-                    
+
                     {/* Student Info Card */}
                     <div className="card" style={{ padding: '1.25rem', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)' }}>
                       <h3 style={{ fontSize: '0.92rem', fontWeight: '700', marginBottom: '0.85rem', color: '#818cf8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>👤 Student Profile</h3>
@@ -3254,7 +3794,7 @@ export default function App() {
 
                   {/* Row 2: Admission Preference & Counselor Follow-up */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '1.25rem' }}>
-                    
+
                     {/* Preferences Card */}
                     <div className="card" style={{ padding: '1.25rem', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)' }}>
                       <h3 style={{ fontSize: '0.92rem', fontWeight: '700', marginBottom: '0.85rem', color: '#f59e0b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>🎓 Academic Preference</h3>
@@ -3327,9 +3867,9 @@ export default function App() {
                       </h3>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', alignItems: 'center' }}>
                         <div>
-                          <audio 
-                            controls 
-                            src={recordingUrl} 
+                          <audio
+                            controls
+                            src={recordingUrl}
                             style={{ width: '100%', borderRadius: '8px' }}
                           />
                         </div>
@@ -3376,16 +3916,16 @@ export default function App() {
                 {/* Dynamic Extra Columns Panel */}
                 {(() => {
                   const standardKeys = [
-                    'Call ID', 'Timestamp', 'Student Name', 'Contact Number', 'Email', 
-                    'Program', 'Course', 'Preferred State', 'Preferred City', 'Lead Status', 
-                    'Interest Level', 'Counselor Required', 'Callback Required', 'Entrance Exam', 
-                    'Education Status', 'Questions Asked', 'Universities Discussed', 
+                    'Call ID', 'Timestamp', 'Student Name', 'Contact Number', 'Email',
+                    'Program', 'Course', 'Preferred State', 'Preferred City', 'Lead Status',
+                    'Interest Level', 'Counselor Required', 'Callback Required', 'Entrance Exam',
+                    'Education Status', 'Questions Asked', 'Universities Discussed',
                     'Call Outcome Summary', 'Additional Notes', 'Call Outcome', 'id',
                     'recordingUrl', 'recording_url', 'transferStatus', 'call_transfered_status',
                     'preferredUniversity', 'preferred_university', 'sentiment', 'botName', 'bot_name',
                     'callDuration', 'call_duration_in_seconds', 'duration'
                   ];
-                  
+
                   const rawFields = selectedCall.rawFields || {};
                   const extraFields = Object.keys(rawFields).filter(k => {
                     return !standardKeys.some(sk => sk.toLowerCase() === k.toLowerCase());
@@ -3417,6 +3957,124 @@ export default function App() {
           </div>
         );
       })()}
+
+      {/* Add College Modal */}
+      {showCollegeModal && (
+        <div className="modal-overlay" onClick={() => setShowCollegeModal(false)}>
+          <div className="modal-content" style={{ maxWidth: '620px', width: '92%' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header" style={{ borderBottom: '1px solid var(--border)', paddingBottom: '1rem' }}>
+              <div>
+                <h3 style={{ fontSize: '1.15rem', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <GraduationCap size={20} /> {editingCollegeId ? 'Edit College' : 'Add New College'}
+                </h3>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  Saved colleges appear in sequence calling, WhatsApp links, and analytics filters.
+                </span>
+              </div>
+              <button className="modal-close" onClick={() => setShowCollegeModal(false)}>×</button>
+            </div>
+
+            <form onSubmit={handleSaveCollege}>
+              <div className="modal-body" style={{ padding: '1.25rem 0', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div className="form-grid">
+                  <div className="form-group">
+                    <label className="form-label">College Name *</label>
+                    <input
+                      className="form-input"
+                      value={collegeForm.name}
+                      onChange={(e) => setCollegeForm(prev => ({ ...prev, name: e.target.value }))}
+                      placeholder="CBIT Hyderabad"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Place / City</label>
+                    <input
+                      className="form-input"
+                      value={collegeForm.place}
+                      onChange={(e) => setCollegeForm(prev => ({ ...prev, place: e.target.value }))}
+                      placeholder="Gandipet, Hyderabad"
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Application / Website Link</label>
+                  <input
+                    className="form-input"
+                    value={collegeForm.websiteUrl}
+                    onChange={(e) => setCollegeForm(prev => ({ ...prev, websiteUrl: e.target.value }))}
+                    placeholder="https://college.edu/admissions"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Languages</label>
+                  <input
+                    className="form-input"
+                    value={collegeForm.languages}
+                    onChange={(e) => setCollegeForm(prev => ({ ...prev, languages: e.target.value }))}
+                    placeholder="English, Hindi, Telugu"
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Description</label>
+                  <textarea
+                    className="form-input"
+                    rows={3}
+                    value={collegeForm.description}
+                    onChange={(e) => setCollegeForm(prev => ({ ...prev, description: e.target.value }))}
+                    placeholder="Admissions outreach notes for this college bot"
+                  />
+                </div>
+
+                {/* Existing Saved Colleges Quick Delete Section */}
+                <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem', marginTop: '0.5rem' }}>
+                  <label style={{ fontSize: '0.78rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.5rem', display: 'block' }}>
+                    Existing Saved Colleges ({universities.length}) — Click Delete to remove:
+                  </label>
+                  <div style={{ maxHeight: '160px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.4rem', paddingRight: '0.25rem' }}>
+                    {universities.map(uni => (
+                      <div key={uni.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.45rem 0.75rem', backgroundColor: 'var(--bg-card)', borderRadius: '6px', border: '1px solid var(--border)' }}>
+                        <div>
+                          <strong style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>🎓 {uni.name}</strong>
+                          {uni.place && <span style={{ fontSize: '0.76rem', color: '#818cf8', marginLeft: '0.4rem' }}>({uni.place})</span>}
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>🕒 {uni.createdAt ? new Date(uni.createdAt).toLocaleString() : '—'}</div>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-danger-outline"
+                          style={{ padding: '0.2rem 0.55rem', fontSize: '0.74rem', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.4)', backgroundColor: 'rgba(239, 68, 68, 0.1)', fontWeight: '700' }}
+                          disabled={deletingCollegeId === uni.id}
+                          onClick={() => handleDeleteCollege(uni)}
+                        >
+                          <Trash2 size={12} /> {deletingCollegeId === uni.id ? 'Deleting...' : 'Delete'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="modal-footer" style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    setShowCollegeModal(false);
+                    resetCollegeForm();
+                  }}
+                >
+                  Cancel
+                </button>
+                <button className="btn btn-primary" type="submit" disabled={isSavingCollege}>
+                  <Save size={15} /> {isSavingCollege ? 'Saving...' : (editingCollegeId ? 'Update College' : 'Save College')}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Toast Notification Floating Container */}
       <div className="toast-container">
