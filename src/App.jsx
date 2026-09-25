@@ -253,6 +253,17 @@ export default function App() {
       status: 'active',
       websiteUrl: 'https://mnrindia.org/admissions',
       description: 'MNR University medical, engineering & general admissions.'
+    },
+    {
+      id: 'mitwpu',
+      name: 'MIT WPU',
+      place: 'Pune, Maharashtra',
+      agentId: 257941,
+      languages: 'English, Hindi',
+      courses: ['MBA', 'B.Tech CSE', 'B.Tech ECE', 'BBA'],
+      status: 'active',
+      websiteUrl: 'https://mitwpu.edu.in/admissions',
+      description: 'MIT World Peace University admissions outreach.'
     }
   ];
 
@@ -1645,19 +1656,34 @@ export default function App() {
         botName: c.bot_name || c.botName || '—'
       };
 
+      // Same call only (matched by call id). Different calls to one recycled
+      // number stay separate rows — otherwise another call's verdict would
+      // clobber the sheet's curated outcome for its own call.
       const existingIdx = (callId && idxById.get(callId) !== undefined)
         ? idxById.get(callId)
-        : idxByPhone.get(cleanPhone);
+        : undefined;
 
       if (existingIdx !== undefined) {
         // Sheets row exists: keep its academic fields, overwrite with live call data.
         // Name rule: the CURRENT call's staged/dispatch name always wins over a
         // stale Sheets name (same number can be re-called for different students).
+        // Verdict rule: the sheet is the source of truth (OmniDimension writes its
+        // own flags there), so on an id-matched merge the sheet's final status
+        // always wins over re-guessing from the transcript.
         const prev = list[existingIdx];
         const isGenericName = (n) => !n || n === '—' || n === 'Student' || /^recipient\s*\(/i.test(String(n));
+        const sheetVerdict = prev.final_status || prev.finalStatus;
+        const keepSheetVerdict = Boolean(sheetVerdict);
         list[existingIdx] = {
           ...prev,
           ...liveOverlay,
+          ...(keepSheetVerdict ? {
+            final_status: sheetVerdict,
+            finalStatus: sheetVerdict,
+            interestStatus: sheetVerdict,
+            leadStatus: sheetVerdict,
+            interestLevel: levelForStatus(sheetVerdict)
+          } : {}),
           studentName: !isGenericName(displayName) ? displayName : (!isGenericName(prev.studentName) ? prev.studentName : displayName),
           course: prev.course && prev.course !== '—' ? prev.course : cleanCourse(c.target_course || c.course),
           preferredUniversity: (prev.preferredUniversity && prev.preferredUniversity !== '—') ? prev.preferredUniversity : (displayCollege || '—'),
@@ -1705,6 +1731,9 @@ export default function App() {
   // Dynamic Call University ID Helper: checks against configured universities array.
   // Exact staged/transcript college wins; fuzzy scan checks specific colleges
   // before the generic Vidyavision fallback (its name appears in every note).
+  // All comparisons are punctuation-insensitive so sheet values like "MIT WPU"
+  // still match a saved college named "MIT - WPU".
+  const normKey = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const getCallUniversityId = (c) => {
     if (!c) return 'vidyavision';
     const bot = String(c.botName || c.bot_name || (c.rawFields && c.rawFields.bot_name) || '').toLowerCase();
@@ -1717,7 +1746,8 @@ export default function App() {
     // 1. Exact college name match on the explicit fields
     for (const u of universities) {
       const uname = u.name.toLowerCase().trim();
-      if ((prefUni && prefUni === uname) || (discussed && discussed === uname)) return u.id;
+      const unameKey = normKey(uname);
+      if ((prefUni && (prefUni === uname || normKey(prefUni) === unameKey)) || (discussed && (discussed === uname || normKey(discussed) === unameKey))) return u.id;
     }
 
     // 2. Fuzzy scan: specific colleges first, generic fallback last
@@ -1726,10 +1756,11 @@ export default function App() {
       const bGen = b.id === 'vidyavision' || /vidyavision|vision/.test(b.id) ? 1 : 0;
       return aGen - bGen;
     });
+    const normCombined = normKey(combined);
     for (const u of ordered) {
-      const uName = u.name.toLowerCase().replace('university', '').trim();
-      const uId = u.id.toLowerCase();
-      if ((uId.length >= 3 && combined.includes(uId)) || (uName.length >= 3 && combined.includes(uName))) {
+      const uName = normKey(u.name.toLowerCase().replace('university', '').trim());
+      const uId = normKey(u.id);
+      if ((uId.length >= 3 && normCombined.includes(uId)) || (uName.length >= 3 && normCombined.includes(uName))) {
         return u.id;
       }
     }

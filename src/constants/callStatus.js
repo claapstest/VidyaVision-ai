@@ -151,7 +151,9 @@ const EXPLICIT_INTEREST_KEYWORDS = [
   'fee structure', 'which college', 'which course',
   'want to take admission', 'looking for admission', 'interested in b.tech',
   'interested in mba', 'interested in computer science', 'provide details',
-  'send information', 'connect me with counselor', 'connect with counselor'
+  'send information', 'connect me with counselor', 'connect with counselor',
+  'to join', 'whatsapp link', 'send me the link', 'send the link', 'share the link',
+  'జాయిన్', 'ఫీజు'
 ];
 
 /**

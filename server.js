@@ -17,7 +17,8 @@ const PORT = process.env.PORT || 5000;
 
 function getApiKey() {
   dotenv.config();
-  return process.env.OMNIDIM_API_KEY || 'W3Qa8QnVpS0uq5GY7eOKX5V8b3tMG9oOJdFLP23_k-c';
+  // Secrets live in .env only — never hardcode keys here (this file is committed to git).
+  return process.env.OMNIDIM_API_KEY || '';
 }
 
 function getAgentId() {
@@ -87,6 +88,17 @@ const DEFAULT_COLLEGES = [
     status: 'active',
     websiteUrl: 'https://mnrindia.org/admissions',
     description: 'MNR University medical, engineering & general admissions.'
+  },
+  {
+    id: 'mitwpu',
+    name: 'MIT WPU',
+    place: 'Pune, Maharashtra',
+    agentId: 257941,
+    languages: 'English, Hindi',
+    courses: ['MBA', 'B.Tech CSE', 'B.Tech ECE', 'BBA'],
+    status: 'active',
+    websiteUrl: 'https://mitwpu.edu.in/admissions',
+    description: 'MIT World Peace University admissions outreach.'
   }
 ];
 
@@ -436,7 +448,7 @@ function resolveFinalCallStatus(item) {
   }
 
   // 7. Explicit Interest
-  const interestedKeywords = ['interested in college', 'looking for college', 'want admission', 'want to join', 'tell me fees', 'send details', 'send me the details', 'send the details', 'details in whatsapp', 'details on whatsapp', 'send it on whatsapp', 'send it to my whatsapp', 'whatsapp me', 'message me on whatsapp', 'on my whatsapp', 'send application', 'send the application', 'send me the application', 'application link', 'admission link', 'application of', 'fee structure', 'which college', 'which course', 'want to take admission', 'looking for admission', 'connect me with counselor'];
+  const interestedKeywords = ['interested in college', 'looking for college', 'want admission', 'want to join', 'tell me fees', 'send details', 'send me the details', 'send the details', 'details in whatsapp', 'details on whatsapp', 'send it on whatsapp', 'send it to my whatsapp', 'whatsapp me', 'message me on whatsapp', 'on my whatsapp', 'send application', 'send the application', 'send me the application', 'application link', 'admission link', 'application of', 'fee structure', 'which college', 'which course', 'want to take admission', 'looking for admission', 'connect me with counselor', 'to join', 'whatsapp link', 'send me the link', 'send the link', 'share the link', 'జాయిన్', 'ఫీజు'];
   // Interest must come from the CALLER's speech — never the agent's greeting.
   const __userParts = [];
   if (Array.isArray(item.interactions)) {
@@ -499,17 +511,17 @@ function normalizeRow(row, headers) {
   const contactNumber = findValue(['to number', 'contact number', 'phone number', 'mobile', 'phone', 'number', 'recipient']) || '—';
   const email = findValue(['email address', 'email', 'mail']) || '—';
   const program = findValue(['program type', 'program', 'degree']) || '—';
-  const course = findValue(['preferred course', 'course', 'specialization', 'branch']) || '—';
+  const course = findValue(['preferred course', 'course', 'specialization', 'branch', 'program interest', 'program_interest', 'program']) || '—';
   const preferredState = findValue(['preferred state', 'state']) || '—';
   const preferredCity = findValue(['preferred city', 'city']) || '—';
   const leadStatus = findValue(['lead status', 'status', 'qualification']) || '—';
   const interestLevel = findValue(['interest level', 'interest status', 'interest']) || '—';
-  const counselorRequired = findValue(['counselor required', 'counselor follow-up', 'counselor requirement', 'counselor']) || '—';
+  const counselorRequired = findValue(['counselor required', 'counselor follow-up', 'counselor requirement', 'counselor', 'counsellor required', 'counsellor follow-up', 'counsellor follow up', 'counsellor requirement', 'counsellor']) || '—';
   const callbackRequired = findValue(['callback required', 'callback']) || '—';
   const callDate = findValue(['call date', 'timestamp', 'date', 'call time', 'registered_at']) || '—';
   const callOutcome = findValue(['call outcome', 'outcome', 'status']) || '—';
   const questionsAsked = findValue(['questions asked', 'questions', 'query']) || '—';
-  const universitiesDiscussed = findValue(['universities discussed', 'colleges discussed', 'universities', 'colleges']) || '—';
+  const universitiesDiscussed = findValue(['universities discussed', 'colleges discussed', 'universities', 'colleges', 'college interest', 'college_interest', 'college discussed']) || '—';
   const summary = findValue(['conversation summary', 'summary', 'call summary', 'transcript']) || '—';
   const notes = findValue(['additional notes', 'notes']) || '—';
   const entranceExam = findValue(['entrance exam', 'exam']) || '—';
@@ -518,9 +530,12 @@ function normalizeRow(row, headers) {
   // Extra vital fields mapped explicitly
   const recordingUrl = findValue(['recording url', 'recording_url']);
   const transferStatus = findValue(['call transfered status', 'call_transfered_status', 'transfer']);
-  const preferredUniversity = findValue(['preferred university', 'preferred_university', 'university']);
+  const preferredUniversity = findValue(['preferred university', 'preferred_university', 'university', 'college interest', 'college_interest', 'college']);
   const sentiment = findValue(['sentiment']);
   const botName = findValue(['bot name', 'bot_name']);
+  const fullConversation = findValue(['full conversation', 'full_conversation', 'conversation']);
+  // No name column in these sheets — recover the student's name from the greeting.
+  const recoveredName = extractStudentName({ call_conversation: fullConversation, summary });
 
   const rawFields = {};
   headers.forEach((h, i) => {
@@ -544,6 +559,25 @@ function normalizeRow(row, headers) {
 
   let effectiveLeadStatus = leadStatus;
 
+  // Explicit per-call verdict flags from the sheet (interested /
+  // application_sent / callback / already_applied / already_joined /
+  // not_interested / wrong_invalid columns) always win over keyword
+  // guessing, so the dashboard mirrors the sheet exactly. Most advanced
+  // outcome wins when several flags are set together.
+  const flagYes = (keywords) => String(findValue(keywords)).trim().toLowerCase() === 'yes';
+  const flagStatus =
+    flagYes(['wrong invalid', 'wrong_invalid', 'wrong number']) ? CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID :
+    flagYes(['already joined', 'already_joined']) ? CALL_OUTCOME_STATUS.ALREADY_JOINED :
+    flagYes(['already applied', 'already_applied']) ? CALL_OUTCOME_STATUS.ALREADY_APPLIED :
+    flagYes(['application sent', 'application_sent']) ? CALL_OUTCOME_STATUS.APPLICATION_SENT :
+    flagYes(['callback']) ? CALL_OUTCOME_STATUS.CALLBACK :
+    flagYes(['not interested', 'not_interested']) ? CALL_OUTCOME_STATUS.NOT_INTERESTED :
+    flagYes(['interested']) ? CALL_OUTCOME_STATUS.INTERESTED : '';
+  if (flagStatus) {
+    final_status = flagStatus;
+    effectiveLeadStatus = flagStatus;
+  }
+
   // Manual overrides (e.g. APPLICATION_SENT after WhatsApp) so dashboard calculus updates
   const cleanPhone = contactNumber.replace(/\D/g, '').slice(-10);
   const manual = (cleanPhone && CALL_INTERESTS[cleanPhone]) || (id && CALL_INTERESTS[id]);
@@ -565,7 +599,7 @@ function normalizeRow(row, headers) {
 
   return {
     id,
-    studentName,
+    studentName: recoveredName || studentName,
     contactNumber,
     email,
     program,
@@ -591,6 +625,7 @@ function normalizeRow(row, headers) {
     preferredUniversity: effectivePreferredUniversity,
     sentiment,
     botName,
+    call_conversation: fullConversation,
     rawFields
   };
 }
@@ -721,6 +756,37 @@ function extractUserSpeech(callRecord) {
   return parts.join(' ').toLowerCase();
 }
 
+// Student name recovery: OmniDimension exposes no per-call student name
+// (user_name is the account holder), so recover it from the call itself —
+// self-stated ("my name is X") first, then the bot's personalized greeting
+// ("Hello <name>", "<name> garu").
+function extractStudentName(callRecord) {
+  if (!callRecord) return '';
+  const userText = extractUserSpeech(callRecord);
+  const fullText = extractTranscriptText(callRecord);
+  const titleCase = (s) => String(s || '').trim().toLowerCase().replace(/\b[a-z]/g, (ch) => ch.toUpperCase());
+
+  // 1. Caller stating their own name (highest confidence)
+  const selfM = userText.match(/\bmy name is\s+([a-z][a-z'.\- ]{1,40})/i);
+  if (selfM) {
+    const name = titleCase(selfM[1].split(/[.,!?]/)[0]).split(/\s+/).filter((w) => !/^(and|uh|um|er|ah|yeah)$/i.test(w)).slice(0, 4).join(' ');
+    if (/^[A-Za-z][A-Za-z .'\-]{1,40}$/.test(name)) return name;
+  }
+
+  // 2. Telugu honorific: "<name> garu" (e.g. "కార్తిక్ గారు")
+  const teM = (fullText.slice(0, 600) + ' ' + userText.slice(0, 300)).match(/([\u0C00-\u0C7F]{2,20})\s*గార[ుూ]/);
+  if (teM) return teM[1];
+
+  // 3. Bot greeting the dialled contact by name ("Hello vittal, ...")
+  const greetM = fullText.slice(0, 600).match(/\b(?:hello|hi|hey|namaste|namaskar)[,!]?\s+([a-z]{2,20})\b/i);
+  if (greetM) {
+    const word = greetM[1].toLowerCase();
+    const stop = new Set(['there', 'sir', 'maam', 'madam', 'everyone', 'all', 'dear', 'friend', 'how', 'what', 'can', 'may', 'welcome', 'thanks', 'thank', 'good', 'morning', 'evening', 'afternoon', 'today', 'this', 'that', 'these', 'those', 'is', 'are', 'you', 'your', 'we', 'our', 'iam', 'im']);
+    if (!stop.has(word)) return titleCase(word);
+  }
+  return '';
+}
+
 // Intelligent Post-Call Interest & Preference Analyzer (Strict real call data)
 function analyzeCallInterest(callRecord) {
   if (!callRecord) return { interestStatus: 'PENDING', college: '—', course: '—', details: 'No call data recorded' };
@@ -809,7 +875,9 @@ function analyzeCallInterest(callRecord) {
     'send application', 'send the application',
     'send me the application', 'send admission', 'application link', 'admission link',
     'application of', 'send me application link', 'fee structure', 'which college', 'which course',
-    'b.tech', 'btech', 'cse', 'ece', 'mba', 'computer science', 'information technology'
+    'b.tech', 'btech', 'cse', 'ece', 'mba', 'computer science', 'information technology',
+    'to join', 'whatsapp link', 'send me the link', 'send the link', 'share the link',
+    'జాయిన్', 'ఫీజు'
   ];
 
   const isWrongNumber = wrongNumberKeywords.some(kw => fullText.includes(kw));
@@ -854,6 +922,9 @@ function analyzeCallInterest(callRecord) {
   } else {
     // Detect college name spoken in transcript (misspellings included: geetham = gitam)
     const collegeHints = [
+      ['mit wpu', 'MIT WPU'],
+      ['mitwpu', 'MIT WPU'],
+      ['mit-wpu', 'MIT WPU'],
       ['geetham', 'GITAM University'],
       ['gitam', 'GITAM University'],
       ['kl university', 'KL University'],
@@ -989,9 +1060,29 @@ function enrichCallWithInterest(callRecord) {
   }
 
   const interestData = analyzeCallInterest(callRecord);
+
+  // OmniDimension's own structured verdict (extracted_variables) wins over
+  // keyword guessing — it is the same source that feeds the Google Sheet,
+  // so live rows and sheet rows classify identically.
+  const ev = callRecord.extracted_variables || {};
+  const evYes = (k) => String(ev[k] ?? '').trim().toLowerCase() === 'yes';
+  const evStatus =
+    evYes('wrong_invalid') ? CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID :
+    evYes('already_joined') ? CALL_OUTCOME_STATUS.ALREADY_JOINED :
+    evYes('already_applied') ? CALL_OUTCOME_STATUS.ALREADY_APPLIED :
+    evYes('application_sent') ? CALL_OUTCOME_STATUS.APPLICATION_SENT :
+    evYes('callback') ? CALL_OUTCOME_STATUS.CALLBACK :
+    evYes('not_interested') ? CALL_OUTCOME_STATUS.NOT_INTERESTED :
+    (evYes('Interested') || evYes('interested')) ? CALL_OUTCOME_STATUS.INTERESTED : '';
+  if (evStatus) interestData.interestStatus = evStatus;
+
+  // Recover the student's name (user_name is the account holder, not the student).
+  const recoveredLiveName = extractStudentName(callRecord);
+
   return applyTargetMemory({
     ...callRecord,
     ...interestData,
+    ...(recoveredLiveName ? { studentName: recoveredLiveName } : {}),
     final_status: interestData.interestStatus,
     finalStatus: interestData.interestStatus,
     interest_status: interestData.interestStatus,
