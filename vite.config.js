@@ -12,11 +12,18 @@ export default defineConfig({
         changeOrigin: true,
         ws: true,
         configure: (proxy) => {
+          const ignoredCodes = new Set(['ECONNRESET', 'ECONNREFUSED', 'ECONNABORTED', 'EPIPE', 'ETIMEDOUT']);
           proxy.on('error', (err) => {
-            // Gracefully ignore ECONNRESET / ECONNREFUSED during server reloads
-            if (err.code !== 'ECONNRESET' && err.code !== 'ECONNREFUSED') {
+            if (!ignoredCodes.has(err.code)) {
               console.warn('[vite-proxy]', err.message);
             }
+          });
+          proxy.on('proxyReqWs', (proxyReq, req, socket) => {
+            socket.on('error', (err) => {
+              if (!ignoredCodes.has(err.code)) {
+                console.warn('[vite-proxy-ws]', err.message);
+              }
+            });
           });
         }
       }

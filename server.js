@@ -23,7 +23,8 @@ function getApiKey() {
 
 function getAgentId() {
   dotenv.config();
-  return Number(process.env.AGENT_ID || 257941);
+  const id = Number(process.env.AGENT_ID);
+  return !isNaN(id) && id > 0 ? id : 257941;
 }
 
 const DATA_DIR = path.join(process.cwd(), 'data');
