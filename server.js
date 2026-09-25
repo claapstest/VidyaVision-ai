@@ -436,7 +436,7 @@ function resolveFinalCallStatus(item) {
   }
 
   // 7. Explicit Interest
-  const interestedKeywords = ['interested in college', 'looking for college', 'want admission', 'want to join', 'tell me fees', 'send details', 'send application', 'send the application', 'send me the application', 'application link', 'admission link', 'application of', 'fee structure', 'which college', 'which course', 'want to take admission', 'looking for admission', 'connect me with counselor'];
+  const interestedKeywords = ['interested in college', 'looking for college', 'want admission', 'want to join', 'tell me fees', 'send details', 'send me the details', 'send the details', 'details in whatsapp', 'details on whatsapp', 'send it on whatsapp', 'send it to my whatsapp', 'whatsapp me', 'message me on whatsapp', 'on my whatsapp', 'send application', 'send the application', 'send me the application', 'application link', 'admission link', 'application of', 'fee structure', 'which college', 'which course', 'want to take admission', 'looking for admission', 'connect me with counselor'];
   // Interest must come from the CALLER's speech — never the agent's greeting.
   const __userParts = [];
   if (Array.isArray(item.interactions)) {
@@ -606,9 +606,24 @@ async function loadCache() {
 
 async function saveCache(data) {
   try {
+    // Guard: never let a partial/failed fetch wipe a healthy cache. If the new
+    // payload is less than half the cached size (and cache is non-trivial),
+    // keep the old cache — a Sheet cleanup this drastic needs a human look.
+    let prevLen = 0;
+    try {
+      const raw = await fs.readFile(GOOGLE_SHEETS_CACHE_FILE, 'utf8');
+      const prev = JSON.parse(raw);
+      prevLen = Array.isArray(prev) ? prev.length : 0;
+    } catch {}
+    if (prevLen > 5 && Array.isArray(data) && data.length < prevLen * 0.5) {
+      console.warn(`Sheets cache guard: fresh fetch has ${data.length} rows vs cached ${prevLen} — keeping cache.`);
+      return false;
+    }
     await fs.writeFile(GOOGLE_SHEETS_CACHE_FILE, JSON.stringify(data, null, 2), 'utf8');
+    return true;
   } catch (err) {
     console.error('Failed to save cache file:', err);
+    return false;
   }
 }
 
@@ -655,9 +670,10 @@ async function pollGoogleSheets() {
 
     const recordsJson = JSON.stringify(normalizedList);
     if (recordsJson !== lastSheetsDataJson) {
+      const saved = await saveCache(normalizedList);
+      if (saved === false) return; // guard kept the healthy cache; retry next poll
       console.log('Detected new/updated Google Sheets records. Broadcasting...');
       lastSheetsDataJson = recordsJson;
-      await saveCache(normalizedList);
       broadcast({ type: 'sheets_update', data: normalizedList });
     }
   } catch (err) {
@@ -787,7 +803,10 @@ function analyzeCallInterest(callRecord) {
   // 3. Explicit Interest keywords (user asking for application/admission link counts as interest)
   const interestedKeywords = [
     'interested in college', 'looking for college', 'want admission', 'want to join',
-    'tell me fees', 'send details', 'send application', 'send the application',
+    'tell me fees', 'send details', 'send me the details', 'send the details',
+    'details in whatsapp', 'details on whatsapp', 'send it on whatsapp', 'send it to my whatsapp',
+    'whatsapp me', 'message me on whatsapp', 'on my whatsapp',
+    'send application', 'send the application',
     'send me the application', 'send admission', 'application link', 'admission link',
     'application of', 'send me application link', 'fee structure', 'which college', 'which course',
     'b.tech', 'btech', 'cse', 'ece', 'mba', 'computer science', 'information technology'
@@ -993,41 +1012,15 @@ function buildAdmissionMessage({ studentName, collegeName, applicationUrl }) {
   );
 }
 
-async function sendWhatsAppViaOmni({ toNumber, message, collegeName }) {
-  const apiKey = getApiKey();
-  if (!apiKey) throw new Error('OMNIDIM_API_KEY missing');
-  const endpoints = [
-    'https://backend.omnidim.io/api/v1/messages/send',
-    'https://backend.omnidim.io/api/v1/whatsapp/send',
-    'https://omnidim.io/api/v1/messages/send',
-    'https://omnidim.io/api/v1/whatsapp/send'
-  ];
-  const payloads = [
-    { to_number: toNumber, message, channel: 'whatsapp', college: collegeName },
-    { to: toNumber, body: message, channel: 'whatsapp' },
-    { phone_number: toNumber, message, type: 'whatsapp' }
-  ];
-  let lastError = null;
-  for (const url of endpoints) {
-    for (const body of payloads) {
-      try {
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...body, agent_id: getAgentId() })
-        });
-        const text = await res.text().catch(() => '');
-        if (res.ok) return { ok: true, endpoint: url, response: text.slice(0, 500) };
-        lastError = new Error(`${url} -> HTTP ${res.status}: ${text.slice(0, 300)}`);
-      } catch (err) {
-        lastError = err;
-      }
-    }
-  }
-  throw lastError || new Error('WhatsApp send failed (no OmniDimension messaging endpoint available)');
-}
+// NOTE: OmniDimension has no WhatsApp-send REST API (every messaging path
+// returns 404). Delivery is owned by the agent's Post-Call Cloud WhatsApp
+// action — never attempt HTTP delivery from here.
 
 async function maybeAutoSendWhatsApp(matchedCall, pending) {
+  // NOTE: OmniDimension exposes NO WhatsApp-send REST endpoint, so this backend
+  // does not attempt HTTP delivery. The real WhatsApp goes out via the AGENT's
+  // Post-Call Cloud WhatsApp action. Here we only record the outcome so the
+  // dashboard flips to APPLICATION_SENT the moment interest is detected.
   try {
     const enriched = enrichCallWithInterest(matchedCall || {});
     if (enriched.interestStatus !== CALL_OUTCOME_STATUS.INTERESTED) return null;
@@ -1036,7 +1029,7 @@ async function maybeAutoSendWhatsApp(matchedCall, pending) {
     const cleanPhone = digits.length === 10 ? digits : digits.slice(-10);
     if (!cleanPhone) return null;
     // Skip only if the stored APPLICATION_SENT entry is newer than this call
-    // (stale entries from older calls must still trigger a fresh WhatsApp send).
+    // (stale entries from older calls must still trigger a fresh record).
     const existing = CALL_INTERESTS[cleanPhone];
     if (existing?.interestStatus === CALL_OUTCOME_STATUS.APPLICATION_SENT && existing.updatedAt) {
       try {
@@ -1063,24 +1056,15 @@ async function maybeAutoSendWhatsApp(matchedCall, pending) {
         }
       } catch {}
     }
+
     const message = buildAdmissionMessage({ studentName, collegeName, applicationUrl });
     const toNumber = rawPhone.startsWith('+') ? rawPhone : `+91${cleanPhone}`;
-
-    let sendResult = 'logged';
-    try {
-      const sent = await sendWhatsAppViaOmni({ toNumber, message, collegeName });
-      sendResult = `sent via ${sent.endpoint}`;
-      addLog('success', `WhatsApp admission link sent to ${toNumber} for ${collegeName} (${sendResult}).`);
-    } catch (err) {
-      addLog('warning', `WhatsApp API not reachable for ${toNumber} (${err.message}). Admission link saved as APPLICATION_SENT so dashboard still updates.`);
-    }
-
     const entry = {
       interestStatus: CALL_OUTCOME_STATUS.APPLICATION_SENT,
       college: collegeName,
       course: enriched.target_course || 'Not Mentioned in Call',
-      notes: `${message} [${sendResult}]`,
-      details: `${studentName} showed interest; admission link shared via WhatsApp (${sendResult}).`,
+      notes: `${message} [Delivery: agent Post-Call Cloud WhatsApp]`,
+      details: `${studentName} showed interest; admission link goes via agent Post-Call Cloud WhatsApp (${collegeName}).`,
       studentName,
       applicationUrl,
       updatedAt: new Date().toISOString()
@@ -1089,6 +1073,7 @@ async function maybeAutoSendWhatsApp(matchedCall, pending) {
     const callId = String(matchedCall.id || matchedCall.call_id || '').trim();
     if (callId) CALL_INTERESTS[callId] = entry;
     await saveInterests();
+    addLog('success', `Interested lead ${toNumber} (${collegeName}) — admission link via agent Post-Call Cloud WhatsApp. Dashboard → APPLICATION_SENT.`);
     return entry;
   } catch (err) {
     console.error('maybeAutoSendWhatsApp failed:', err);
@@ -1180,21 +1165,45 @@ async function pollCallsOnce() {
   const calls = await fetchCallsFromOmni();
   if (!calls || !Array.isArray(calls)) return;
 
-  // Process pending call dispatches to capture status changes (completed/no-answer/ringing/in-progress)
-  // NOTE: match only logs NEWER than the dispatch — the logs endpoint returns
-  // history, and a stale completed record for a redialed number must not
-  // instantly "complete" the fresh dispatch.
+  // Process pending call dispatches to capture status changes (completed/no-answer/ringing/in-progress).
+  // Match priority: (1) Omni's call_request_id from the dispatch response —
+  // exact, immune to redials and clock skew. (2) Fallback: logs newer than the
+  // dispatch, parsed as BOTH UTC and local time (Omni timestamps carry no zone).
+  const parseLogTime = (v) => {
+    if (!v) return NaN;
+    const s = String(v).trim();
+    const asLocal = new Date(s).getTime();
+    const asUtc = new Date(s.includes('GMT') || s.includes('Z') || s.includes('+') ? s : s + ' UTC').getTime();
+    return { asLocal, asUtc };
+  };
   for (const [phone, pending] of PENDING_CALLS.entries()) {
-    const candidates = calls.filter(c => {
+    const samePhone = calls.filter(c => {
       const cPhone = c.to_number || c.phone_number || c.to || '';
       return cPhone === phone;
-    }).filter(c => {
-      const t = new Date(c.time_of_call || 0).getTime();
-      if (isNaN(t)) return true;
-      return t >= pending.dispatchTime - 5 * 60 * 1000;
-    }).sort((a, b) => new Date(b.time_of_call || 0).getTime() - new Date(a.time_of_call || 0).getTime());
+    });
 
-    const matchedCall = candidates[0];
+    let matchedCall = null;
+    if (pending.requestId) {
+      matchedCall = samePhone.find(c => {
+        const rid = c.call_request_id && (c.call_request_id.id || c.call_request_id.request_id);
+        return rid !== undefined && rid !== null && String(rid) === String(pending.requestId);
+      }) || null;
+    }
+    if (!matchedCall) {
+      const fresh = samePhone.filter(c => {
+        const { asLocal, asUtc } = parseLogTime(c.time_of_call);
+        if (isNaN(asLocal) && isNaN(asUtc)) return true;
+        const okLocal = !isNaN(asLocal) && asLocal >= pending.dispatchTime - 5 * 60 * 1000;
+        const okUtc = !isNaN(asUtc) && asUtc >= pending.dispatchTime - 5 * 60 * 1000;
+        return okLocal || okUtc;
+      });
+      fresh.sort((a, b) => {
+        const ta = parseLogTime(a.time_of_call);
+        const tb = parseLogTime(b.time_of_call);
+        return Math.max(tb.asLocal || 0, tb.asUtc || 0) - Math.max(ta.asLocal || 0, ta.asUtc || 0);
+      });
+      matchedCall = fresh[0] || null;
+    }
 
     if (matchedCall) {
       const rawStatus = matchedCall.call_status || matchedCall.status || '';
@@ -1239,8 +1248,15 @@ async function pollCallsOnce() {
         }
       }
     } else {
-      // Timeout tracking if call log doesn't appear after 3 minutes
-      if (Date.now() - pending.dispatchTime > 180000) {
+      // Omni posts call logs with a delay (often 1-4 min after hang-up for
+      // recording/analysis/post-actions). Keep waiting up to 8 minutes so a
+      // slow log never strands the queue as "dialing" forever.
+      const waitedSec = Math.floor((Date.now() - pending.dispatchTime) / 1000);
+      if (waitedSec > 150 && !pending.waitingLogged) {
+        pending.waitingLogged = true;
+        addLog('info', `Still waiting for the call log of "${pending.fullName}" (${phone}) — Omni publishes it a few minutes after hang-up. Queue stays on this contact.`);
+      }
+      if (Date.now() - pending.dispatchTime > 480000) {
         PENDING_CALLS.delete(phone);
         updateWsPolling();
 
@@ -1398,6 +1414,7 @@ async function processNextInQueue() {
         collegeName: CAMPAIGN_STATE.universityName || '',
         universityId: CAMPAIGN_STATE.universityId || contact.universityId || '',
         applicationUrl: CAMPAIGN_STATE.applicationUrl || '',
+        requestId: responseData.requestId || responseData.request_id || responseData.id || null,
         dispatchTime: Date.now(),
         lastStatus: 'dispatched',
         queueContactId: contact.id
@@ -1851,13 +1868,10 @@ app.post('/api/calls/send-whatsapp', async (req, res) => {
 
     const message = buildAdmissionMessage({ studentName, collegeName: resolvedCollege, applicationUrl: resolvedUrl });
     const toNumber = `+91${cleanPhone}`;
-    let sendResult = 'logged';
-    try {
-      const sent = await sendWhatsAppViaOmni({ toNumber, message, collegeName: resolvedCollege });
-      sendResult = `sent via ${sent.endpoint}`;
-    } catch (err) {
-      sendResult = `provider pending (${err.message})`;
-    }
+    // Delivery is owned by the agent's Post-Call Cloud WhatsApp action (there
+    // is no OmniDimension WhatsApp-send API). This endpoint records the intent
+    // so the dashboard flips to APPLICATION_SENT.
+    const sendResult = 'delivery via agent Post-Call Cloud WhatsApp';
 
     const entry = {
       interestStatus: CALL_OUTCOME_STATUS.APPLICATION_SENT,
@@ -1906,8 +1920,17 @@ app.get('/api/call-analytics', async (req, res) => {
         });
         records = normalizedList;
       }
+      const saved = await saveCache(records);
+      if (saved === false) {
+        const cached = await loadCache();
+        return res.json({
+          success: true,
+          source: 'cache_kept',
+          error: `Fresh sheet fetch returned only ${records.length} rows — kept the last healthy cache (${cached.length} records). If you cleaned the sheet on purpose, tell the team to reset the cache.`,
+          data: cached.length > 0 ? cached : records
+        });
+      }
       lastSheetsDataJson = JSON.stringify(records);
-      await saveCache(records);
     } else {
       records = await loadCache();
       if (records.length === 0) {

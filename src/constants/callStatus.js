@@ -143,7 +143,10 @@ const NOT_INTERESTED_KEYWORDS = [
 
 const EXPLICIT_INTEREST_KEYWORDS = [
   'interested in college', 'looking for college', 'want admission', 'want to join',
-  'tell me fees', 'send details', 'send application', 'send the application',
+  'tell me fees', 'send details', 'send me the details', 'send the details',
+  'details in whatsapp', 'details on whatsapp', 'send it on whatsapp', 'send it to my whatsapp',
+  'whatsapp me', 'message me on whatsapp', 'on my whatsapp',
+  'send application', 'send the application',
   'send me the application', 'application link', 'admission link', 'application of',
   'fee structure', 'which college', 'which course',
   'want to take admission', 'looking for admission', 'interested in b.tech',
