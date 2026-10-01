@@ -598,9 +598,20 @@ function normalizeRow(row, headers) {
     effectiveDiscussed = target.collegeName;
   }
 
+  let effectiveStudentName = recoveredName || (studentName && studentName !== 'Student' && studentName !== '—' && studentName !== 'Not provided' ? studentName : '');
+  if (!effectiveStudentName && target && target.name) {
+    effectiveStudentName = target.name;
+  }
+  if (!effectiveStudentName) {
+    effectiveStudentName = studentName || 'Student';
+  }
+  if (rawFields && (!rawFields.student_name || rawFields.student_name === 'Not provided' || rawFields.student_name === '—')) {
+    rawFields.student_name = effectiveStudentName;
+  }
+
   return {
     id,
-    studentName: recoveredName || studentName,
+    studentName: effectiveStudentName,
     contactNumber,
     email,
     program,

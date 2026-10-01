@@ -1428,35 +1428,106 @@ export default function App() {
     return match ? match.name : uniId;
   };
 
-  // Helper to format a call record for clean Excel presentation with Primary Final Outcome
+  // Helper to format a call record for clean Excel presentation with exact required Google Sheets columns
   const formatCallForExcel = (call, idx) => {
+    // 1. Name: taken from dashboard (crucial for unanswered calls where Google Sheet has null/Not provided)
+    const isGenericName = (n) => !n || n === '—' || n === 'Student' || n === 'Not provided' || /^recipient\s*\(/i.test(String(n));
+    let studentName = call.studentName;
+    if (isGenericName(studentName)) {
+      if (!isGenericName(call.name)) studentName = call.name;
+      else if (!isGenericName(call.student_name)) studentName = call.student_name;
+      else if (!isGenericName(call.fullName)) studentName = call.fullName;
+      else if (call.rawFields && !isGenericName(call.rawFields.student_name)) studentName = call.rawFields.student_name;
+      else if (call.rawFields && !isGenericName(call.rawFields['Student Name'])) studentName = call.rawFields['Student Name'];
+      else if (call.rawFields && !isGenericName(call.rawFields.name)) studentName = call.rawFields.name;
+      else {
+        const cleanPhone = String(call.contactNumber || call.to_number || call.phone_number || '').replace(/\D/g, '').slice(-10);
+        if (cleanPhone) {
+          const q = activeQueue.find(item => String(item.formattedPhone || item.phone || '').replace(/\D/g, '').slice(-10) === cleanPhone);
+          if (q && !isGenericName(q.name)) studentName = q.name;
+        }
+      }
+    }
+    if (!studentName || studentName === '—') studentName = call.studentName || 'Student';
+
+    // 2. Phone Number (from Google Sheets raw fields or call record)
+    const rawPhone = (call.rawFields && (call.rawFields.to_number || call.rawFields.phone_number))
+      || call.contactNumber
+      || call.to_number
+      || call.phone_number
+      || '—';
+    const cleanDigits = String(rawPhone).replace(/\D/g, '');
+    const phoneNumber = cleanDigits.length >= 10 ? (cleanDigits.length === 10 ? `+91${cleanDigits}` : `+${cleanDigits}`) : (rawPhone || '—');
+
+    // 3. College Name (from Google Sheets college_name / college_interest or dashboard university)
     const uniId = getCallUniversityId(call);
     const uniDisplayName = getUniversityName(uniId);
-    const primaryStatus = resolveCallFinalStatus(call);
-    const statusInfo = getStatusDisplay(primaryStatus);
-    const counselorReq = isCounselorFollowupRequired(call) ? 'Yes' : 'No';
-    const callbackTime = getCallbackTime(call) || (String(call.callbackRequired || '').toLowerCase().includes('yes') ? 'Requested' : '—');
-    const rawDuration = call.callDuration || call.duration || (call.rawFields && call.rawFields.call_duration_in_seconds) || '—';
+    const collegeName = (call.rawFields && (call.rawFields.college_name || call.rawFields.college_interest))
+      || call.college_name
+      || call.preferredUniversity
+      || (call.target_college && call.target_college !== 'Not Mentioned in Call' ? call.target_college : '')
+      || (call.college && call.college !== 'Not Mentioned in Call' ? call.college : '')
+      || uniDisplayName
+      || 'MIT WPU';
+
+    // 4. Calls Answered & Calls Not Answered
+    const rawCallStatus = String(call.rawFields?.call_status || call.call_status || call.callOutcome || '').toLowerCase();
+    const isAns = (rawCallStatus === 'completed' || rawCallStatus === 'answered' || isAnswered(call)) && rawCallStatus !== 'no-answer' && !isUnanswered(call);
+    const callsAnswered = isAns ? 'Yes' : 'No';
+    const callsNotAnswered = !isAns ? 'Yes' : 'No';
+
+    // Google Sheets verdict flags (Interested, Application Sent, Callback, Already Applied, Already Joined, Not Interested, Wrong / Invalid, Counsellor Follow-up)
+    const normalizeFlag = (sheetVal, dashboardFallbackBool) => {
+      if (!isAns) return 'No'; // Unanswered calls never have positive outcome flags
+      if (sheetVal !== undefined && sheetVal !== null && String(sheetVal).trim() !== '') {
+        const s = String(sheetVal).trim().toLowerCase();
+        if (s === 'yes' || s === 'true' || s === '1') return 'Yes';
+        if (s === 'no' || s === 'false' || s === '0') return 'No';
+      }
+      return dashboardFallbackBool ? 'Yes' : 'No';
+    };
+
+    const rf = call.rawFields || {};
+    const interested = normalizeFlag(rf.Interested ?? rf.interested, isInterested(call));
+    const applicationSent = normalizeFlag(rf.application_sent ?? rf['Application Sent'], isApplicationSent(call));
+    const callback = normalizeFlag(rf.callback ?? rf.Callback, isCallback(call));
+    const alreadyApplied = normalizeFlag(rf.already_applied ?? rf['Already Applied'], isAlreadyApplied(call));
+    const alreadyJoined = normalizeFlag(rf.already_joined ?? rf['Already Joined'], isAlreadyJoined(call));
+    const notInterested = normalizeFlag(rf.not_interested ?? rf['Not Interested'], isNotInterested(call));
+    const wrongInvalid = normalizeFlag(rf.wrong_invalid ?? rf['Wrong Invalid'] ?? rf.wrong_number, isWrongNumber(call));
+    const counsellorFollowup = normalizeFlag(rf.counsellor_follow_up ?? rf.counselor_follow_up ?? rf.counselor_followup, isCounselorFollowupRequired(call));
+
+    // Call Summary (from Google Sheets call_summary / summary)
+    const callSummary = (rf.call_summary && rf.call_summary !== 'Not provided' && rf.call_summary !== '—' ? rf.call_summary : '')
+      || (rf.summary && rf.summary !== 'Not provided' && rf.summary !== '—' ? rf.summary : '')
+      || (call.summary && call.summary !== '—' ? call.summary : '—');
+
+    // Call Transcript / Full Conversation (from Google Sheets full_conversation / call_conversation)
+    const rawTranscript = rf.full_conversation
+      || rf.call_conversation
+      || call.call_conversation
+      || (Array.isArray(call.interactions) && call.interactions.length > 0
+          ? call.interactions.map(it => `${it.user_query ? `User: ${it.user_query}` : ''}${it.user_query && it.bot_response ? ' | ' : ''}${it.bot_response ? `Bot: ${it.bot_response}` : ''}`).filter(Boolean).join('\n')
+          : '');
+    const callTranscript = rawTranscript ? String(rawTranscript).replace(/<br\s*\/?>/gi, '\n').trim() : '—';
 
     return {
       'S.No': idx + 1,
-      'Student Name': call.studentName || '—',
-      'Contact Number': call.contactNumber || '—',
-      'Email': call.email || '—',
-      'University': uniDisplayName,
-      'Final Status': statusInfo.label, // Exactly one of: Interested, Callback, Not Interested, Already Joined, Already Applied, Wrong Number / Invalid, Calls Not Answered
-      'Interest Level': call.interestLevel || 'PENDING',
-      'Counselor Follow-up': counselorReq,
-      'Callback Time': callbackTime,
-      'Call Date & Time': call.callDate !== '—' && !isNaN(new Date(call.callDate).getTime()) ? new Date(call.callDate).toLocaleString() : call.callDate || '—',
-      'Call Duration': formatDuration(rawDuration),
-      'Program': call.program || '—',
-      'Course': call.course || '—',
-      'Preferred State': call.preferredState || '—',
-      'Preferred City': call.preferredCity || '—',
-      'Call Outcome Details': call.callOutcome || '—',
-      'Sentiment': call.sentiment || 'Neutral',
-      'Summary / Call Notes': call.summary || '—'
+      'Name': studentName,
+      'Phone Number': phoneNumber,
+      'College Name': collegeName,
+      'Calls Answered': callsAnswered,
+      'Calls Not Answered': callsNotAnswered,
+      'Interested': interested,
+      'Application Sent': applicationSent,
+      'Callback': callback,
+      'Already Applied': alreadyApplied,
+      'Already Joined': alreadyJoined,
+      'Not Interested': notInterested,
+      'Wrong / Invalid': wrongInvalid,
+      'Counsellor Follow-up': counsellorFollowup,
+      'Call Summary': callSummary,
+      'Call Transcript / Full Conversation': callTranscript
     };
   };
 
@@ -1465,12 +1536,28 @@ export default function App() {
     if (!dataRowArray || dataRowArray.length === 0) return [];
     const keys = Object.keys(dataRowArray[0]);
     return keys.map(key => {
-      let maxLen = key.length;
+      let maxLen = String(key || '').length;
       dataRowArray.forEach(row => {
-        const val = String(row[key] || '');
-        if (val.length > maxLen) maxLen = val.length;
+        const val = row[key];
+        if (val !== undefined && val !== null) {
+          const str = String(val);
+          // Split by line to handle multi-line transcripts and summaries
+          const lines = str.split(/\r?\n/);
+          lines.forEach(line => {
+            if (line.length > maxLen) maxLen = line.length;
+          });
+        }
       });
-      return { wch: Math.min(maxLen + 4, 60) };
+      const isLargeTextCol = /summary|transcript|conversation/i.test(key);
+      const minWidth = Math.max(String(key || '').length + 4, 12);
+      const calculatedWidth = maxLen + 3;
+      
+      if (isLargeTextCol) {
+        // Generous readable width for summary and transcript, up to 120 chars
+        return { wch: Math.max(minWidth, Math.min(calculatedWidth, 120)) };
+      }
+      // Exact dynamic fit for regular columns without truncation
+      return { wch: Math.max(minWidth, Math.min(calculatedWidth, 60)) };
     });
   };
 
@@ -1482,11 +1569,11 @@ export default function App() {
     // Scoped calls based on university and date filter
     const scopedCalls = dateFilteredCalls;
 
-    // 1. Current Filtered View Sheet (exactly what user sees in table)
+    // 1. Main Call Analytics Report Sheet (populated with exact required columns and dashboard-recovered names)
     const activeData = finalDashboardList.map((c, i) => formatCallForExcel(c, i));
     const wsActive = XLSX.utils.json_to_sheet(activeData.length > 0 ? activeData : [{ 'Status': 'No call records match the active filters.' }]);
     if (activeData.length > 0) wsActive['!cols'] = calculateColWidths(activeData);
-    XLSX.utils.book_append_sheet(workbook, wsActive, "Active Filtered Calls");
+    XLSX.utils.book_append_sheet(workbook, wsActive, "Call Analytics Report");
 
     // 2. Executive Metrics Summary Sheet
     const getUniSummaryRow = (name, list) => {
@@ -1514,8 +1601,8 @@ export default function App() {
         'Already Applied': aa,
         'Already Joined': aj,
         'Not Interested': ni,
-        'Wrong Number / Invalid': wn,
-        'Counselor Follow-up': cf,
+        'Wrong / Invalid': wn,
+        'Counsellor Follow-up': cf,
         'Lead Conversion Rate': conv
       };
     };
@@ -1539,7 +1626,7 @@ export default function App() {
     wsSummary['!cols'] = calculateColWidths(summaryRows);
     XLSX.utils.book_append_sheet(workbook, wsSummary, "Outcome Summary");
 
-    // Helper to safely append an outcome sheet
+    // Helper to safely append an outcome sheet with dynamic widths
     const appendOutcomeSheet = (sheetTitle, callsList, emptyMessage) => {
       const data = callsList.map((c, i) => formatCallForExcel(c, i));
       const ws = XLSX.utils.json_to_sheet(data.length > 0 ? data : [{ 'Status': emptyMessage }]);
@@ -1556,13 +1643,13 @@ export default function App() {
     appendOutcomeSheet("Already Applied", scopedCalls.filter(isAlreadyApplied), "No already-applied records.");
     appendOutcomeSheet("Already Joined", scopedCalls.filter(isAlreadyJoined), "No already-joined records.");
     appendOutcomeSheet("Not Interested", scopedCalls.filter(isNotInterested), "No not-interested records.");
-    appendOutcomeSheet("Wrong Number or Invalid", scopedCalls.filter(isWrongNumber), "No wrong-number records.");
+    appendOutcomeSheet("Wrong or Invalid", scopedCalls.filter(isWrongNumber), "No wrong-number records.");
     appendOutcomeSheet("Calls Not Answered", scopedCalls.filter(isUnanswered), "No unanswered calls recorded.");
 
     // Save workbook
     const cleanScopeName = activeScopeName.replace(/[^a-zA-Z0-9]/g, '_');
-    XLSX.writeFile(workbook, `${cleanScopeName}_Leads_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    addToast(`Exported ${activeScopeName} Excel report with final status categorization!`, 'success');
+    XLSX.writeFile(workbook, `${cleanScopeName}_Call_Analytics_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    addToast(`Exported ${activeScopeName} Excel report with dynamically adjusted columns!`, 'success');
   };
 
   // Open Detailed Call View
