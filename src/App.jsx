@@ -328,6 +328,9 @@ export default function App() {
   const [isSavingInterest, setIsSavingInterest] = useState(false);
   const [deletingCollegeId, setDeletingCollegeId] = useState('');
   const [editingCollegeId, setEditingCollegeId] = useState('');
+  const [collegeKbFile, setCollegeKbFile] = useState(null);
+  const [collegeKbExisting, setCollegeKbExisting] = useState(null);
+  const [collegeKbRemove, setCollegeKbRemove] = useState(false);
   const [collegeForm, setCollegeForm] = useState({
     name: '',
     place: '',
@@ -403,6 +406,9 @@ export default function App() {
       courses: ''
     });
     setEditingCollegeId('');
+    setCollegeKbFile(null);
+    setCollegeKbExisting(null);
+    setCollegeKbRemove(false);
   };
 
   const handleEditCollege = (college) => {
@@ -416,9 +422,19 @@ export default function App() {
       languages: college.languages || 'English, Hindi, Telugu',
       courses: Array.isArray(college.courses) ? college.courses.join(', ') : (college.courses || '')
     });
+    setCollegeKbFile(null);
+    setCollegeKbRemove(false);
+    setCollegeKbExisting(college.kbFileId ? { id: college.kbFileId, name: college.kbFileName || `file ${college.kbFileId}` } : null);
     setEditingCollegeId(college.id);
     setShowCollegeModal(true);
   };
+
+  const readFileAsDataUrl = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 
   const handleSaveCollege = async (e) => {
     if (e) e.preventDefault();
@@ -427,6 +443,17 @@ export default function App() {
       addToast('College name is required.', 'error');
       return;
     }
+    if (collegeKbFile) {
+      const isPdf = collegeKbFile.type === 'application/pdf' || /\.pdf$/i.test(collegeKbFile.name);
+      if (!isPdf) {
+        addToast('Knowledge base must be a PDF file.', 'error');
+        return;
+      }
+      if (collegeKbFile.size > 15 * 1024 * 1024) {
+        addToast('PDF too large (max 15MB).', 'error');
+        return;
+      }
+    }
 
     setIsSavingCollege(true);
     const savedName = collegeForm.name.trim();
@@ -434,6 +461,12 @@ export default function App() {
     let fetchSuccess = false;
 
     try {
+      let kbFileName = undefined;
+      let kbFileData = undefined;
+      if (collegeKbFile) {
+        kbFileName = collegeKbFile.name;
+        kbFileData = await readFileAsDataUrl(collegeKbFile);
+      }
       const res = await fetch('/api/colleges', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -445,7 +478,10 @@ export default function App() {
           description: collegeForm.description.trim(),
           agentId: Number(collegeForm.agentId) || 257941,
           languages: (collegeForm.languages || '').trim() || 'English, Hindi, Telugu',
-          courses: String(collegeForm.courses || '').split(',').map(s => s.trim()).filter(Boolean)
+          courses: String(collegeForm.courses || '').split(',').map(s => s.trim()).filter(Boolean),
+          kbFileName,
+          kbFileData,
+          kbRemove: collegeKbRemove || undefined
         })
       });
 
@@ -460,6 +496,8 @@ export default function App() {
 
     if (fetchSuccess) {
       addToast(editingCollegeId ? `College "${savedName}" updated successfully!` : `College "${savedName}" added successfully!`, 'success');
+      if (resData.kbWarning) addToast(`Saved, but KB upload issue: ${resData.kbWarning}`, 'error');
+      else if (collegeKbFile) addToast('Knowledge base PDF uploaded and attached to agent.', 'success');
       if (Array.isArray(resData.colleges)) {
         setUniversities(resData.colleges);
       }
@@ -1065,14 +1103,29 @@ export default function App() {
 
   // Helper to find matching call log from OmniDimension by phone number
   const findMatchedCallLog = (item) => {
+    // Same call only: match by call id first so a redial to the same number
+    // never shows another call's transcript/verdict.
+    const wantId = String(item.call_id || item.id || '').trim();
+    if (wantId) {
+      const byId = calls.find(c => String(c.call_id || c.id || '').trim() === wantId);
+      if (byId) return byId;
+    }
     const rawNum = item.formattedPhone || item.to_number || item.phone_number || item.to || item.phone || '';
     const cleanNum = String(rawNum).replace(/\D/g, '');
     if (!cleanNum) return null;
 
-    return calls.find(c => {
+    // Same number redialed: newest call wins (fresh verdict, not stale history).
+    const matches = calls.filter(c => {
       const cNum = String(c.to_number || c.phone_number || c.to || '').replace(/\D/g, '');
       return cNum === cleanNum || (cleanNum.length >= 10 && cNum.endsWith(cleanNum.slice(-10)));
     });
+    if (matches.length === 0) return null;
+    const ts = (c) => {
+      const t = Date.parse(c.time_of_call || c.call_date || c.callDate || '');
+      return isNaN(t) ? -1 : t;
+    };
+    matches.sort((a, b) => ts(b) - ts(a));
+    return matches[0];
   };
 
   // Combine active queue contacts, current dialing call, and OmniDimension call records into single source
@@ -1140,6 +1193,60 @@ export default function App() {
     // Extract transcript & conversation text from all possible properties
     const rawTranscript = String(matched.call_conversation || matched.transcript || matched.conversation || c.call_conversation || c.transcript || c.conversation || matched.summary || matched.call_summary || '').trim();
     const hasTranscript = rawTranscript.length > 0;
+    const unansweredStatuses = ['failed', 'canceled', 'busy', 'no-answer', 'no_answer', 'timeout'];
+
+    // Cut/ignored call: never connected. Verdict is NO_ANSWER even if a greeting got transcribed.
+    if (unansweredStatuses.includes(status)) {
+      return {
+        interestStatus: 'NO_ANSWER',
+        college: '—',
+        course: '—',
+        details: `${name} did not answer call.`
+      };
+    }
+
+    // Caller-only speech: "Bot: ... | User: ..." pipe format or User: lines.
+    // Agent greeting words ("want to join?", "fee structure") must never count as interest.
+    const hasLabels = /(bot|user|agent)\s*:/i.test(rawTranscript);
+    const userSegs = [];
+    if (hasLabels) {
+      rawTranscript.replace(/<br\s*\/?>/gi, '\n').split('\n').forEach(line => {
+        line.split('|').forEach(seg => {
+          const m = seg.match(/^\s*user\s*:(.*)$/i);
+          if (m && m[1].trim()) userSegs.push(m[1].trim());
+        });
+      });
+    }
+    const userSpeech = userSegs.join(' ').trim();
+    const userSpeechChars = userSpeech.replace(/[^a-z0-9]/gi, '').length;
+    const rawDur = matched.call_duration_in_seconds ?? matched.duration_in_seconds ?? matched.callDuration ?? matched.duration ?? matched.call_duration ?? c.callDuration ?? c.duration ?? NaN;
+    const durMatch = String(rawDur ?? '').trim().match(/^(\d+):(\d{1,2})/);
+    const durSec = durMatch ? Number(durMatch[1]) * 60 + Number(durMatch[2]) : parseFloat(rawDur);
+    // Caller never spoke — or only a stray "hello"/"yes" in a ≤5s call (cut
+    // before engaging). Nothing truthful to report: not "Not Interested".
+    const weakCut = !isNaN(durSec)
+      ? (durSec <= 5 && (userSpeechChars < 10 || rawTranscript.replace(/(bot|agent|user)\s*:/gi, ' ').replace(/[^a-z0-9]/gi, '').length < 60)
+        && !/(wrong number|wrong person|invalid number|not the right person|already joined|already enrolled|already admitted|already applied|submitted application|filled application)/i.test(userSpeech))
+      : (hasTranscript && hasLabels && !userSpeech);
+    if (weakCut) {
+      return {
+        interestStatus: 'NO_ANSWER',
+        college: '—',
+        course: '—',
+        details: `${name} did not engage (call cut before speaking).`
+      };
+    }
+    // Caller never spoke (cut before engaging) — nothing truthful to report.
+    if (hasTranscript && hasLabels && !userSpeech) {
+      return {
+        interestStatus: 'NO_ANSWER',
+        college: '—',
+        course: '—',
+        details: `${name} did not engage (call cut before speaking).`
+      };
+    }
+    // No speaker labels (plain transcript): analyze full text as before.
+    const analysisText = (hasLabels ? userSpeech : rawTranscript).toLowerCase();
 
     // 1. If NO transcript is recorded yet:
     if (!hasTranscript) {
@@ -1199,11 +1306,11 @@ export default function App() {
       'b.tech', 'btech', 'cse', 'ece', 'mba', 'computer science', 'information technology'
     ];
 
-    const isKwWrongNumber = wrongNumberKeywords.some(kw => transcriptLower.includes(kw));
-    const isKwAlreadyJoined = alreadyJoinedKeywords.some(kw => transcriptLower.includes(kw));
-    const isKwAlreadyApplied = alreadyAppliedKeywords.some(kw => transcriptLower.includes(kw));
-    const isKwCallback = callbackKeywords.some(kw => transcriptLower.includes(kw));
-    const isKwNotInterested = notInterestedKeywords.some(kw => transcriptLower.includes(kw));
+    const isKwWrongNumber = wrongNumberKeywords.some(kw => analysisText.includes(kw));
+    const isKwAlreadyJoined = alreadyJoinedKeywords.some(kw => analysisText.includes(kw));
+    const isKwAlreadyApplied = alreadyAppliedKeywords.some(kw => analysisText.includes(kw));
+    const isKwCallback = callbackKeywords.some(kw => analysisText.includes(kw));
+    const isKwNotInterested = notInterestedKeywords.some(kw => analysisText.includes(kw));
 
     let finalStatus = 'PENDING';
     let college = 'Not Mentioned in Call';
@@ -1263,9 +1370,10 @@ export default function App() {
       else if (transcriptLower.includes('mech') || transcriptLower.includes('mechanical')) course = 'B.Tech Mech';
       else if (transcriptLower.includes('civil')) course = 'B.Tech Civil';
 
-      const isExplicitlyInterested = interestedKeywords.some(kw => transcriptLower.includes(kw));
+      const isExplicitlyInterested = interestedKeywords.some(kw => analysisText.includes(kw));
 
-      if (isExplicitlyInterested || status === 'completed') {
+      // INTERESTED needs the CALLER's own words — a completed call alone proves nothing.
+      if (isExplicitlyInterested) {
         finalStatus = 'INTERESTED';
         if (college !== 'Not Mentioned in Call' && course !== 'Not Mentioned in Call') {
           detailsStr = `${name} expressed interest in ${course} at ${college} during call.`;
@@ -4014,6 +4122,25 @@ export default function App() {
                                   <span>📩</span>
                                   <span>Submitted</span>
                                 </span>
+                              ) : primaryStatus === CALL_OUTCOME_STATUS.NOT_ANSWERED ? (
+                                <span
+                                  style={{
+                                    fontSize: '0.74rem',
+                                    fontWeight: '800',
+                                    width: 'fit-content',
+                                    backgroundColor: 'rgba(244, 63, 94, 0.15)',
+                                    color: '#fb7185',
+                                    border: '1px solid rgba(244, 63, 94, 0.25)',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.35rem',
+                                    padding: '0.25rem 0.65rem',
+                                    borderRadius: '6px'
+                                  }}
+                                >
+                                  <span>❌</span>
+                                  <span>No Answer</span>
+                                </span>
                               ) : (
                                 <span
                                   style={{
@@ -4038,13 +4165,23 @@ export default function App() {
 
                             {/* 5. Interest Level (pure transcript verdict) */}
                             <td>
-                              <span style={{
-                                fontSize: '0.82rem',
-                                fontWeight: '700',
-                                color: isInterestedLead(call) ? '#4ade80' : '#f87171'
-                              }}>
-                                {isInterestedLead(call) ? 'Interested' : 'Not Interested'}
-                              </span>
+                              {primaryStatus === CALL_OUTCOME_STATUS.NOT_ANSWERED ? (
+                                <span style={{
+                                  fontSize: '0.82rem',
+                                  fontWeight: '700',
+                                  color: '#fb7185'
+                                }}>
+                                  No Answer
+                                </span>
+                              ) : (
+                                <span style={{
+                                  fontSize: '0.82rem',
+                                  fontWeight: '700',
+                                  color: isInterestedLead(call) ? '#4ade80' : '#f87171'
+                                }}>
+                                  {isInterestedLead(call) ? 'Interested' : 'Not Interested'}
+                                </span>
+                              )}
                             </td>
 
                             {/* 6. Counsellor Follow-up (Secondary Metric) */}
@@ -4584,6 +4721,43 @@ export default function App() {
                   />
                 </div>
 
+                <div className="form-group">
+                  <label className="form-label">Knowledge Base PDF</label>
+                  {collegeKbExisting && !collegeKbRemove && (
+                    <div style={{ fontSize: '0.78rem', marginBottom: '0.4rem', color: 'var(--text-primary)' }}>
+                      📎 Attached: <strong>{collegeKbExisting.name}</strong> (file {collegeKbExisting.id})
+                      <button
+                        type="button"
+                        className="btn btn-danger-outline"
+                        style={{ marginLeft: '0.5rem', padding: '0.15rem 0.5rem', fontSize: '0.72rem' }}
+                        onClick={() => setCollegeKbRemove(true)}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  )}
+                  {collegeKbRemove && (
+                    <div style={{ fontSize: '0.78rem', marginBottom: '0.4rem', color: '#ef4444' }}>
+                      Existing PDF will be removed on save.
+                      <button type="button" className="btn btn-secondary" style={{ marginLeft: '0.5rem', padding: '0.15rem 0.5rem', fontSize: '0.72rem' }} onClick={() => setCollegeKbRemove(false)}>Undo</button>
+                    </div>
+                  )}
+                  <input
+                    className="form-input"
+                    type="file"
+                    accept=".pdf,application/pdf"
+                    onChange={(e) => setCollegeKbFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)}
+                  />
+                  {collegeKbFile && (
+                    <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                      Selected: {collegeKbFile.name} ({(collegeKbFile.size / 1024).toFixed(1)} KB) — uploads on Save.
+                    </span>
+                  )}
+                  <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', display: 'block', marginTop: '0.25rem' }}>
+                    PDF only, max 15MB. On sequential Start, only this college&apos;s PDF stays attached to the agent.
+                  </span>
+                </div>
+
                 {/* Existing Saved Colleges Quick Delete Section */}
                 <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem', marginTop: '0.5rem' }}>
                   <label style={{ fontSize: '0.78rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.5rem', display: 'block' }}>
@@ -4595,6 +4769,7 @@ export default function App() {
                         <div>
                           <strong style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>🎓 {uni.name}</strong>
                           {uni.place && <span style={{ fontSize: '0.76rem', color: '#818cf8', marginLeft: '0.4rem' }}>({uni.place})</span>}
+                          {uni.kbFileId && <span style={{ fontSize: '0.72rem', color: '#22c55e', marginLeft: '0.4rem' }}>📎 {uni.kbFileName || `KB ${uni.kbFileId}`}</span>}
                           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>🕒 {uni.createdAt ? new Date(uni.createdAt).toLocaleString() : '—'}</div>
                         </div>
                         <button

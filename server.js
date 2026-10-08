@@ -11,7 +11,7 @@ dotenv.config();
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
 
 const PORT = process.env.PORT || 5000;
 
@@ -120,6 +120,104 @@ async function saveColleges(colleges) {
   }
 }
 
+// ---------- OmniDimension Knowledge Base (per-college PDF, single shared agent) ----------
+// Docs: POST /knowledge_base/create { file: base64, filename: *.pdf } -> { file: { id } }
+//       POST /knowledge_base/attach { file_ids, agent_id, when_to_use }
+//       POST /knowledge_base/detach { file_ids, agent_id }
+// Strategy: colleges share one agent; only the selected college's PDF stays attached
+// during its sequential campaign (swapped on /api/queue/start).
+const OMNI_KB_BASE = 'https://backend.omnidim.io/api/v1';
+
+async function omnidimKBCreate(base64Data, filename) {
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error('OMNIDIM_API_KEY is missing in .env');
+  const res = await fetch(`${OMNI_KB_BASE}/knowledge_base/create`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file: base64Data, filename })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.success === false) {
+    throw new Error(data?.message || data?.error || `KB upload failed (HTTP ${res.status})`);
+  }
+  const fileId = data?.file?.id ?? data?.data?.file?.id ?? data?.id;
+  if (!fileId) throw new Error('KB upload succeeded but no file id returned');
+  return { fileId: Number(fileId), raw: data };
+}
+
+async function omnidimKBAttach(fileIds, agentId, whenToUse) {
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error('OMNIDIM_API_KEY is missing in .env');
+  const res = await fetch(`${OMNI_KB_BASE}/knowledge_base/attach`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file_ids: fileIds.map(Number), agent_id: Number(agentId), when_to_use: whenToUse || undefined })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.success === false) {
+    throw new Error(data?.message || data?.error || `KB attach failed (HTTP ${res.status})`);
+  }
+  return data;
+}
+
+async function omnidimKBDetach(fileIds, agentId) {
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error('OMNIDIM_API_KEY is missing in .env');
+  const ids = fileIds.map(Number).filter(n => !isNaN(n) && n > 0);
+  if (ids.length === 0) return { skipped: true };
+  const res = await fetch(`${OMNI_KB_BASE}/knowledge_base/detach`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file_ids: ids, agent_id: Number(agentId) })
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.success === false) {
+    throw new Error(data?.message || data?.error || `KB detach failed (HTTP ${res.status})`);
+  }
+  return data;
+}
+
+// Attach ONLY selected college's PDF; detach every other college's PDF from the agent.
+// Best-effort: never throws — logs warnings and returns { attached, detached }.
+async function syncAgentKBForCollege(selectedCollege, allColleges) {
+  const result = { attached: null, detached: [], warnings: [] };
+  try {
+    if (!selectedCollege) return result;
+    const agentId = Number(selectedCollege.agentId) || getAgentId();
+    const selectedId = selectedCollege.kbFileId ? Number(selectedCollege.kbFileId) : null;
+    const otherIds = (allColleges || [])
+      .filter(c => c.id !== selectedCollege.id && c.kbFileId && Number(c.kbFileId) !== selectedId)
+      .map(c => Number(c.kbFileId))
+      .filter(n => !isNaN(n) && n > 0);
+    if (otherIds.length > 0) {
+      try {
+        await omnidimKBDetach(otherIds, agentId);
+        result.detached = otherIds;
+        addLog('info', `KB swap: detached ${otherIds.length} other college PDF(s) from agent ${agentId}.`);
+      } catch (err) {
+        result.warnings.push(`detach: ${err.message}`);
+        addLog('warning', `KB swap detach warning: ${err.message}`);
+      }
+    }
+    if (selectedId) {
+      try {
+        const whenToUse = `Use this document ONLY when calling for ${selectedCollege.name} admissions. Ignore for other colleges.`;
+        await omnidimKBAttach([selectedId], agentId, whenToUse);
+        result.attached = selectedId;
+        addLog('success', `KB swap: attached "${selectedCollege.kbFileName || selectedId}" (file ${selectedId}) to agent ${agentId} for ${selectedCollege.name}.`);
+      } catch (err) {
+        result.warnings.push(`attach: ${err.message}`);
+        addLog('warning', `KB swap attach warning for ${selectedCollege.name}: ${err.message}`);
+      }
+    } else {
+      addLog('info', `KB swap: ${selectedCollege.name} has no PDF attached — agent uses base prompt only.`);
+    }
+  } catch (err) {
+    result.warnings.push(err.message);
+  }
+  return result;
+}
+
 let CALL_INTERESTS = {};
 
 // Phone -> campaign target memory (persists across restarts): which college +
@@ -140,12 +238,52 @@ function rememberCallTarget(formattedPhone, info) {
   const digits = String(formattedPhone || '').replace(/\D/g, '');
   const key = digits.length === 10 ? digits : digits.slice(-10);
   if (!key) return;
-  CALL_TARGETS[key] = { ...(CALL_TARGETS[key] || {}), ...info, updatedAt: new Date().toISOString() };
+  const nowIso = new Date().toISOString();
+  const prev = CALL_TARGETS[key] || {};
+  // Per-number dispatch HISTORY (cap 20): every campaign that dialed this
+  // number keeps its own entry, so a redial under college B never rewrites
+  // the college of an older call made under college A.
+  const history = Array.isArray(prev.history) ? prev.history.slice(-19) : [];
+  if (!Array.isArray(prev.history) && prev.collegeName) {
+    history.push({
+      collegeName: prev.collegeName, universityId: prev.universityId || '',
+      applicationUrl: prev.applicationUrl || '', course: prev.course || '',
+      name: prev.name || '', dispatchedAt: prev.updatedAt || nowIso
+    });
+  }
+  history.push({
+    collegeName: info.collegeName || '', universityId: info.universityId || '',
+    applicationUrl: info.applicationUrl || '', course: info.course || '',
+    name: info.name || '', dispatchedAt: nowIso
+  });
+  CALL_TARGETS[key] = { ...prev, ...info, updatedAt: nowIso, history };
   fs.writeFile(CALL_TARGETS_FILE, JSON.stringify(CALL_TARGETS, null, 2), 'utf8').catch(() => {});
 }
 
-function getCallTarget(cleanPhone) {
-  return (cleanPhone && CALL_TARGETS[cleanPhone]) || null;
+// Campaign record for THIS call: nearest dispatch at or before the call date.
+// A later redial under another college never matches an older call.
+function getCallTargetForDate(cleanPhone, callDate) {
+  const entry = (cleanPhone && CALL_TARGETS[cleanPhone]) || null;
+  if (!entry) return null;
+  const hist = Array.isArray(entry.history) && entry.history.length > 0 ? entry.history : [{
+    collegeName: entry.collegeName, universityId: entry.universityId,
+    applicationUrl: entry.applicationUrl, course: entry.course,
+    name: entry.name, dispatchedAt: entry.updatedAt
+  }];
+  const c = callDate && callDate !== '—' ? Date.parse(callDate) : NaN;
+  if (isNaN(c)) {
+    // No call date yet (queued/pending item): current (latest) campaign applies.
+    const last = hist[hist.length - 1];
+    return last && last.collegeName ? { ...last, updatedAt: last.dispatchedAt } : null;
+  }
+  let best = null;
+  let bestT = -Infinity;
+  for (const h of hist) {
+    const t = Date.parse(h.dispatchedAt || '');
+    if (!isNaN(t) && t <= c + 5 * 60 * 1000 && t > bestT) { best = h; bestT = t; }
+  }
+  if (!best || !best.collegeName) return null;
+  return { ...best, updatedAt: best.dispatchedAt };
 }
 
 async function loadInterests() {
@@ -451,6 +589,7 @@ function resolveFinalCallStatus(item) {
   // 7. Explicit Interest
   const interestedKeywords = ['interested in college', 'looking for college', 'want admission', 'want to join', 'tell me fees', 'send details', 'send me the details', 'send the details', 'details in whatsapp', 'details on whatsapp', 'send it on whatsapp', 'send it to my whatsapp', 'whatsapp me', 'message me on whatsapp', 'on my whatsapp', 'send application', 'send the application', 'send me the application', 'application link', 'admission link', 'application of', 'fee structure', 'which college', 'which course', 'want to take admission', 'looking for admission', 'connect me with counselor', 'to join', 'whatsapp link', 'send me the link', 'send the link', 'share the link', 'జాయిన్', 'ఫీజు'];
   // Interest must come from the CALLER's speech — never the agent's greeting.
+  // Sheet transcripts use "Bot: ... | User: ..." pipe format; live logs use newlines.
   const __userParts = [];
   if (Array.isArray(item.interactions)) {
     item.interactions.forEach(t => {
@@ -460,20 +599,26 @@ function resolveFinalCallStatus(item) {
   const __conv = item.call_conversation || item.transcript || item.conversation || '';
   if (typeof __conv === 'string' && __conv) {
     __conv.replace(/<br\s*\/?>/gi, '\n').split('\n').forEach(line => {
-      const __m = line.match(/^\s*user\s*:(.*)$/i);
-      if (__m && __m[1].trim()) __userParts.push(__m[1].trim());
+      line.split('|').forEach(seg => {
+        const __m = seg.match(/^\s*user\s*:(.*)$/i);
+        if (__m && __m[1].trim()) __userParts.push(__m[1].trim());
+      });
     });
   }
   const __userText = __userParts.join(' ').toLowerCase();
-  const __interestText = __userText || fullText;
-  if (leadStatus === 'INTERESTED' || leadStatus === 'HOT LEAD' || leadStatus === 'QUALIFIED' || leadStatus.includes('HOT') || interestLevel === 'HIGH' || interestLevel === 'INTERESTED' || interestedKeywords.some(kw => __interestText.includes(kw))) {
+  const __hasUserSpeech = __userText.replace(/[^a-z0-9]/gi, '').length > 2;
+  // Keyword interest requires the CALLER's own words. Structured LLM verdicts
+  // (leadStatus INTERESTED/HOT) still count — they come from analysis, not greeting text.
+  const __kwInterest = __hasUserSpeech && interestedKeywords.some(kw => __userText.includes(kw));
+  if (leadStatus === 'INTERESTED' || leadStatus === 'HOT LEAD' || leadStatus === 'QUALIFIED' || leadStatus.includes('HOT') || interestLevel === 'HIGH' || interestLevel === 'INTERESTED' || __kwInterest) {
     return CALL_OUTCOME_STATUS.INTERESTED;
   }
 
-  // 8. Answered call fallback: if completed without positive interest, mark NOT_INTERESTED
+  // 8. Answered call fallback: completed but the caller NEVER spoke (cut/ignored
+  // in the first seconds) is NOT_ANSWERED — interest needs engagement.
   if (lowerCallStatus === 'completed' || outcome.includes('COMPLETED') || outcome.includes('ANSWERED')) {
-    if (__userText && (interestLevel === 'MEDIUM' || String(item.sentiment || '').toLowerCase() === 'positive')) {
-      return CALL_OUTCOME_STATUS.INTERESTED;
+    if (!__hasUserSpeech) {
+      return CALL_OUTCOME_STATUS.NOT_ANSWERED;
     }
     return CALL_OUTCOME_STATUS.NOT_INTERESTED;
   }
@@ -560,11 +705,35 @@ function normalizeRow(row, headers) {
 
   let effectiveLeadStatus = leadStatus;
 
+  // Fresh-call truth guard: a call that never connected (no-answer/busy/failed)
+  // or had zero human engagement (cut within seconds, no real talk) is
+  // NOT_ANSWERED — LLM Yes/No flags or summaries must never upgrade it.
+  const sheetStatusRaw = String(findValue(['call status', 'call_status', 'status'])).toLowerCase().trim();
+  const sheetUnanswered = ['failed', 'canceled', 'cancelled', 'busy', 'no-answer', 'no_answer', 'timeout', 'timedout', 'unreachable', 'missed', 'not answered', 'unanswered'].includes(sheetStatusRaw)
+    || sheetStatusRaw.includes('no answer') || sheetStatusRaw.includes('no-answer') || sheetStatusRaw.includes('missed')
+    || sheetStatusRaw.includes('busy') || sheetStatusRaw.includes('fail') || sheetStatusRaw.includes('unreach')
+    || sheetStatusRaw.includes('cancel') || sheetStatusRaw.includes('timeout');
+  const sheetTalkChars = String(fullConversation || '').replace(/(bot|agent|user)\s*:/gi, ' ').replace(/[^a-z0-9]/gi, '').length;
+  const sheetDurSec = parseFloat(findValue(['call duration in seconds', 'call_duration_in_seconds', 'call duration_in_seconds']))
+    || (parseFloat(findValue(['call duration in minutes', 'call_duration_in_minutes'])) * 60) || NaN;
+  // Caller-only speech from the transcript (pipe or newline format). A stray
+  // "hello"/"yes" inside a ≤5s call is a cut, not a conversation.
+  const sheetUserText = String(fullConversation || '').replace(/<br\s*\/?>/gi, '\n').split(/[\n|]/).map(s => {
+    const m = s.match(/^\s*user\s*:(.*)$/i);
+    return m ? m[1] : '';
+  }).join(' ').toLowerCase();
+  const sheetUserChars = sheetUserText.replace(/[^a-z0-9]/gi, '').length;
+  const sheetStrongFact = /(wrong number|wrong person|invalid number|not the right person|already joined|already enrolled|already admitted|already applied|submitted application|filled application)/i.test(sheetUserText);
+  const sheetNoEngagement = (!isNaN(sheetDurSec)
+    ? (sheetDurSec <= 5 && (sheetUserChars < 10 || sheetTalkChars < 60))
+    : (sheetTalkChars < 20 && sheetUserChars < 10)) && !sheetStrongFact;
+  const sheetIsNoAnswer = sheetUnanswered || sheetNoEngagement;
+
   // Explicit per-call verdict flags from the sheet (interested /
   // application_sent / callback / already_applied / already_joined /
-  // not_interested / wrong_invalid columns) always win over keyword
-  // guessing, so the dashboard mirrors the sheet exactly. Most advanced
-  // outcome wins when several flags are set together.
+  // not_interested / wrong_invalid columns) win over keyword guessing, so the
+  // dashboard mirrors the sheet — BUT never for calls that never connected.
+  // Most advanced outcome wins when several flags are set together.
   const flagYes = (keywords) => String(findValue(keywords)).trim().toLowerCase() === 'yes';
   const flagStatus =
     flagYes(['wrong invalid', 'wrong_invalid', 'wrong number']) ? CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID :
@@ -574,21 +743,37 @@ function normalizeRow(row, headers) {
     flagYes(['callback']) ? CALL_OUTCOME_STATUS.CALLBACK :
     flagYes(['not interested', 'not_interested']) ? CALL_OUTCOME_STATUS.NOT_INTERESTED :
     flagYes(['interested']) ? CALL_OUTCOME_STATUS.INTERESTED : '';
-  if (flagStatus) {
+  if (sheetIsNoAnswer) {
+    final_status = CALL_OUTCOME_STATUS.NOT_ANSWERED;
+    effectiveLeadStatus = CALL_OUTCOME_STATUS.NOT_ANSWERED;
+  } else if (flagStatus) {
     final_status = flagStatus;
     effectiveLeadStatus = flagStatus;
   }
 
-  // Manual overrides (e.g. APPLICATION_SENT after WhatsApp) so dashboard calculus updates
+  // Manual overrides (e.g. APPLICATION_SENT after WhatsApp). An override made
+  // for one specific call (matched by call id) always applies. A per-number
+  // override applies only if it is NEWER than this call row — so when the same
+  // number is dialed again, the fresh call's own verdict wins over the stale one.
   const cleanPhone = contactNumber.replace(/\D/g, '').slice(-10);
-  const manual = (cleanPhone && CALL_INTERESTS[cleanPhone]) || (id && CALL_INTERESTS[id]);
-  if (manual && manual.interestStatus) {
-    final_status = manual.interestStatus;
-    effectiveLeadStatus = manual.interestStatus;
+  const manualById = (id && CALL_INTERESTS[id]) || null;
+  const manualByPhone = (cleanPhone && CALL_INTERESTS[cleanPhone]) || null;
+  const manualToApply = (manualById && manualById.interestStatus) ? manualById
+    : (manualByPhone && manualByPhone.interestStatus && !sheetIsNoAnswer && (() => {
+      const callTime = Date.parse(callDate || '');
+      const manualTime = Date.parse(manualByPhone.updatedAt || '');
+      return isNaN(callTime) || isNaN(manualTime) || manualTime >= callTime;
+    })() ? manualByPhone : null);
+  if (manualToApply && manualToApply.interestStatus) {
+    final_status = manualToApply.interestStatus;
+    effectiveLeadStatus = manualToApply.interestStatus;
   }
 
-  // Campaign target memory: exact college this number was called with
-  const target = getCallTarget(cleanPhone);
+  // Campaign target memory: exact college this number was called with.
+  // Per-CALL lookup (nearest dispatch at/before this call's date): a number
+  // recycled across colleges keeps each call's own college. A later redial
+  // under college B never restamps an older call made under college A.
+  const target = getCallTargetForDate(cleanPhone, callDate);
   let effectivePreferredUniversity = preferredUniversity;
   let effectiveDiscussed = universitiesDiscussed;
   if (target && target.collegeName && (!preferredUniversity || preferredUniversity === '—')) {
@@ -1006,24 +1191,17 @@ function enrichCallWithInterest(callRecord) {
   const cleanPhone = phone.length === 10 ? phone : phone.slice(-10);
   const callId = String(callRecord.id || callRecord.call_id || '').trim();
 
-  const applyTargetMemory = (out, manualEntry) => {
-    // Campaign target memory: exact college + staged name this number was
-    // called with (survives restarts; transcript-detected college still wins).
-    const target = getCallTarget(cleanPhone);
+  const applyTargetMemory = (out) => {
+    // Same-campaign dispatch record only (nearest dispatch at/before this
+    // call's date): fills BLANK colleges, never overwrites a real college
+    // (transcript or manual edit) with another campaign's college.
+    const target = getCallTargetForDate(cleanPhone, callRecord.time_of_call || callRecord.call_date || callRecord.callDate || '');
     if (!target) return out;
-    const targetNewer = manualEntry?.updatedAt && target.updatedAt
-      && new Date(target.updatedAt).getTime() > new Date(manualEntry.updatedAt).getTime();
-    if ((!out.college || /Not Mentioned|Invalid Contact/.test(out.college)) || targetNewer) {
-      // Newer campaign record corrects a stale saved college (e.g. number
-      // re-called under a different college).
+    if (!out.college || /Not Mentioned|Invalid Contact/.test(out.college)) {
       out.college = target.collegeName || out.college;
     }
-    if ((!out.target_college || /Not Mentioned|Invalid Contact/.test(out.target_college)) || targetNewer) {
+    if (!out.target_college || /Not Mentioned|Invalid Contact/.test(out.target_college)) {
       out.target_college = target.collegeName || out.target_college;
-    }
-    if (targetNewer && out.details && target.applicationUrl) {
-      out.details = `${out.details} [College corrected to ${target.collegeName} from campaign record. Apply: ${target.applicationUrl}]`;
-      out.interest_details = out.details;
     }
     if (target.course && (!out.target_course || out.target_course === 'Not Mentioned in Call')) {
       out.target_course = target.course;
@@ -1068,16 +1246,24 @@ function enrichCallWithInterest(callRecord) {
       target_course: manual.course && !/�/.test(manual.course) ? manual.course : analyzed.course,
       interest_details: manual.details || manual.notes || analyzed.details,
       summary: manual.notes ? `${callRecord.summary || ''} [Notes: ${manual.notes}]` : callRecord.summary
-    }, manual);
+    });
   }
 
   const interestData = analyzeCallInterest(callRecord);
 
   // OmniDimension's own structured verdict (extracted_variables) wins over
   // keyword guessing — it is the same source that feeds the Google Sheet,
-  // so live rows and sheet rows classify identically.
+  // so live rows and sheet rows classify identically. BUT never for calls
+  // that never connected: hallucinated Yes flags on no-answer/empty calls
+  // must not upgrade them.
   const ev = callRecord.extracted_variables || {};
   const evYes = (k) => String(ev[k] ?? '').trim().toLowerCase() === 'yes';
+  const evStatusRaw = String(callRecord.call_status || callRecord.status || '').toLowerCase();
+  const evUnanswered = ['failed', 'canceled', 'cancelled', 'busy', 'no-answer', 'no_answer', 'timeout', 'timedout', 'unreachable', 'missed', 'not answered', 'unanswered'].includes(evStatusRaw)
+    || /no.answer|missed|busy|fail|unreach|cancel|timeout/.test(evStatusRaw);
+  const evTalkChars = String(callRecord.call_conversation || callRecord.transcript || '').replace(/(bot|agent|user)\s*:/gi, ' ').replace(/[^a-z0-9]/gi, '').length;
+  const evDurSec = parseFloat(callRecord.call_duration_in_seconds ?? callRecord.duration_in_seconds ?? NaN);
+  const evNoEngagement = evTalkChars < 20 && (isNaN(evDurSec) || evDurSec <= 5);
   const evStatus =
     evYes('wrong_invalid') ? CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID :
     evYes('already_joined') ? CALL_OUTCOME_STATUS.ALREADY_JOINED :
@@ -1086,7 +1272,7 @@ function enrichCallWithInterest(callRecord) {
     evYes('callback') ? CALL_OUTCOME_STATUS.CALLBACK :
     evYes('not_interested') ? CALL_OUTCOME_STATUS.NOT_INTERESTED :
     (evYes('Interested') || evYes('interested')) ? CALL_OUTCOME_STATUS.INTERESTED : '';
-  if (evStatus) interestData.interestStatus = evStatus;
+  if (evStatus && !(evUnanswered || evNoEngagement)) interestData.interestStatus = evStatus;
 
   // Recover the student's name (user_name is the account holder, not the student).
   const recoveredLiveName = extractStudentName(callRecord);
@@ -1101,7 +1287,7 @@ function enrichCallWithInterest(callRecord) {
     target_college: interestData.college,
     target_course: interestData.course,
     interest_details: interestData.details
-  }, null);
+  });
 }
 
 function buildAdmissionMessage({ studentName, collegeName, applicationUrl }) {
@@ -1648,7 +1834,7 @@ app.get('/api/colleges', async (req, res) => {
 
 app.post('/api/colleges', async (req, res) => {
   try {
-    const { name, place, websiteUrl, description, agentId, languages, courses, id } = req.body;
+    const { name, place, websiteUrl, description, agentId, languages, courses, id, kbFileName, kbFileData, kbRemove } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, error: 'College name is required.' });
     }
@@ -1665,35 +1851,87 @@ app.post('/api/colleges', async (req, res) => {
         return res.status(404).json({ success: false, error: 'College not found.' });
       }
       const existing = currentList[idx];
+      const resolvedAgentId = agentId ? Number(agentId) : existing.agentId;
+      let kbPatch = {};
+      let kbWarning = null;
+      // Remove existing KB link (detach best-effort)
+      if (kbRemove && existing.kbFileId) {
+        try { await omnidimKBDetach([existing.kbFileId], resolvedAgentId); } catch (e) { kbWarning = e.message; }
+        kbPatch = { kbFileId: null, kbFileName: '', kbAttachedAt: null };
+        addLog('warning', `Removed KB "${existing.kbFileName || existing.kbFileId}" from ${existing.name}.`);
+      }
+      // Upload + attach new PDF (replaces old link)
+      if (kbFileData && String(kbFileData).length > 100) {
+        try {
+          let b64 = String(kbFileData);
+          const comma = b64.indexOf(',');
+          if (b64.startsWith('data:') && comma !== -1) b64 = b64.slice(comma + 1);
+          if (b64.length > 20 * 1024 * 1024) throw new Error('PDF too large (max ~15MB).');
+          let safeName = String(kbFileName || `${name.trim()}-kb.pdf`).replace(/[^\w.\-() ]+/g, '').trim() || 'college-kb.pdf';
+          if (!/\.pdf$/i.test(safeName)) safeName += '.pdf';
+          const { fileId } = await omnidimKBCreate(b64, safeName);
+          if (existing.kbFileId && Number(existing.kbFileId) !== Number(fileId)) {
+            try { await omnidimKBDetach([existing.kbFileId], resolvedAgentId); } catch {}
+          }
+          await omnidimKBAttach([fileId], resolvedAgentId, `Use this document ONLY when calling for ${name.trim()} admissions. Ignore for other colleges.`);
+          kbPatch = { kbFileId: Number(fileId), kbFileName: safeName, kbAttachedAt: new Date().toISOString() };
+          addLog('success', `KB uploaded for "${name.trim()}": ${safeName} (file ${fileId}, agent ${resolvedAgentId}).`);
+        } catch (e) {
+          kbWarning = e.message;
+          addLog('error', `KB upload failed for "${name.trim()}": ${e.message}`);
+        }
+      }
       currentList[idx] = {
         ...existing,
         name: name.trim(),
         place: place !== undefined ? String(place).trim() || 'India' : existing.place,
-        agentId: agentId ? Number(agentId) : existing.agentId,
+        agentId: resolvedAgentId,
         languages: languages !== undefined ? String(languages).trim() || existing.languages : existing.languages,
         courses: courses !== undefined ? normCourses(courses) : (existing.courses || []),
         websiteUrl: websiteUrl !== undefined ? String(websiteUrl).trim() : existing.websiteUrl,
         description: description !== undefined ? String(description).trim() : existing.description,
+        ...kbPatch,
         updatedAt: new Date().toISOString()
       };
       await saveColleges(currentList);
       broadcast({ type: 'colleges', data: currentList });
 
       addLog('success', `Updated college: "${currentList[idx].name}" (${id})`);
-      return res.json({ success: true, college: currentList[idx], colleges: currentList, data: currentList });
+      return res.json({ success: true, college: currentList[idx], colleges: currentList, data: currentList, kbWarning });
     }
 
     const newId = `college-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const resolvedNewAgent = Number(agentId) || getAgentId();
+    let newKb = {};
+    let newKbWarning = null;
+    if (kbFileData && String(kbFileData).length > 100) {
+      try {
+        let b64 = String(kbFileData);
+        const comma = b64.indexOf(',');
+        if (b64.startsWith('data:') && comma !== -1) b64 = b64.slice(comma + 1);
+        if (b64.length > 20 * 1024 * 1024) throw new Error('PDF too large (max ~15MB).');
+        let safeName = String(kbFileName || `${name.trim()}-kb.pdf`).replace(/[^\w.\-() ]+/g, '').trim() || 'college-kb.pdf';
+        if (!/\.pdf$/i.test(safeName)) safeName += '.pdf';
+        const { fileId } = await omnidimKBCreate(b64, safeName);
+        await omnidimKBAttach([fileId], resolvedNewAgent, `Use this document ONLY when calling for ${name.trim()} admissions. Ignore for other colleges.`);
+        newKb = { kbFileId: Number(fileId), kbFileName: safeName, kbAttachedAt: new Date().toISOString() };
+        addLog('success', `KB uploaded for "${name.trim()}": ${safeName} (file ${fileId}, agent ${resolvedNewAgent}).`);
+      } catch (e) {
+        newKbWarning = e.message;
+        addLog('error', `KB upload failed for "${name.trim()}": ${e.message}`);
+      }
+    }
     const newCollege = {
       id: newId,
       name: name.trim(),
       place: place ? place.trim() : 'India',
-      agentId: Number(agentId) || getAgentId(),
+      agentId: resolvedNewAgent,
       languages: languages && String(languages).trim() ? String(languages).trim() : 'English, Hindi, Telugu',
       courses: normCourses(courses),
       status: 'active',
       websiteUrl: websiteUrl ? websiteUrl.trim() : '',
       description: description ? description.trim() : '',
+      ...newKb,
       createdAt: new Date().toISOString()
     };
 
@@ -1702,7 +1940,7 @@ app.post('/api/colleges', async (req, res) => {
     broadcast({ type: 'colleges', data: updatedList });
 
     addLog('success', `Added new college: "${newCollege.name}" (Agent ID: ${newCollege.agentId})`);
-    res.json({ success: true, college: newCollege, colleges: updatedList, data: updatedList });
+    res.json({ success: true, college: newCollege, colleges: updatedList, data: updatedList, kbWarning: newKbWarning });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -1717,6 +1955,12 @@ app.delete('/api/colleges/:id', async (req, res) => {
       return res.status(404).json({ success: false, error: 'College not found.' });
     }
 
+    // Best-effort: detach its KB so the shared agent stops answering from it.
+    if (target.kbFileId) {
+      try { await omnidimKBDetach([target.kbFileId], target.agentId || getAgentId()); } catch (e) {
+        addLog('warning', `KB detach on delete warning for ${target.name}: ${e.message}`);
+      }
+    }
     const updatedList = currentList.filter(c => c.id !== id);
     await saveColleges(updatedList);
     broadcast({ type: 'colleges', data: updatedList });
@@ -1729,7 +1973,7 @@ app.delete('/api/colleges/:id', async (req, res) => {
 });
 
 // 1. Batch & Sequential Calling API
-app.post('/api/queue/start', (req, res) => {
+app.post('/api/queue/start', async (req, res) => {
   const { contacts, delaySeconds, agentId, universityName, universityId, collegePlace, applicationUrl, course } = req.body;
 
   if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
@@ -1798,13 +2042,28 @@ app.post('/api/queue/start', (req, res) => {
     course: ct.course || CAMPAIGN_STATE.course || ''
   }));
 
+  // KB isolation: attach ONLY this college's PDF to the shared agent (best-effort).
+  let kbSwap = null;
+  try {
+    const allColleges = await loadColleges();
+    const selected = allColleges.find(c => c.id === String(universityId || '')) ||
+      allColleges.find(c => (c.name || '').toLowerCase() === String(CAMPAIGN_STATE.universityName || '').toLowerCase()) || {
+        id: String(universityId || ''), name: CAMPAIGN_STATE.universityName, agentId: CAMPAIGN_STATE.agentId
+      };
+    const enriched = allColleges.find(c => c.id === selected.id) || selected;
+    kbSwap = await syncAgentKBForCollege(enriched, allColleges);
+  } catch (e) {
+    addLog('warning', `KB swap skipped: ${e.message}`);
+  }
+
   // Kick off sequential execution
   processNextInQueue();
 
   res.json({
     success: true,
     message: `Started sequential calling campaign with ${parsedQueue.length} contacts.`,
-    totalCount: parsedQueue.length
+    totalCount: parsedQueue.length,
+    kbSwap
   });
 });
 

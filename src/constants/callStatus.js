@@ -141,6 +141,17 @@ const NOT_INTERESTED_KEYWORDS = [
   'not required', 'bad timing', 'stop calling', 'not interested in any college'
 ];
 
+// Talk-time parser: handles "1:52", "0:00", 52, "52.0", "—" -> seconds or NaN.
+function parseTalkSeconds(v) {
+  if (v === null || v === undefined) return NaN;
+  const s = String(v).trim();
+  if (!s || s === '—' || s === '-') return NaN;
+  const mss = s.match(/^(\d+):(\d{1,2})(?:\.(\d+))?$/);
+  if (mss) return Number(mss[1]) * 60 + Number(mss[2]);
+  const n = parseFloat(s);
+  return isNaN(n) ? NaN : n;
+}
+
 const EXPLICIT_INTEREST_KEYWORDS = [
   'interested in college', 'looking for college', 'want admission', 'want to join',
   'tell me fees', 'send details', 'send me the details', 'send the details',
@@ -162,11 +173,11 @@ const EXPLICIT_INTEREST_KEYWORDS = [
 export function resolveCallFinalStatus(item) {
   if (!item) return CALL_OUTCOME_STATUS.NOT_ANSWERED;
 
-  // 1. Direct structured final_status / finalStatus
+  // Stored verdict (server sheet truth / manual override). It is returned
+  // only after the engagement + unanswered guards below — a stored INTERESTED
+  // on a call the human never joined is a stale error, not truth.
   const directStatus = String(item.final_status || item.finalStatus || '').toUpperCase().trim();
-  if (directStatus && CALL_OUTCOME_STATUS[directStatus]) {
-    return CALL_OUTCOME_STATUS[directStatus];
-  }
+  const hasDirectStatus = Boolean(directStatus && CALL_OUTCOME_STATUS[directStatus]);
 
   const outcome = String(item.callOutcome || item.call_status || item.status || '').toUpperCase().trim();
   const leadStatus = String(item.leadStatus || item.lead_status || '').toUpperCase().trim();
@@ -194,16 +205,39 @@ export function resolveCallFinalStatus(item) {
   const convStr = item.call_conversation || item.transcript || item.conversation || '';
   if (typeof convStr === 'string' && convStr) {
     convStr.replace(/<br\s*\/?>/gi, '\n').split('\n').forEach(line => {
-      const m = line.match(/^\s*user\s*:(.*)$/i);
-      if (m && m[1].trim()) userParts.push(m[1].trim());
+      line.split('|').forEach(seg => {
+        const m = seg.match(/^\s*user\s*:(.*)$/i);
+        if (m && m[1].trim()) userParts.push(m[1].trim());
+      });
     });
   }
   const userText = userParts.join(' ').toLowerCase();
-  const interestText = userText || fullText;
+  const hasUserSpeech = userText.replace(/[^a-z0-9]/gi, '').length > 2;
+  // Keyword interest needs the CALLER's own words — agent greeting text never counts.
 
-  // 1b. Answered but the caller said NOTHING (hung up mid-greeting) = Not Interested
+  // 1b. No human engagement at all (cut/ignored within seconds, caller never
+  // spoke — or only a stray "hello" in a ≤5s call) is NOT_ANSWERED, even if
+  // the carrier marks the leg "completed". A verdict of interest is
+  // impossible without engagement, so this guard runs before any stored
+  // final_status.
+  const durSecPre = parseTalkSeconds(item.call_duration_in_seconds ?? item.duration_in_seconds ?? item.callDuration ?? item.duration ?? item.call_duration ?? NaN);
+  const talkCharsPre = String(item.call_conversation || item.transcript || item.conversation || '').replace(/(bot|agent|user)\s*:/gi, ' ').replace(/[^a-z0-9]/gi, '').length;
+  const userCharsPre = userText.replace(/[^a-z0-9]/gi, '').length;
+  // A "yes"/"hello" inside a ≤5s call is a cut, not a conversation.
+  const noEngagementPre = !isNaN(durSecPre)
+    ? (durSecPre <= 5 && (userCharsPre < 10 || talkCharsPre < 60))
+    : (!hasUserSpeech && talkCharsPre < 60);
+  // Factual identity verdicts ("wrong number", "already joined/applied") stay
+  // valid even in a 4-second call — only interest-style verdicts need talk time.
+  const strongFactPre = /(wrong number|wrong person|invalid number|not the right person|already joined|already enrolled|already admitted|already applied|submitted application|filled application)/i.test(userText);
+  if (noEngagementPre && !strongFactPre) {
+    return CALL_OUTCOME_STATUS.NOT_ANSWERED;
+  }
+
+  // 1c. Answered but the caller said NOTHING (hung up mid-greeting after real
+  // talk time) = Not Interested.
   const lowerCallStatusPre = String(item.call_status || item.status || '').toLowerCase().trim();
-  if (!userText && (lowerCallStatusPre === 'completed' || fullText.length > 0) && !directStatus) {
+  if (!userText && (lowerCallStatusPre === 'completed' || fullText.length > 0) && !hasDirectStatus) {
     return CALL_OUTCOME_STATUS.NOT_INTERESTED;
   }
 
@@ -221,6 +255,12 @@ export function resolveCallFinalStatus(item) {
     outcome === 'NO_ANSWER'
   ) {
     return CALL_OUTCOME_STATUS.NOT_ANSWERED;
+  }
+
+  // 2b. Stored verdict — the call had real engagement and a connected status,
+  // so the sheet/manual verdict is authoritative.
+  if (hasDirectStatus) {
+    return CALL_OUTCOME_STATUS[directStatus];
   }
 
   // 3. Wrong Number / Invalid
@@ -280,11 +320,11 @@ export function resolveCallFinalStatus(item) {
   }
 
   // 8. Explicitly Interested (Strict check: verified interest, hot lead, or explicit affirmative)
-  // Matched against the CALLER's speech only — never the agent's greeting.
+  // Keyword matching needs the CALLER's own words — agent greeting text never counts.
   if (
     leadStatus === 'INTERESTED' || leadStatus === 'HOT LEAD' || leadStatus === 'QUALIFIED' ||
     leadStatus.includes('HOT') || interestLevel === 'HIGH' || interestLevel === 'INTERESTED' ||
-    EXPLICIT_INTEREST_KEYWORDS.some(kw => interestText.includes(kw))
+    (hasUserSpeech && EXPLICIT_INTEREST_KEYWORDS.some(kw => userText.includes(kw)))
   ) {
     return CALL_OUTCOME_STATUS.INTERESTED;
   }
@@ -292,8 +332,12 @@ export function resolveCallFinalStatus(item) {
   // 9. If answered and transcript/summary exists without positive interest
   // DO NOT blindly mark as INTERESTED!
   if (lowerCallStatus === 'completed' || outcome.includes('COMPLETED') || outcome.includes('ANSWERED')) {
+    // Cut before engaging (caller never spoke) = not answered, not interested
+    if (!hasUserSpeech) {
+      return CALL_OUTCOME_STATUS.NOT_ANSWERED;
+    }
     // Positive signal needs the CALLER's own words — agent-only speech is a hang-up
-    if (userText && (interestLevel === 'MEDIUM' || String(item.sentiment || '').toLowerCase() === 'positive')) {
+    if (interestLevel === 'MEDIUM' || String(item.sentiment || '').toLowerCase() === 'positive') {
       return CALL_OUTCOME_STATUS.INTERESTED;
     }
     // Otherwise it is neutral/not interested, not "Interested"
