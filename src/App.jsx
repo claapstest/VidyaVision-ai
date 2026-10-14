@@ -738,18 +738,25 @@ export default function App() {
     }
 
     const newContact = {
-      id: `staged-${Date.now()}`,
+      id: `staged-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       phone: singlePhone,
       formattedPhone: formatted,
       name: singleName.trim(),
       hasName: Boolean(singleName.trim())
     };
 
-    setTempContacts([newContact]);
+    setTempContacts(prev => {
+      const exists = prev.some(c => c.phone === singlePhone || c.formattedPhone === formatted);
+      if (exists) {
+        addToast(`Number ${formatted} is already in the imported list.`, 'info');
+        return prev;
+      }
+      return [...prev, newContact];
+    });
     setTempInputMode('manual');
     setSinglePhone('');
     setSingleName('');
-    addToast(`Contact loaded! Please select University Bot below to stage it.`, 'success');
+    addToast(`Imported ${singleName.trim() ? singleName.trim() + ' (' + formatted + ')' : formatted}!`, 'success');
   };
 
   // Handle Bulk Paste Input
@@ -794,10 +801,14 @@ export default function App() {
     if (newItems.length === 0) {
       addToast('No valid 10-digit Indian mobile numbers found in text.', 'error');
     } else {
-      setTempContacts(newItems);
+      setTempContacts(prev => {
+        const existingPhones = new Set(prev.map(c => c.phone));
+        const filteredNew = newItems.filter(item => !existingPhones.has(item.phone));
+        return [...prev, ...filteredNew];
+      });
       setTempInputMode('bulk');
       setBulkText('');
-      addToast(`Imported ${newItems.length} contacts! Select university and delay below.`, 'success');
+      addToast(`Imported ${newItems.length} contacts!`, 'success');
     }
   };
 
@@ -906,6 +917,12 @@ export default function App() {
     setStagedContacts(prev => prev.filter(c => c.id !== id));
   };
 
+  // Remove temporarily imported contact
+  const removeTempContact = (id) => {
+    setTempContacts(prev => prev.filter(c => c.id !== id));
+    addToast('Removed contact from imported list.', 'info');
+  };
+
   // Clear all staged contacts
   const clearStagedContacts = () => {
     setStagedContacts([]);
@@ -1006,6 +1023,29 @@ export default function App() {
       const res = await fetch('/api/queue/cancel', { method: 'POST' });
       if (res.ok) addToast('Campaign cancelled', 'info');
     } catch (err) { addToast('Error cancelling campaign', 'error'); }
+  };
+
+  const handleClearCampaignQueue = async () => {
+    try {
+      const res = await fetch('/api/queue/clear', { method: 'POST' });
+      if (res.ok) {
+        setActiveQueue([]);
+        setCampaignState(prev => ({
+          ...prev,
+          isRunning: false,
+          isPaused: false,
+          currentContactIndex: 0,
+          totalCount: 0,
+          completedCount: 0,
+          answeredCount: 0,
+          unansweredCount: 0
+        }));
+        setCurrentCall(null);
+        addToast('Campaign queue cleared. You can now stage a new batch.', 'info');
+      }
+    } catch (err) {
+      addToast('Error resetting campaign queue', 'error');
+    }
   };
 
   const handleClearLogs = async () => {
@@ -1605,8 +1645,15 @@ export default function App() {
     };
 
     const rf = call.rawFields || {};
-    const interested = normalizeFlag(rf.Interested ?? rf.interested, isInterested(call));
-    const applicationSent = normalizeFlag(rf.application_sent ?? rf['Application Sent'], isApplicationSent(call));
+    const interested = normalizeFlag(rf.Interested ?? rf.interested, isInterestedLead(call));
+
+    let applicationSentStatus = 'No';
+    if (isAns) {
+      if (isApplicationSent(call)) applicationSentStatus = 'Sent';
+      else if (isInterested(call)) applicationSentStatus = 'To be sent';
+      else if (rf.application_sent && String(rf.application_sent).toLowerCase() === 'yes') applicationSentStatus = 'Sent';
+    }
+
     const callback = normalizeFlag(rf.callback ?? rf.Callback, isCallback(call));
     const alreadyApplied = normalizeFlag(rf.already_applied ?? rf['Already Applied'], isAlreadyApplied(call));
     const alreadyJoined = normalizeFlag(rf.already_joined ?? rf['Already Joined'], isAlreadyJoined(call));
@@ -1630,19 +1677,22 @@ export default function App() {
 
     return {
       'S.No': idx + 1,
-      'Name': studentName,
+      'Recipient Name': studentName,
       'Phone Number': phoneNumber,
       'College Name': collegeName,
-      'Calls Answered': callsAnswered,
-      'Calls Not Answered': callsNotAnswered,
-      'Interested': interested,
-      'Application Sent': applicationSent,
-      'Callback': callback,
-      'Already Applied': alreadyApplied,
+      'Target Course': call.target_course || call.course || 'General',
+      'Dialing Status': isAns ? 'Answered' : (call.call_status || 'Not Answered'),
+      'Call Duration': formatDuration(call.callDuration || call.call_duration || call.duration || 0),
+      'Call Answered': callsAnswered,
+      'Interest Level': interested,
       'Already Joined': alreadyJoined,
+      'Counsellor Follow-up': counsellorFollowup,
+      'Application Sent': applicationSentStatus,
+      'Already Applied': alreadyApplied,
+      'Callback': callback,
       'Not Interested': notInterested,
       'Wrong / Invalid': wrongInvalid,
-      'Counsellor Follow-up': counsellorFollowup,
+      'AI Call Outcome': call.final_status || call.finalStatus || call.interestStatus || (isAns ? 'ANSWERED' : 'NOT_ANSWERED'),
       'Call Summary': callSummary,
       'Call Transcript / Full Conversation': callTranscript
     };
@@ -2095,6 +2145,284 @@ export default function App() {
   // Sort the final list
   const finalDashboardList = sortCalls(searchFiltered, sortBy);
 
+  // Export Current/Active Campaign Batch to Excel (Only this session's contacts)
+  const handleExportCampaignBatch = () => {
+    if (!activeQueue || activeQueue.length === 0) {
+      addToast('No active or recent campaign batch to export.', 'warning');
+      return;
+    }
+
+    const workbook = XLSX.utils.book_new();
+    const targetUni = universities.find(u => u.id === selectedUniversity);
+    const collegeName = campaignState.universityName || targetUni?.name || 'Campaign_Batch';
+
+    // Map each contact in the active queue to detailed Excel columns
+    const batchData = activeQueue.map((q, idx) => {
+      const cleanPhone = String(q.formattedPhone || q.phone || '').replace(/\D/g, '').slice(-10);
+
+      // 1. Queue contact's own state (direct from live campaign runner)
+      const isQueueAnswered = q.status === 'completed';
+      const isQueueFailedOrCut = q.status === 'no-answer' || (q.reason && q.status !== 'completed');
+
+      // 2. Find matching live call (prioritize live OmniDimension calls sorted newest first, NEVER ancient Google Sheets)
+      let match = q.matchedCall || null;
+      if (!match && q.callId) {
+        match = calls.find(c => String(c.id || c.call_id || '') === String(q.callId)) || null;
+      }
+      if (!match && cleanPhone) {
+        const liveMatches = calls.filter(c => {
+          const cPhone = String(c.to_number || c.phone_number || c.to || '').replace(/\D/g, '').slice(-10);
+          return cPhone && cPhone === cleanPhone;
+        });
+        if (liveMatches.length > 0) match = liveMatches[0];
+      }
+      if (!match && !isQueueFailedOrCut) {
+        match = mergedCalls.find(c => {
+          const cPhone = String(c.contactNumber || c.to_number || c.phone_number || c.to || '').replace(/\D/g, '').slice(-10);
+          return cPhone && cPhone === cleanPhone;
+        }) || null;
+      }
+
+      // 3. Determine genuine answered state for THIS call
+      let isAns = false;
+      if (isQueueAnswered) {
+        isAns = true;
+      } else if (isQueueFailedOrCut) {
+        isAns = false;
+      } else if (match) {
+        const mStatus = String(match.call_status || match.status || '').toLowerCase();
+        isAns = (mStatus === 'completed' || isAnswered(match)) && mStatus !== 'no-answer' && !isUnanswered(match);
+      }
+
+      // Duration: if not answered or cut, duration is 0:00
+      let dur = '0:00';
+      if (isAns) {
+        dur = q.duration && q.duration !== '0:00' && q.duration !== '—'
+          ? q.duration
+          : (match ? formatDuration(match.callDuration || match.call_duration || match.duration) : '0:00');
+      }
+
+      // Dialing Status
+      let dialingStatus = 'Not Reached';
+      if (isAns) {
+        dialingStatus = 'Answered';
+      } else if (q.status === 'in-progress') {
+        dialingStatus = 'Dialing...';
+      } else if (q.status === 'queued') {
+        dialingStatus = 'Queued';
+      } else if (q.reason) {
+        dialingStatus = `Not Answered (${q.reason})`;
+      } else if (q.status === 'no-answer') {
+        dialingStatus = 'Not Answered (Call Cut / Missed)';
+      } else if (match?.call_status) {
+        dialingStatus = String(match.call_status).toUpperCase();
+      }
+
+      // Recipient Name: Staged contact name ALWAYS takes precedence over old history!
+      const studentName = (q.name && q.name !== '—' && q.name !== 'Student')
+        ? q.name
+        : (match && match.studentName && match.studentName !== '—' && match.studentName !== 'Student' ? match.studentName : (q.name || 'Student'));
+
+      // If NOT answered (e.g. cut, missed, busy, failed):
+      // All outcome flags MUST be 'No', Application Sent MUST be 'No', Transcript MUST reflect not answered!
+      let callAnswered = 'No';
+      let interestLevel = 'No';
+      let alreadyJoined = 'No';
+      let counsellorFollowup = 'No';
+      let applicationSentStatus = 'No';
+      let alreadyApplied = 'No';
+      let callback = 'No';
+      let notInterested = 'No';
+      let wrongInvalid = 'No';
+      let aiVerdict = 'NOT_ANSWERED';
+      let summary = q.reason ? `Call not answered (${q.reason}).` : 'Call was cut / not answered.';
+      let transcript = 'Call not connected / No conversation';
+
+      if (isAns && match) {
+        callAnswered = 'Yes';
+        aiVerdict = match.final_status || match.finalStatus || match.interestStatus || resolveCallFinalStatus(match);
+
+        const normalizeFlag = (sheetVal, fallbackBool) => {
+          if (sheetVal !== undefined && sheetVal !== null && String(sheetVal).trim() !== '') {
+            const s = String(sheetVal).trim().toLowerCase();
+            if (s === 'yes' || s === 'true' || s === '1') return 'Yes';
+            if (s === 'no' || s === 'false' || s === '0') return 'No';
+          }
+          return fallbackBool ? 'Yes' : 'No';
+        };
+
+        const rf = match.rawFields || {};
+
+        // Interest Level
+        const interestBool = isInterested(match) || isApplicationSent(match);
+        interestLevel = normalizeFlag(rf.Interested ?? rf.interested ?? rf.interest_level, interestBool);
+
+        // Application Sent
+        if (isApplicationSent(match)) {
+          applicationSentStatus = 'Sent';
+        } else if (isInterested(match)) {
+          applicationSentStatus = 'To be sent';
+        } else if (rf.application_sent && String(rf.application_sent).toLowerCase() === 'yes') {
+          applicationSentStatus = 'Sent';
+        }
+
+        // Already Joined
+        alreadyJoined = normalizeFlag(rf.already_joined ?? rf['Already Joined'], isAlreadyJoined(match));
+
+        // Counsellor Follow-up
+        counsellorFollowup = normalizeFlag(rf.counsellor_follow_up ?? rf.counselor_follow_up ?? rf.counselor_followup, isCounselorFollowupRequired(match));
+
+        // Already Applied
+        alreadyApplied = normalizeFlag(rf.already_applied ?? rf['Already Applied'], isAlreadyApplied(match));
+
+        // Callback
+        callback = normalizeFlag(rf.callback ?? rf.Callback, isCallback(match));
+
+        // Not Interested
+        notInterested = normalizeFlag(rf.not_interested ?? rf['Not Interested'], isNotInterested(match));
+
+        // Wrong / Invalid
+        wrongInvalid = normalizeFlag(rf.wrong_invalid ?? rf['Wrong Invalid'] ?? rf.wrong_number, isWrongNumber(match));
+
+        summary = (match.summary && match.summary !== '—' && match.summary !== 'Not provided' ? match.summary : '')
+          || rf.call_summary
+          || rf.summary
+          || 'Call completed.';
+
+        const rawTranscript = match.call_conversation
+          || match.transcript
+          || rf.full_conversation
+          || (Array.isArray(match.interactions) && match.interactions.length > 0
+              ? match.interactions.map(it => `${it.user_query ? `User: ${it.user_query}` : ''}${it.user_query && it.bot_response ? ' | ' : ''}${it.bot_response ? `Bot: ${it.bot_response}` : ''}`).filter(Boolean).join('\n')
+              : '');
+        transcript = rawTranscript ? String(rawTranscript).replace(/<br\s*\/?>/gi, '\n').trim() : 'Call completed (no transcript available)';
+      } else if (isAns && !match) {
+        callAnswered = 'Yes';
+        aiVerdict = 'ANSWERED';
+        summary = 'Call was completed.';
+        transcript = 'Call completed (transcript processing...)';
+      }
+
+      return {
+        'S.No': idx + 1,
+        'Recipient Name': studentName,
+        'Phone Number': q.formattedPhone || q.phone || '—',
+        'College Name': q.universityName || collegeName,
+        'Target Course': q.course || selectedCourse || 'General',
+        'Dialing Status': dialingStatus,
+        'Call Duration': dur,
+        'Call Answered': callAnswered,
+        'Interest Level': interestLevel,
+        'Already Joined': alreadyJoined,
+        'Counsellor Follow-up': counsellorFollowup,
+        'Application Sent': applicationSentStatus,
+        'Already Applied': alreadyApplied,
+        'Callback': callback,
+        'Not Interested': notInterested,
+        'Wrong / Invalid': wrongInvalid,
+        'AI Call Outcome': aiVerdict,
+        'Call Summary': summary,
+        'Call Transcript / Full Conversation': transcript
+      };
+    });
+    const wsBatch = XLSX.utils.json_to_sheet(batchData);
+    wsBatch['!cols'] = calculateColWidths(batchData);
+    XLSX.utils.book_append_sheet(workbook, wsBatch, "Campaign Batch Calls");
+
+    // 2. Executive Batch Summary Sheet
+    const totalCount = activeQueue.length;
+    const ansCount = activeQueue.filter(q => q.status === 'completed').length;
+    const unansCount = totalCount - ansCount;
+    const ansRate = totalCount > 0 ? `${Math.round((ansCount / totalCount) * 100)}%` : '0%';
+
+    const summaryRows = [
+      { 'Campaign Metric': 'Target University', 'Value': collegeName },
+      { 'Campaign Metric': 'Total Contacts in Batch', 'Value': totalCount },
+      { 'Campaign Metric': 'Calls Answered', 'Value': ansCount },
+      { 'Campaign Metric': 'Calls Not Answered / Failed', 'Value': unansCount },
+      { 'Campaign Metric': 'Answer / Pickup Rate', 'Value': ansRate },
+      { 'Campaign Metric': 'Batch Export Date', 'Value': new Date().toLocaleString() }
+    ];
+    const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
+    wsSummary['!cols'] = [{ wch: 30 }, { wch: 35 }];
+    XLSX.utils.book_append_sheet(workbook, wsSummary, "Batch Summary");
+
+    // 3. Interested Leads Sheet (if any)
+    const interestedCalls = batchData.filter(b => b['AI Call Outcome'] === 'INTERESTED' || b['AI Call Outcome'] === 'APPLICATION_SENT');
+    if (interestedCalls.length > 0) {
+      const wsInt = XLSX.utils.json_to_sheet(interestedCalls);
+      wsInt['!cols'] = calculateColWidths(interestedCalls);
+      XLSX.utils.book_append_sheet(workbook, wsInt, "Interested Leads");
+    }
+
+    const cleanScopeName = collegeName.replace(/[^a-zA-Z0-9]/g, '_');
+    XLSX.writeFile(workbook, `${cleanScopeName}_Campaign_Batch_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    addToast(`Exported ${totalCount} campaign batch calls to Excel!`, 'success');
+  };
+
+  // Export Recent OmniDimension Calls to Excel
+  const handleExportRecentCalls = () => {
+    if (!calls || calls.length === 0) {
+      addToast('No recent calls available to export.', 'warning');
+      return;
+    }
+
+    const workbook = XLSX.utils.book_new();
+    const data = calls.map((c, idx) => {
+      const contact = c.to_number || c.phone_number || c.to || '—';
+      const status = c.call_status || c.status || '—';
+      const dur = formatDuration(c.call_duration || c.duration || '—');
+      const id = c.id || c.call_log_id || `call-${idx}`;
+      const rawTranscript = c.call_conversation || c.transcript || c.conversation || '';
+      const transcript = rawTranscript ? String(rawTranscript).replace(/<br\s*\/?>/gi, '\n').trim() : '—';
+      const summary = c.interest_details || c.summary || c.call_summary || '—';
+      const outcome = c.final_status || c.finalStatus || c.interestStatus || status;
+
+      const isAns = status.toLowerCase() === 'completed' || isAnswered(c);
+      const callAnswered = isAns ? 'Yes' : 'No';
+      const interestLevel = isInterestedLead(c) ? 'Yes' : 'No';
+      const applicationSent = isApplicationSent(c) ? 'Sent' : (isInterested(c) ? 'To be sent' : 'No');
+      const alreadyJoined = isAlreadyJoined(c) ? 'Yes' : 'No';
+      const alreadyApplied = isAlreadyApplied(c) ? 'Yes' : 'No';
+      const callback = isCallback(c) ? 'Yes' : 'No';
+      const notInterested = isNotInterested(c) ? 'Yes' : 'No';
+      const wrongInvalid = isWrongNumber(c) ? 'Yes' : 'No';
+      const counsellorFollowup = isCounselorFollowupRequired(c) ? 'Yes' : 'No';
+
+      return {
+        'S.No': idx + 1,
+        'Recipient Name': c.studentName || c.name || 'Student',
+        'Phone Number': contact,
+        'College Name': c.target_college || c.college || 'MIT WPU',
+        'Target Course': c.target_course || c.course || 'General',
+        'Dialing Status': isAns ? 'Answered' : status,
+        'Call Duration': dur,
+        'Call Answered': callAnswered,
+        'Interest Level': interestLevel,
+        'Already Joined': alreadyJoined,
+        'Counsellor Follow-up': counsellorFollowup,
+        'Application Sent': applicationSent,
+        'Already Applied': alreadyApplied,
+        'Callback': callback,
+        'Not Interested': notInterested,
+        'Wrong / Invalid': wrongInvalid,
+        'AI Call Outcome': outcome,
+        'Date / Time': c.time_of_call || c.call_date || '—',
+        'Call Summary': summary,
+        'Call Transcript / Full Conversation': transcript,
+        'Call ID': id,
+        'Recording URL': c.recording_url || c.recordingUrl || '—'
+      };
+    });
+
+    const ws = XLSX.utils.json_to_sheet(data);
+    ws['!cols'] = calculateColWidths(data);
+    XLSX.utils.book_append_sheet(workbook, ws, "Recent Outbound Calls");
+
+    XLSX.writeFile(workbook, `Recent_Omni_Calls_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    addToast(`Exported ${calls.length} recent calls to Excel!`, 'success');
+  };
+
   // Extract unique statuses dynamically from mergedCalls
   const uniqueStatuses = Array.from(new Set(
     mergedCalls
@@ -2247,8 +2575,8 @@ export default function App() {
               )}
             </div>
 
-            {/* If campaign is NOT running, show the progressive setup steps */}
-            {!campaignState.isRunning && (
+            {/* If campaign is NOT running and no campaign queue exists, show the progressive setup steps */}
+            {!campaignState.isRunning && (!activeQueue || activeQueue.length === 0) && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
 
                 {/* STEP 1: UPLOAD DATA CARD */}
@@ -2619,6 +2947,73 @@ export default function App() {
                     </div>
                   </div>
                 )}
+
+                {/* IMPORTED CONTACTS PREVIEW TABLE (SHOWS EXACTLY WHAT WAS ADDED) */}
+                {tempContacts.length > 0 && (
+                  <div style={{ marginTop: '1.5rem', paddingTop: '1.25rem', borderTop: '1px solid var(--border)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                      <div>
+                        <h4 style={{ fontSize: '1rem', fontWeight: '800', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-primary)' }}>
+                          <CheckCircle2 size={18} style={{ color: '#10b981' }} />
+                          Imported Contacts ({tempContacts.length})
+                        </h4>
+                        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                          Contacts added and ready. Select your university bot in Step 2 below to stage them for sequence calling.
+                        </span>
+                      </div>
+
+                      <button
+                        type="button"
+                        className="btn btn-danger-outline"
+                        style={{ padding: '0.25rem 0.65rem', fontSize: '0.75rem' }}
+                        onClick={() => {
+                          setTempContacts([]);
+                          setUploadedFileInfo(null);
+                          addToast('Imported list cleared.', 'info');
+                        }}
+                      >
+                        <Trash2 size={12} /> Clear List
+                      </button>
+                    </div>
+
+                    <div style={{ maxHeight: '220px', overflowY: 'auto', border: '1px solid var(--border)', borderRadius: '8px', backgroundColor: 'var(--bg-card)' }}>
+                      <table className="calls-table" style={{ width: '100%', fontSize: '0.85rem' }}>
+                        <thead>
+                          <tr>
+                            <th style={{ padding: '0.5rem 0.75rem', width: '40px' }}>#</th>
+                            <th style={{ padding: '0.5rem 0.75rem' }}>Phone Number</th>
+                            <th style={{ padding: '0.5rem 0.75rem' }}>Recipient Name</th>
+                            <th style={{ padding: '0.5rem 0.75rem', textAlign: 'center', width: '70px' }}>Remove</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {tempContacts.map((c, idx) => (
+                            <tr key={c.id}>
+                              <td style={{ padding: '0.5rem 0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--mono)' }}>{idx + 1}</td>
+                              <td style={{ padding: '0.5rem 0.75rem', fontFamily: 'var(--mono)', fontWeight: '700', color: '#818cf8' }}>
+                                📞 {c.formattedPhone || c.phone}
+                              </td>
+                              <td style={{ padding: '0.5rem 0.75rem', fontWeight: '600' }}>
+                                {c.name ? `👤 ${c.name}` : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Generic Recipient</span>}
+                              </td>
+                              <td style={{ padding: '0.5rem 0.75rem', textAlign: 'center' }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-danger-outline"
+                                  style={{ padding: '0.2rem 0.45rem', borderRadius: '4px' }}
+                                  onClick={() => removeTempContact(c.id)}
+                                  title="Remove this contact"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
                 </div>
 
                 {/* STEP 2 & 3: SELECT UNIVERSITY & DELAY (SHOWN IF TEMP CONTACTS ARE LOADED) */}
@@ -2632,6 +3027,41 @@ export default function App() {
                       <button className="btn btn-danger-outline" style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }} onClick={() => setTempContacts([])}>
                         Cancel
                       </button>
+                    </div>
+
+                    {/* Compact preview chips of contacts being configured */}
+                    <div style={{ backgroundColor: 'rgba(99, 102, 241, 0.04)', borderRadius: '8px', padding: '0.65rem 0.85rem', marginBottom: '1.25rem', border: '1px solid rgba(99, 102, 241, 0.15)' }}>
+                      <div style={{ fontSize: '0.78rem', fontWeight: '700', color: 'var(--text-secondary)', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        📋 Contacts to stage with this bot ({tempContacts.length}):
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', maxHeight: '90px', overflowY: 'auto' }}>
+                        {tempContacts.map((c, i) => (
+                          <span
+                            key={c.id || i}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.35rem',
+                              backgroundColor: 'var(--bg-card)',
+                              border: '1px solid var(--border)',
+                              borderRadius: '20px',
+                              padding: '0.15rem 0.55rem',
+                              fontSize: '0.78rem'
+                            }}
+                          >
+                            <span>{c.name ? `👤 ${c.name}` : '👤 Generic'}</span>
+                            <b style={{ fontFamily: 'var(--mono)', color: '#818cf8' }}>{c.formattedPhone || c.phone}</b>
+                            <button
+                              type="button"
+                              onClick={() => removeTempContact(c.id)}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}
+                              title="Remove"
+                            >
+                              <XCircle size={12} />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
                     </div>
 
                     {/* University Selector (searchable dropdown — scales to many colleges) */}
@@ -2900,8 +3330,8 @@ export default function App() {
               </div>
             )}
 
-            {/* ACTIVE CAMPAIGN DASHBOARD - Displays when calling campaign is active */}
-            {campaignState.isRunning && (
+            {/* CAMPAIGN BATCH DASHBOARD - Displays when calling campaign is active OR has completed queue items */}
+            {(campaignState.isRunning || (activeQueue && activeQueue.length > 0)) && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
 
                 {/* Active Campaign Info Header Panel */}
@@ -2909,28 +3339,72 @@ export default function App() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
                     <div>
                       <h2 style={{ fontSize: '1.35rem', fontWeight: '800', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <Volume2 size={22} className="animate-pulse" style={{ color: 'var(--accent)' }} />
-                        Sequential Outbound Campaign Active
+                        {campaignState.isRunning ? (
+                          <>
+                            <Volume2 size={22} className="animate-pulse" style={{ color: 'var(--accent)' }} />
+                            Sequential Outbound Campaign Active
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle size={22} style={{ color: '#10b981' }} />
+                            🎉 Sequential Campaign Batch Finished
+                          </>
+                        )}
                       </h2>
                       <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                        Dialing sequential list using <b>{campaignState.universityName || 'Selected Bot'}</b> (Agent ID: <b>#{campaignState.agentId || 'N/A'}</b>)
+                        {campaignState.isRunning ? (
+                          <>Dialing sequential list using <b>{campaignState.universityName || 'Selected Bot'}</b> (Agent ID: <b>#{campaignState.agentId || 'N/A'}</b>)</>
+                        ) : (
+                          <>Sequential dialing finished for <b>{campaignState.universityName || 'Selected Bot'}</b> ({campaignState.completedCount} of {campaignState.totalCount} contacts processed). Download your batch report below or start a new campaign.</>
+                        )}
                       </p>
                     </div>
 
-                    <div style={{ display: 'flex', gap: '0.75rem' }}>
-                      {campaignState.isPaused ? (
-                        <button className="btn btn-primary" onClick={handleResumeCampaign}>
-                          <Play size={16} /> Resume Campaign
-                        </button>
+                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                      {/* Prominent Campaign Batch Export Button */}
+                      <button
+                        className="btn btn-primary"
+                        style={{
+                          backgroundColor: '#059669',
+                          borderColor: '#10b981',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.5rem',
+                          fontWeight: '700',
+                          padding: '0.6rem 1.25rem'
+                        }}
+                        onClick={handleExportCampaignBatch}
+                        title="Download Excel report containing only the contacts from this specific campaign batch"
+                      >
+                        <Download size={16} /> Download Campaign Batch (.xlsx)
+                      </button>
+
+                      {campaignState.isRunning ? (
+                        <>
+                          {campaignState.isPaused ? (
+                            <button className="btn btn-primary" onClick={handleResumeCampaign}>
+                              <Play size={16} /> Resume Campaign
+                            </button>
+                          ) : (
+                            <button className="btn btn-secondary" onClick={handlePauseCampaign}>
+                              <Pause size={16} /> Pause Campaign
+                            </button>
+                          )}
+
+                          <button className="btn btn-danger-outline" onClick={handleCancelCampaign} style={{ padding: '0.5rem 1rem' }}>
+                            <Square size={16} /> Stop Campaign Queue
+                          </button>
+                        </>
                       ) : (
-                        <button className="btn btn-secondary" onClick={handlePauseCampaign}>
-                          <Pause size={16} /> Pause Campaign
+                        <button
+                          className="btn btn-secondary"
+                          style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.6rem 1.1rem', fontWeight: '600' }}
+                          onClick={handleClearCampaignQueue}
+                          title="Clear current batch and upload/stage new contacts"
+                        >
+                          <Plus size={16} /> Start New Batch
                         </button>
                       )}
-
-                      <button className="btn btn-danger-outline" onClick={handleCancelCampaign} style={{ padding: '0.5rem 1rem' }}>
-                        <Square size={16} /> Stop Campaign Queue
-                      </button>
                     </div>
                   </div>
 
@@ -3001,9 +3475,24 @@ export default function App() {
 
                 {/* LIVE CAMPAIGN QUEUE TABLE */}
                 <div className="card" style={{ width: '100%' }}>
-                  <h3 style={{ fontSize: '1.2rem', fontWeight: '700', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem' }}>
-                    Dialing Queue Contacts Progress
-                  </h3>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                    <div>
+                      <h3 style={{ fontSize: '1.2rem', fontWeight: '700', margin: 0 }}>
+                        Dialing Queue Contacts Progress ({activeQueue.length})
+                      </h3>
+                      <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0' }}>
+                        Session contacts and live results. Download below for the exact batch report.
+                      </p>
+                    </div>
+
+                    <button
+                      className="btn btn-primary"
+                      style={{ backgroundColor: '#059669', borderColor: '#10b981', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: '700', fontSize: '0.85rem', padding: '0.5rem 1rem' }}
+                      onClick={handleExportCampaignBatch}
+                    >
+                      <Download size={15} /> Download Campaign Batch (.xlsx)
+                    </button>
+                  </div>
 
                   <div className="staged-table-container" style={{ maxHeight: '450px', overflowY: 'auto' }}>
                     <table className="calls-table" style={{ width: '100%' }}>
@@ -4247,9 +4736,20 @@ export default function App() {
                 <p>Full synchronized history of dispatches and agent conversation transcripts from OmniDimension.</p>
               </div>
 
-              <button onClick={triggerReloadCalls} className="btn btn-secondary">
-                <RefreshCw size={16} /> Sync Calls
-              </button>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <button
+                  onClick={handleExportRecentCalls}
+                  className="btn btn-primary"
+                  style={{ backgroundColor: '#059669', borderColor: '#10b981', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: '700' }}
+                  title="Download the latest dispatches from OmniDimension as an Excel report"
+                >
+                  <Download size={16} /> Download Recent Calls (.xlsx)
+                </button>
+
+                <button onClick={triggerReloadCalls} className="btn btn-secondary">
+                  <RefreshCw size={16} /> Sync Calls
+                </button>
+              </div>
             </div>
 
             <div className="card" style={{ padding: '1rem' }}>

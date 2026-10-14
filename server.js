@@ -1214,20 +1214,58 @@ function enrichCallWithInterest(callRecord) {
   };
 
   // Manual overrides (e.g. APPLICATION_SENT after WhatsApp) win over transcript analysis
-  const manual = (cleanPhone && CALL_INTERESTS[cleanPhone]) || (callId && CALL_INTERESTS[callId]);
-  // ...unless a NEWER call with a real transcript exists: fresh evidence beats a
-  // stale saved status (e.g. old Submitted must not resurrect onto a hang-up).
-  let useFresh = false;
-  if (manual && manual.interestStatus && manual.updatedAt) {
-    const callTime = new Date(callRecord.time_of_call || callRecord.call_date || 0).getTime();
-    const manualTime = new Date(manual.updatedAt).getTime();
-    const hasFreshTranscript = (typeof callRecord.call_conversation === 'string' && callRecord.call_conversation.trim())
-      || (Array.isArray(callRecord.interactions) && callRecord.interactions.length > 0);
-    if (!isNaN(callTime) && !isNaN(manualTime) && callTime > manualTime && hasFreshTranscript) {
-      useFresh = true;
-    }
+  // 1. Connection & Engagement Guard:
+  // An unanswered, missed, busy, failed, or immediately cut call (duration 0 or <=5s without speech)
+  // is strictly NOT_ANSWERED. It can NEVER be overridden to Interested or Application Sent!
+  const evStatusRaw = String(callRecord.call_status || callRecord.status || '').toLowerCase();
+  const evUnanswered = ['failed', 'canceled', 'cancelled', 'busy', 'no-answer', 'no_answer', 'timeout', 'timedout', 'unreachable', 'missed', 'not answered', 'unanswered'].includes(evStatusRaw)
+    || /no.answer|missed|busy|fail|unreach|cancel|timeout/.test(evStatusRaw);
+  const convRawText = String(callRecord.call_conversation || callRecord.transcript || '').trim();
+  const evTalkChars = convRawText.replace(/(bot|agent|user)\s*:/gi, ' ').replace(/[^a-z0-9]/gi, '').length;
+  const evDurSec = parseFloat(callRecord.call_duration_in_seconds ?? callRecord.duration_in_seconds ?? NaN);
+  const durStr = String(callRecord.call_duration || callRecord.duration || '').trim();
+  const isZeroDur = durStr === '0:00' || durStr === '0:0' || durStr === '0' || evDurSec === 0;
+  const evNoEngagement = (evTalkChars < 15 && (isNaN(evDurSec) || evDurSec <= 5)) || (isZeroDur && evTalkChars < 20);
+
+  if (evUnanswered || evNoEngagement || evStatusRaw === 'no-answer') {
+    return applyTargetMemory({
+      ...callRecord,
+      final_status: CALL_OUTCOME_STATUS.NOT_ANSWERED,
+      finalStatus: CALL_OUTCOME_STATUS.NOT_ANSWERED,
+      interest_status: CALL_OUTCOME_STATUS.NOT_ANSWERED,
+      interestStatus: CALL_OUTCOME_STATUS.NOT_ANSWERED,
+      leadStatus: CALL_OUTCOME_STATUS.NOT_ANSWERED,
+      lead_status: CALL_OUTCOME_STATUS.NOT_ANSWERED
+    });
   }
-  if (manual && manual.interestStatus && !useFresh) {
+
+  // 2. Explicit Negative Sentiment Guard:
+  // If user actually spoke and said 'no not interested', that always wins over old overrides.
+  const userTextLower = convRawText.toLowerCase();
+  if (/(not interested|no interest|dont call|don't call|do not call|no thanks|not looking|stop calling)/i.test(userTextLower)) {
+    const analyzed = analyzeCallInterest(callRecord);
+    return applyTargetMemory({
+      ...callRecord,
+      ...analyzed,
+      final_status: CALL_OUTCOME_STATUS.NOT_INTERESTED,
+      finalStatus: CALL_OUTCOME_STATUS.NOT_INTERESTED,
+      interest_status: CALL_OUTCOME_STATUS.NOT_INTERESTED,
+      interestStatus: CALL_OUTCOME_STATUS.NOT_INTERESTED,
+      leadStatus: CALL_OUTCOME_STATUS.NOT_INTERESTED,
+      lead_status: CALL_OUTCOME_STATUS.NOT_INTERESTED
+    });
+  }
+
+  // 3. Manual Overrides: only apply if exact callId matches, OR if keyed by phone within 30 minutes of call date
+  const manual = (callId && CALL_INTERESTS[callId]) || (cleanPhone && CALL_INTERESTS[cleanPhone] && (() => {
+    const m = CALL_INTERESTS[cleanPhone];
+    if (!m || !m.updatedAt) return null;
+    const callTime = new Date(callRecord.time_of_call || callRecord.call_date || 0).getTime();
+    const manualTime = new Date(m.updatedAt).getTime();
+    return (!isNaN(callTime) && !isNaN(manualTime) && Math.abs(callTime - manualTime) < 30 * 60 * 1000) ? m : null;
+  })());
+
+  if (manual && manual.interestStatus) {
     const status = manual.interestStatus;
     const analyzed = analyzeCallInterest(callRecord);
     return applyTargetMemory({
@@ -1240,30 +1278,18 @@ function enrichCallWithInterest(callRecord) {
       leadStatus: status,
       lead_status: status,
       college: manual.college || analyzed.college,
-      course: manual.course && !/�/.test(manual.course) ? manual.course : analyzed.course,
+      course: manual.course || analyzed.course,
       details: manual.details || manual.notes || analyzed.details,
       target_college: manual.college || analyzed.college,
-      target_course: manual.course && !/�/.test(manual.course) ? manual.course : analyzed.course,
+      target_course: manual.course || analyzed.course,
       interest_details: manual.details || manual.notes || analyzed.details,
       summary: manual.notes ? `${callRecord.summary || ''} [Notes: ${manual.notes}]` : callRecord.summary
     });
   }
 
   const interestData = analyzeCallInterest(callRecord);
-
-  // OmniDimension's own structured verdict (extracted_variables) wins over
-  // keyword guessing — it is the same source that feeds the Google Sheet,
-  // so live rows and sheet rows classify identically. BUT never for calls
-  // that never connected: hallucinated Yes flags on no-answer/empty calls
-  // must not upgrade them.
   const ev = callRecord.extracted_variables || {};
   const evYes = (k) => String(ev[k] ?? '').trim().toLowerCase() === 'yes';
-  const evStatusRaw = String(callRecord.call_status || callRecord.status || '').toLowerCase();
-  const evUnanswered = ['failed', 'canceled', 'cancelled', 'busy', 'no-answer', 'no_answer', 'timeout', 'timedout', 'unreachable', 'missed', 'not answered', 'unanswered'].includes(evStatusRaw)
-    || /no.answer|missed|busy|fail|unreach|cancel|timeout/.test(evStatusRaw);
-  const evTalkChars = String(callRecord.call_conversation || callRecord.transcript || '').replace(/(bot|agent|user)\s*:/gi, ' ').replace(/[^a-z0-9]/gi, '').length;
-  const evDurSec = parseFloat(callRecord.call_duration_in_seconds ?? callRecord.duration_in_seconds ?? NaN);
-  const evNoEngagement = evTalkChars < 20 && (isNaN(evDurSec) || evDurSec <= 5);
   const evStatus =
     evYes('wrong_invalid') ? CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID :
     evYes('already_joined') ? CALL_OUTCOME_STATUS.ALREADY_JOINED :
@@ -1414,10 +1440,19 @@ async function fetchCallsFromOmni() {
 }
 
 // Handle completion of a call in queue and trigger next contact
-function handleQueueContactFinished(contact, isAnswered, statusText, durationStr) {
+function handleQueueContactFinished(contact, isAnswered, statusText, durationStr, matchedCall) {
   if (!contact) return;
 
   contact.duration = durationStr || '0:00';
+  if (matchedCall) {
+    contact.callId = String(matchedCall.id || matchedCall.call_id || '');
+    contact.transcript = matchedCall.call_conversation || matchedCall.transcript || '';
+    contact.summary = matchedCall.summary || matchedCall.call_summary || '';
+    contact.outcome = isAnswered
+      ? (matchedCall.final_status || matchedCall.finalStatus || 'ANSWERED')
+      : 'NOT_ANSWERED';
+    contact.matchedCall = matchedCall;
+  }
   if (isAnswered) {
     contact.status = 'completed';
     CAMPAIGN_STATE.answeredCount++;
@@ -1425,10 +1460,11 @@ function handleQueueContactFinished(contact, isAnswered, statusText, durationStr
   } else {
     contact.status = 'no-answer';
     contact.reason = statusText;
+    if (!contact.transcript) contact.transcript = 'Call not answered / cut';
+    contact.outcome = 'NOT_ANSWERED';
     CAMPAIGN_STATE.unansweredCount++;
     addLog('error', `Sequential Call [${contact.index + 1}/${CAMPAIGN_STATE.totalCount}] to "${contact.name || contact.formattedPhone}" (${contact.formattedPhone}) ENDED. Result: NOT ANSWERED (${statusText}).`);
   }
-
   CAMPAIGN_STATE.completedCount++;
   CURRENT_CALL = null;
   broadcastQueueUpdate();
@@ -1507,7 +1543,7 @@ async function pollCallsOnce() {
 
           const queueContact = CALL_QUEUE.find(q => q.id === pending.queueContactId || q.formattedPhone === phone);
           if (queueContact && queueContact.status === 'in-progress') {
-            handleQueueContactFinished(queueContact, true, 'completed', formattedDuration);
+            handleQueueContactFinished(queueContact, true, 'completed', formattedDuration, matchedCall);
           } else {
             addLog('success', `Call to "${pending.fullName}" (${phone}) COMPLETED. Duration: ${formattedDuration}.`);
             pollGoogleSheets().catch(() => {});
@@ -1523,7 +1559,7 @@ async function pollCallsOnce() {
 
           const queueContact = CALL_QUEUE.find(q => q.id === pending.queueContactId || q.formattedPhone === phone);
           if (queueContact && queueContact.status === 'in-progress') {
-            handleQueueContactFinished(queueContact, false, displayStatus, formattedDuration);
+            handleQueueContactFinished(queueContact, false, displayStatus, formattedDuration, matchedCall);
           } else {
             addLog('error', `Call to "${pending.fullName}" (${phone}) ended. Result: NOT ANSWERED (${displayStatus}).`);
           }
@@ -1551,7 +1587,7 @@ async function pollCallsOnce() {
 
         const queueContact = CALL_QUEUE.find(q => q.id === pending.queueContactId || q.formattedPhone === phone);
         if (queueContact && queueContact.status === 'in-progress') {
-          handleQueueContactFinished(queueContact, false, 'timeout', '0:00');
+          handleQueueContactFinished(queueContact, false, 'timeout', '0:00', null);
         } else {
           addLog('error', `Call status tracking for "${pending.fullName}" (${phone}) timed out.`);
         }
@@ -2121,6 +2157,31 @@ app.post('/api/queue/cancel', (req, res) => {
   addLog('warning', 'Sequential calling campaign CANCELLED by user.');
   broadcastQueueUpdate();
   res.json({ success: true, message: 'Campaign cancelled.' });
+});
+
+// Clear/Reset Campaign Queue
+app.post('/api/queue/clear', (req, res) => {
+  if (queueNextTimer) {
+    clearTimeout(queueNextTimer);
+    queueNextTimer = null;
+  }
+  CALL_QUEUE = [];
+  CAMPAIGN_STATE = {
+    isRunning: false,
+    isPaused: false,
+    currentContactIndex: 0,
+    totalCount: 0,
+    completedCount: 0,
+    answeredCount: 0,
+    unansweredCount: 0,
+    delayMs: 2000,
+    universityName: '',
+    universityId: '',
+    agentId: getAgentId()
+  };
+  CURRENT_CALL = null;
+  broadcastQueueUpdate();
+  res.json({ success: true, message: 'Queue reset successfully.' });
 });
 
 // 5. Get Campaign & Queue Status
