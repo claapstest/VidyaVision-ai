@@ -19,7 +19,7 @@ export const STATUS_DISPLAY_CONFIG = Object.freeze({
   [CALL_OUTCOME_STATUS.INTERESTED]: {
     key: CALL_OUTCOME_STATUS.INTERESTED,
     label: 'Interested',
-    color: '#4ade80',
+    color: '#22c55e',
     bg: 'rgba(34, 197, 94, 0.15)',
     border: '#22c55e',
     icon: '🟢',
@@ -39,7 +39,7 @@ export const STATUS_DISPLAY_CONFIG = Object.freeze({
   [CALL_OUTCOME_STATUS.CALLBACK]: {
     key: CALL_OUTCOME_STATUS.CALLBACK,
     label: 'Callback',
-    color: '#fbbf24',
+    color: '#f59e0b',
     bg: 'rgba(245, 158, 11, 0.15)',
     border: '#f59e0b',
     icon: '📞',
@@ -49,7 +49,7 @@ export const STATUS_DISPLAY_CONFIG = Object.freeze({
   [CALL_OUTCOME_STATUS.ALREADY_APPLIED]: {
     key: CALL_OUTCOME_STATUS.ALREADY_APPLIED,
     label: 'Already Applied',
-    color: '#38bdf8',
+    color: '#0ea5e9',
     bg: 'rgba(56, 189, 248, 0.15)',
     border: '#0284c7',
     icon: '📝',
@@ -69,7 +69,7 @@ export const STATUS_DISPLAY_CONFIG = Object.freeze({
   [CALL_OUTCOME_STATUS.NOT_INTERESTED]: {
     key: CALL_OUTCOME_STATUS.NOT_INTERESTED,
     label: 'Not Interested',
-    color: '#f87171',
+    color: '#ef4444',
     bg: 'rgba(239, 68, 68, 0.15)',
     border: '#dc2626',
     icon: '🔴',
@@ -79,7 +79,7 @@ export const STATUS_DISPLAY_CONFIG = Object.freeze({
   [CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID]: {
     key: CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID,
     label: 'Wrong Number / Invalid',
-    color: '#fb923c',
+    color: '#f97316',
     bg: 'rgba(251, 146, 60, 0.15)',
     border: '#ea580c',
     icon: '⚠️',
@@ -89,7 +89,7 @@ export const STATUS_DISPLAY_CONFIG = Object.freeze({
   [CALL_OUTCOME_STATUS.NOT_ANSWERED]: {
     key: CALL_OUTCOME_STATUS.NOT_ANSWERED,
     label: 'Calls Not Answered',
-    color: '#fb7185',
+    color: '#f43f5e',
     bg: 'rgba(244, 63, 94, 0.15)',
     border: '#e11d48',
     icon: '❌',

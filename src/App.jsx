@@ -22,7 +22,6 @@ import {
   HelpCircle,
   Download,
   Search,
-  PieChart,
   Volume2,
   Filter,
   GraduationCap,
@@ -45,10 +44,37 @@ import {
   getCallbackTime
 } from './constants/callStatus';
 import CallOutcomePieChart from './components/CallOutcomePieChart';
+import { resolveDisplayName, isGenericName } from './utils/resolveDisplayName.js';
+import { LandingNav } from './components/Landing';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('dashboard'); // 'dispatch' | 'dashboard' | 'calls'
+  // Separate pages via hash routes (#/dialer, #/dashboard, #/calls); opening page is the dashboard.
+  const getRoute = () => {
+    const r = (window.location.hash || '').replace(/^#\/?/, '');
+    return ['dialer', 'dashboard', 'calls'].includes(r) ? r : 'dashboard';
+  };
+  const [view, setView] = useState(getRoute);
+  useEffect(() => {
+    const onHash = () => { setView(getRoute()); window.scrollTo(0, 0); };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  const go = (id) => {
+    const target = ['dialer', 'dashboard', 'calls'].includes(id) ? id : 'dashboard';
+    window.location.hash = `#/${target}`;
+    setView(target);
+    window.scrollTo(0, 0);
+  };
   const [wsConnected, setWsConnected] = useState(false);
+
+  // Aceternity-style dual theme (light default, dark optional)
+  const [theme, setTheme] = useState(() => {
+    try { return localStorage.getItem('vv_theme') || 'light'; } catch { return 'light'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('vv_theme', theme); } catch {}
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
 
   // Input Modes in Dispatch Console: 'manual' | 'bulk' | 'excel'
   const [inputMode, setInputMode] = useState('excel');
@@ -682,20 +708,16 @@ export default function App() {
     }
   };
 
-  // Auto-sync Google Sheets when Dashboard active or on 45s interval
+  // Auto-sync Google Sheets on load + 45s interval (dashboard always on page now)
   useEffect(() => {
-    if (activeTab === 'dashboard') {
-      fetchCallAnalytics(true).catch(err => console.error('Auto-sync error:', err));
-    } else {
-      fetchCallAnalytics().catch(err => console.error('Silent sync error:', err));
-    }
+    fetchCallAnalytics(true).catch(err => console.error('Auto-sync error:', err));
 
     const interval = setInterval(() => {
-      fetchCallAnalytics(activeTab === 'dashboard').catch(err => console.error('Interval sync error:', err));
+      fetchCallAnalytics(true).catch(err => console.error('Interval sync error:', err));
     }, 45000);
 
     return () => clearInterval(interval);
-  }, [activeTab]);
+  }, []);
 
   // Auto-scroll logs feed
   useEffect(() => {
@@ -1538,25 +1560,12 @@ export default function App() {
 
   // Helper to format a call record for clean Excel presentation with exact required Google Sheets columns
   const formatCallForExcel = (call, idx) => {
-    // 1. Name: taken from dashboard (crucial for unanswered calls where Google Sheet has null/Not provided)
-    const isGenericName = (n) => !n || n === '—' || n === 'Student' || n === 'Not provided' || /^recipient\s*\(/i.test(String(n));
-    let studentName = call.studentName;
-    if (isGenericName(studentName)) {
-      if (!isGenericName(call.name)) studentName = call.name;
-      else if (!isGenericName(call.student_name)) studentName = call.student_name;
-      else if (!isGenericName(call.fullName)) studentName = call.fullName;
-      else if (call.rawFields && !isGenericName(call.rawFields.student_name)) studentName = call.rawFields.student_name;
-      else if (call.rawFields && !isGenericName(call.rawFields['Student Name'])) studentName = call.rawFields['Student Name'];
-      else if (call.rawFields && !isGenericName(call.rawFields.name)) studentName = call.rawFields.name;
-      else {
-        const cleanPhone = String(call.contactNumber || call.to_number || call.phone_number || '').replace(/\D/g, '').slice(-10);
-        if (cleanPhone) {
-          const q = activeQueue.find(item => String(item.formattedPhone || item.phone || '').replace(/\D/g, '').slice(-10) === cleanPhone);
-          if (q && !isGenericName(q.name)) studentName = q.name;
-        }
-      }
-    }
-    if (!studentName || studentName === '—') studentName = call.studentName || 'Student';
+    // 1. Name: single shared resolver (staged -> context -> fields -> transcript -> phone)
+    const excelPhone = String(call.contactNumber || call.to_number || call.phone_number || '').replace(/\D/g, '').slice(-10);
+    const excelQueue = excelPhone
+      ? (activeQueue.find(item => String(item.formattedPhone || item.phone || '').replace(/\D/g, '').slice(-10) === excelPhone) || null)
+      : null;
+    const studentName = resolveDisplayName(call, excelQueue);
 
     // 2. Phone Number (from Google Sheets raw fields or call record)
     const rawPhone = (call.rawFields && (call.rawFields.to_number || call.rawFields.phone_number))
@@ -1813,10 +1822,7 @@ export default function App() {
       else if (status === 'canceled') outcome = 'Canceled';
 
       // Staged dialer name wins (Omni user_name is the account holder, not the student)
-      const displayName = queueMatch?.name
-        || (c.call_context && (c.call_context.student_name || c.call_context.name))
-        || c.name || c.studentName || c.fullName
-        || `Recipient (${c.to_number || c.phone_number || c.to || cleanPhone})`;
+      const displayName = resolveDisplayName(c, queueMatch);
 
       // Exact college called with: staged campaign college first, then transcript analysis
       const displayCollege = queueMatch?.universityName
@@ -1866,7 +1872,6 @@ export default function App() {
         // own flags there), so on an id-matched merge the sheet's final status
         // always wins over re-guessing from the transcript.
         const prev = list[existingIdx];
-        const isGenericName = (n) => !n || n === '—' || n === 'Student' || /^recipient\s*\(/i.test(String(n));
         const sheetVerdict = prev.final_status || prev.finalStatus;
         const keepSheetVerdict = Boolean(sheetVerdict);
         list[existingIdx] = {
@@ -2098,63 +2103,30 @@ export default function App() {
   ));
 
   return (
-    <div className="app-container">
-      {/* Header */}
-      <header className="header">
-        <div className="brand" onClick={() => setActiveTab('dashboard')}>
-          <i className="brand-icon">◈</i>
-          <span>VIDYA <b style={{ color: '#818cf8' }}>VISION</b></span>
-        </div>
-
-        <div className="nav-links">
-          <button
-            className={`nav-button ${activeTab === 'dashboard' ? 'active' : ''}`}
-            onClick={() => setActiveTab('dashboard')}
-          >
-            <PieChart size={18} />
-            Call Dashboard
-          </button>
-
-          <button
-            className={`nav-button ${activeTab === 'dispatch' ? 'active' : ''}`}
-            onClick={() => setActiveTab('dispatch')}
-          >
-            <PhoneCall size={18} />
-            Call Dialer
-          </button>
-
-          <button
-            className={`nav-button ${activeTab === 'calls' ? 'active' : ''}`}
-            onClick={() => setActiveTab('calls')}
-          >
-            <FileText size={18} />
-            Recent Calls
-          </button>
-        </div>
-      </header>
+    <div className="app-container" data-theme={theme}>
+      <LandingNav onEnter={go} theme={theme} onToggleTheme={() => setTheme(t => (t === 'dark' ? 'light' : 'dark'))} />
 
       {/* Main Container */}
       <main className="main-content">
 
-        {/* ========================================== */}
-        {/* TAB 1: DISPATCH CONSOLE (Replaces Registration) */}
-        {/* ========================================== */}
-        {activeTab === 'dispatch' && (
-          <div className="dialer-wrapper" style={{ display: 'flex', flexDirection: 'column', gap: '2rem', minHeight: 'calc(100vh - 120px)', position: 'relative', paddingBottom: '320px' }}>
+        {/* Call Dialer */}
+        {view === 'dialer' && (
+        <section id="dialer" className="home-section">
+          <div className="dialer-wrapper" style={{ display: 'flex', flexDirection: 'column', gap: '2rem', position: 'relative' }}>
             <div className="page-header">
               <h1>Sequential Voice Call Dispatcher</h1>
               <p>Upload a list of student contacts, select their target university bot, and set sequence call delays. The bots will call each student sequentially.</p>
             </div>
 
             {/* College Management & Delete Header Section */}
-            <div className="card" style={{ borderLeft: '4px solid var(--accent)', background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.05) 0%, rgba(241, 101, 34, 0.03) 100%)' }}>
+            <div className="card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
                 <div>
                   <h3 style={{ fontSize: '1.15rem', fontWeight: '800', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-primary)' }}>
-                    🎓 Saved Colleges ({universities.length})
+                    Saved colleges · {universities.length}
                   </h3>
                   <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-                    Manage your colleges below — edit details and courses, or delete unwanted ones. College and course for calling are picked in Step 2.
+                    Edit details and courses, or remove colleges you no longer call. The calling college and course are picked in Step 2.
                   </p>
                 </div>
 
@@ -2164,7 +2136,7 @@ export default function App() {
                     style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }}
                     onClick={() => setShowManageColleges(prev => !prev)}
                   >
-                    <Trash2 size={15} /> {showManageColleges ? 'Hide Colleges' : 'Manage Colleges'}
+                    {showManageColleges ? 'Hide Colleges' : 'Manage Colleges'}
                   </button>
 
                   <button className="btn btn-primary" style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }} onClick={() => { resetCollegeForm(); setShowCollegeModal(true); }}>
@@ -2176,8 +2148,8 @@ export default function App() {
               {/* Saved Colleges Cards Grid with Delete Buttons */}
               {showManageColleges && (
                 <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
-                  <div style={{ fontSize: '0.78rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.75rem', letterSpacing: '0.05em' }}>
-                    Click <b>EDIT</b> to update details/courses, <b style={{ color: '#ef4444' }}>DELETE</b> to permanently remove a college:
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+                    Edit updates a college's details and courses. Delete removes it permanently.
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '0.85rem' }}>
@@ -2198,30 +2170,30 @@ export default function App() {
                         >
                           <div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.35rem' }}>
-                              <h4 style={{ fontSize: '0.95rem', fontWeight: '700', color: 'var(--text-primary)', margin: 0, display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                                🎓 {uni.name}
+                              <h4 style={{ fontSize: '0.95rem', fontWeight: '700', color: 'var(--text-primary)', margin: 0 }}>
+                                {uni.name}
                               </h4>
                             </div>
 
                             {Array.isArray(uni.courses) && uni.courses.length > 0 && (
                               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', margin: '0.3rem 0' }}>
                                 {uni.courses.map(course => (
-                                  <span key={course} style={{ fontSize: '0.7rem', fontWeight: '700', backgroundColor: 'rgba(99, 102, 241, 0.12)', color: '#818cf8', padding: '0.15rem 0.5rem', borderRadius: '20px', border: '1px solid rgba(99, 102, 241, 0.25)' }}>
-                                    📚 {course}
+                                  <span key={course} style={{ fontSize: '0.7rem', fontWeight: '600', backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-secondary)', padding: '0.15rem 0.5rem', borderRadius: '20px', border: '1px solid var(--border)' }}>
+                                    {course}
                                   </span>
                                 ))}
                               </div>
                             )}
 
                             {uni.place && (
-                              <p style={{ fontSize: '0.78rem', color: '#818cf8', margin: '0.15rem 0', fontWeight: '600' }}>
-                                📍 {uni.place}
+                              <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '0.15rem 0', fontWeight: '600' }}>
+                                {uni.place}
                               </p>
                             )}
 
                             {uni.websiteUrl && (
                               <p style={{ fontSize: '0.73rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '0.2rem' }}>
-                                🔗 {uni.websiteUrl}
+                                {uni.websiteUrl}
                               </p>
                             )}
 
@@ -2232,7 +2204,7 @@ export default function App() {
                             )}
 
                             <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
-                              🕒 Created: {uni.createdAt ? new Date(uni.createdAt).toLocaleString() : '—'}
+                              Added {uni.createdAt ? new Date(uni.createdAt).toLocaleDateString() : '—'}
                             </p>
                           </div>
 
@@ -2245,7 +2217,7 @@ export default function App() {
                                 onClick={() => handleEditCollege(uni)}
                                 title={`Edit ${uni.name} details and link`}
                               >
-                                ✏️ Edit
+                                <Edit3 size={13} /> Edit
                               </button>
 
                             <button
@@ -2280,9 +2252,9 @@ export default function App() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
 
                 {/* STEP 1: UPLOAD DATA CARD */}
-                <div className="card" style={{ borderLeft: '4px solid var(--accent)' }}>
+                <div className="card">
                   <h3 style={{ fontSize: '1.15rem', fontWeight: '700', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--accent)', color: 'white', width: '24px', height: '24px', borderRadius: '50%', fontSize: '0.85rem', fontWeight: 'bold' }}>1</span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--accent)', color: 'var(--bg-primary)', width: '24px', height: '24px', borderRadius: '50%', fontSize: '0.85rem', fontWeight: 'bold' }}>1</span>
                     Upload calling data / recipient list
                   </h3>
 
@@ -2336,7 +2308,7 @@ export default function App() {
                               </div>
 
                               <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                                Extracted: <b style={{ color: '#818cf8' }}>{tempContacts.length || (uploadedFileInfo && uploadedFileInfo.count) || 0} Contacts</b>
+                                Extracted: <b style={{ color: 'var(--text-primary)' }}>{tempContacts.length || (uploadedFileInfo && uploadedFileInfo.count) || 0} Contacts</b>
                                 {uploadedFileInfo && ` • Size: ${uploadedFileInfo.fileSize} • Uploaded at ${uploadedFileInfo.uploadedAt}`}
                               </p>
                             </div>
@@ -2415,7 +2387,7 @@ export default function App() {
                                     📄 {f.fileName}
                                   </div>
                                   <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                                    <b style={{ color: '#818cf8' }}>{f.count} contacts</b>
+                                    <b style={{ color: 'var(--text-primary)' }}>{f.count} contacts</b>
                                     {f.fileSize ? ` • ${f.fileSize}` : ''}
                                     {f.uploadedAt && !isNaN(new Date(f.uploadedAt).getTime()) ? ` • ${new Date(f.uploadedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${new Date(f.uploadedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}` : ''}
                                   </div>
@@ -2567,7 +2539,7 @@ export default function App() {
                                 display: 'flex', alignItems: 'center', gap: '0.65rem',
                                 padding: '0.5rem 0.75rem', borderRadius: '8px',
                                 border: checked ? '1px solid var(--accent)' : '1px solid var(--border)',
-                                backgroundColor: checked ? 'rgba(99, 102, 241, 0.07)' : 'var(--bg-card)'
+                                backgroundColor: checked ? 'rgba(0, 0, 0, 0.07)' : 'var(--bg-card)'
                               }}
                             >
                               <input
@@ -2580,7 +2552,7 @@ export default function App() {
                                 <div style={{ fontWeight: '700', fontSize: '0.88rem' }}>
                                   {r.name ? `👤 ${r.name}` : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Generic Recipient</span>}
                                 </div>
-                                <div style={{ fontSize: '0.78rem', color: '#a5b4fc', fontFamily: 'var(--mono)' }}>{r.formattedPhone || r.phone}</div>
+                                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontFamily: 'var(--mono)' }}>{r.formattedPhone || r.phone}</div>
                               </div>
                               <div style={{ textAlign: 'right', flexShrink: 0 }}>
                                 {r.universityName && (
@@ -2651,10 +2623,10 @@ export default function App() {
 
                 {/* STEP 2 & 3: SELECT UNIVERSITY & DELAY (SHOWN IF TEMP CONTACTS ARE LOADED) */}
                 {tempContacts.length > 0 && (
-                  <div className="card" style={{ borderLeft: '4px solid #818cf8', animation: 'fadeIn 0.25s ease-out' }}>
+                  <div className="card" style={{ animation: 'fadeIn 0.25s ease-out' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem' }}>
                       <h3 style={{ fontSize: '1.15rem', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#818cf8', color: 'white', width: '24px', height: '24px', borderRadius: '50%', fontSize: '0.85rem', fontWeight: 'bold' }}>2</span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--accent)', color: 'var(--bg-primary)', width: '24px', height: '24px', borderRadius: '50%', fontSize: '0.85rem', fontWeight: 'bold' }}>2</span>
                         Configure Calling Settings for {tempContacts.length} Contacts
                       </h3>
                       <button className="btn btn-danger-outline" style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }} onClick={() => setTempContacts([])}>
@@ -2713,7 +2685,7 @@ export default function App() {
                                 <strong style={{ fontSize: '0.95rem' }}>{sel.name}</strong>
                                 <span className={`status-badge-mini ${sel.status || 'active'}`}>{(sel.status || 'active').toUpperCase()}</span>
                               </div>
-                              {sel.place && <p style={{ fontSize: '0.8rem', color: '#818cf8', margin: '0.15rem 0', fontWeight: '600' }}>📍 {sel.place}</p>}
+                              {sel.place && <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '0.15rem 0', fontWeight: '600' }}>📍 {sel.place}</p>}
                               {sel.websiteUrl && <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', margin: '0.1rem 0' }}>🔗 {sel.websiteUrl}</p>}
                               {sel.description && <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '0.25rem 0 0', fontStyle: 'italic' }}>"{sel.description}"</p>}
                               <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', margin: '0.25rem 0 0' }}>🗣️ {sel.languages || 'English, Hindi, Telugu'} • 🤖 Agent #{sel.agentId || 257941}</p>
@@ -2728,7 +2700,7 @@ export default function App() {
                         const sel = universities.find(u => u.id === selectedUniversity);
                         if (sel && sel.status === 'inactive') {
                           return (
-                            <div style={{ marginTop: '1rem', backgroundColor: 'var(--error-glow)', border: '1px solid rgba(244, 63, 94, 0.2)', padding: '0.75rem 1rem', borderRadius: '8px', color: '#fb7185', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+                            <div style={{ marginTop: '1rem', backgroundColor: 'var(--error-glow)', border: '1px solid rgba(244, 63, 94, 0.2)', padding: '0.75rem 1rem', borderRadius: '8px', color: '#f43f5e', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
                               <AlertCircle size={16} />
                               <span><b>{sel.name}</b> is currently offline/inactive. Please select an active university to proceed with staging.</span>
                             </div>
@@ -2771,7 +2743,7 @@ export default function App() {
                     {tempInputMode !== 'manual' && (
                       <div style={{ marginBottom: '1.5rem', borderTop: '1px solid var(--border)', paddingTop: '1.25rem' }}>
                         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                          <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#818cf8', color: 'white', width: '24px', height: '24px', borderRadius: '50%', fontSize: '0.85rem', fontWeight: 'bold' }}>3</span>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--accent)', color: 'var(--bg-primary)', width: '24px', height: '24px', borderRadius: '50%', fontSize: '0.85rem', fontWeight: 'bold' }}>3</span>
                           <label className="form-label" style={{ margin: 0 }}>Select Call Buffer Delay between calls:</label>
                         </div>
                         <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '0.25rem 0 0.75rem 2rem' }}>
@@ -2899,7 +2871,7 @@ export default function App() {
                       </div>
 
                       {/* Start Campaign Bar */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(27, 59, 111, 0.03)', padding: '1rem 1.5rem', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(0, 0, 0, 0.03)', padding: '1rem 1.5rem', borderRadius: '12px', border: '1px solid var(--border)' }}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                             Selected University: <b>{universities.find(u => u.id === selectedUniversity)?.name || 'Vidyavision'}</b>
@@ -2933,7 +2905,7 @@ export default function App() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
 
                 {/* Active Campaign Info Header Panel */}
-                <div className="card" style={{ borderLeft: '5px solid var(--accent)', background: 'linear-gradient(135deg, rgba(241, 101, 34, 0.04) 0%, rgba(99, 102, 241, 0.04) 100%)' }}>
+                <div className="card">
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
                     <div>
                       <h2 style={{ fontSize: '1.35rem', fontWeight: '800', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -2986,7 +2958,7 @@ export default function App() {
                     </div>
                     <div style={{ backgroundColor: 'var(--bg-primary)', padding: '0.75rem 1rem', borderRadius: '8px', textAlign: 'center' }}>
                       <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', textTransform: 'uppercase', fontWeight: '700' }}>No Answer</span>
-                      <b style={{ fontSize: '1.5rem', color: '#fb7185' }}>{campaignState.unansweredCount}</b>
+                      <b style={{ fontSize: '1.5rem', color: '#f43f5e' }}>{campaignState.unansweredCount}</b>
                     </div>
                     <div style={{ backgroundColor: 'var(--bg-primary)', padding: '0.75rem 1rem', borderRadius: '8px', textAlign: 'center' }}>
                       <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', textTransform: 'uppercase', fontWeight: '700' }}>Remaining</span>
@@ -3001,7 +2973,7 @@ export default function App() {
 
                 {/* CURRENT ACTIVE CALL CARD (IF A CALL IS CURRENTLY PLACING) */}
                 {currentCall && (
-                  <div className="card" style={{ borderLeft: '4px solid #2dd4bf', backgroundColor: 'rgba(45, 212, 191, 0.03)', animation: 'pulse 3s infinite' }}>
+                  <div className="card" style={{ backgroundColor: 'rgba(45, 212, 191, 0.03)', animation: 'pulse 3s infinite' }}>
                     <h3 style={{ fontSize: '1rem', fontWeight: '700', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#0d9488' }}>
                       <span className="status-dot" style={{ backgroundColor: '#2dd4bf', boxShadow: '0 0 10px #2dd4bf' }} />
                       Actively Dialing Recipient Now
@@ -3134,15 +3106,12 @@ export default function App() {
             </div>
 
           </div>
+        </section>
         )}
 
-        {/* ========================================== */}
-        {/* TAB 2: INTERACTIVE CALL ANALYTICS DASHBOARD */}
-        {/* ========================================== */}
-        {/* ========================================== */}
-        {/* TAB 2: INTERACTIVE CALL ANALYTICS DASHBOARD */}
-        {/* ========================================== */}
-        {activeTab === 'dashboard' && (
+        {/* Dashboard */}
+        {view === 'dashboard' && (
+        <section id="dashboard" className="home-section">
           <div>
             <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '1rem' }}>
               <div>
@@ -3150,7 +3119,7 @@ export default function App() {
                 <p>Establishing Google Sheets as the source of truth for post-call summaries, academic preferences, and follow-up flags.</p>
                 {lastSyncedTime && (
                   <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.25rem' }}>
-                    <span className="status-dot animate-pulse" style={{ backgroundColor: isLoadingSheets ? '#fb923c' : '#4ade80', width: '7px', height: '7px', borderRadius: '50%', display: 'inline-block' }} />
+                    <span className="status-dot animate-pulse" style={{ backgroundColor: isLoadingSheets ? '#f97316' : '#22c55e', width: '7px', height: '7px', borderRadius: '50%', display: 'inline-block' }} />
                     {isLoadingSheets ? 'Refreshing data with Google Sheets...' : `Synced: ${lastSyncedTime.toLocaleTimeString()}`}
                   </span>
                 )}
@@ -3163,114 +3132,28 @@ export default function App() {
               </div>
             </div>
 
+            {/* Ops status banner: live sync + day totals at a glance */}
+            <div className="ops-banner">
+              <span className="live-dot" />
+              <span>{wsConnected ? 'Live' : 'Offline'}</span>
+              <span className="ops-sep">|</span>
+              <span>Dispatched <b>{totalDispatchedCount}</b></span>
+              <span>Answered <b>{answeredCount}</b></span>
+              <span>Interested <b>{interestedCount}</b></span>
+              <span>Callbacks <b>{callbackCount}</b></span>
+              {lastSyncedTime && <span className="ops-sep">|</span>}
+              {lastSyncedTime && <span>Synced {lastSyncedTime.toLocaleTimeString()}</span>}
+            </div>
+
             {/* Sync Error Notice */}
             {sheetsSyncError && (
-              <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '0.75rem 1.25rem', borderRadius: '8px', marginBottom: '1.25rem', color: '#f87171', fontSize: '0.85rem' }}>
+              <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '0.75rem 1.25rem', borderRadius: '8px', marginBottom: '1.25rem', color: '#ef4444', fontSize: '0.85rem' }}>
                 ⚠️ {sheetsSyncError}
               </div>
             )}
 
-            {/* Top-Level University Scope Selector (searchable dropdown — scales to many colleges) */}
-            <div style={{ marginBottom: '1.75rem', backgroundColor: 'rgba(27, 59, 111, 0.02)', padding: '1.25rem', borderRadius: '14px', border: '1px solid var(--border)' }}>
-              <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.75rem', display: 'block' }}>
-                Filter Dashboard by University ({universities.length + 1})
-              </label>
-
-              <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                <div style={{ position: 'relative', flex: '1 1 240px', minWidth: '200px', maxWidth: '380px' }}>
-                  <Search size={15} style={{ position: 'absolute', left: '0.8rem', top: '0.8rem', color: 'var(--text-muted)' }} />
-                  <input
-                    className="form-input"
-                    value={uniSearchDashboard}
-                    onChange={(e) => setUniSearchDashboard(e.target.value)}
-                    placeholder={`Search ${universities.length} colleges...`}
-                    style={{ paddingLeft: '2.3rem' }}
-                  />
-                </div>
-                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    className={`btn ${isAllUniScope ? 'btn-primary' : 'btn-secondary'}`}
-                    style={{ padding: '0.55rem 0.9rem', fontSize: '0.82rem' }}
-                    onClick={() => setDashboardUniversityFilter(['ALL'])}
-                  >
-                    🌐 All ({uniStats.ALL.total})
-                  </button>
-                  {!isAllUniScope && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      style={{ padding: '0.55rem 0.9rem', fontSize: '0.82rem' }}
-                      onClick={() => { setDashboardUniversityFilter(['ALL']); setUniSearchDashboard(''); }}
-                    >
-                      Clear ({dashboardUniversityFilter.length} selected)
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Multi-select college checkboxes (tick 1, 2 or more) */}
-              <div style={{ marginTop: '0.75rem', maxHeight: '190px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.35rem', paddingRight: '0.25rem' }}>
-                {universities
-                  .filter(u => {
-                    const q = uniSearchDashboard.trim().toLowerCase();
-                    if (!q) return true;
-                    return `${u.name} ${u.place || ''} ${u.languages || ''}`.toLowerCase().includes(q);
-                  })
-                  .map(u => {
-                    const count = (uniStats[u.id] || { total: 0 }).total;
-                    const checked = !isAllUniScope && dashboardUniversityFilter.includes(u.id);
-                    return (
-                      <label
-                        key={u.id}
-                        style={{
-                          display: 'flex', alignItems: 'center', gap: '0.6rem',
-                          padding: '0.5rem 0.75rem', borderRadius: '8px', cursor: 'pointer',
-                          border: checked ? '1px solid var(--accent)' : '1px solid var(--border)',
-                          backgroundColor: checked ? 'rgba(99, 102, 241, 0.08)' : 'var(--bg-card)',
-                          fontSize: '0.85rem'
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleUniScope(u.id)}
-                          style={{ width: '16px', height: '16px', accentColor: 'var(--accent)', cursor: 'pointer' }}
-                        />
-                        <span style={{ fontWeight: checked ? '700' : '500', flex: 1 }}>
-                          🎓 {u.name}{u.place ? <span style={{ color: '#818cf8', fontWeight: '600' }}> — {u.place}</span> : ''}
-                        </span>
-                        <span className="uni-count-badge">{count}</span>
-                      </label>
-                    );
-                  })}
-                {universities.filter(u => {
-                  const q = uniSearchDashboard.trim().toLowerCase();
-                  if (!q) return true;
-                  return `${u.name} ${u.place || ''} ${u.languages || ''}`.toLowerCase().includes(q);
-                }).length === 0 && (
-                  <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>No colleges match your search.</p>
-                )}
-              </div>
-
-              {/* Selected scope summary */}
-              <div style={{ marginTop: '0.75rem', fontSize: '0.83rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                <GraduationCap size={15} style={{ color: 'var(--accent)' }} />
-                {isAllUniScope ? (
-                  <span>Showing aggregate metrics across <b>{universities.length}</b> colleges • <b>{uniStats.ALL.total}</b> total calls</span>
-                ) : dashboardUniversityFilter.length === 1 ? (() => {
-                  const sel = universities.find(u => u.id === dashboardUniversityFilter[0]);
-                  const count = (uniStats[dashboardUniversityFilter[0]] || { total: 0 }).total;
-                  if (!sel) return <span>Unknown scope</span>;
-                  return <span>Showing <b>{sel.name}</b>{sel.place ? ` (${sel.place})` : ''} • <b>{count}</b> calls • 🗣️ {sel.languages || 'English, Hindi, Telugu'}</span>;
-                })() : (
-                  <span>Showing combined analytics for <b>{dashboardUniversityFilter.length} colleges</b> • <b>{totalDispatchedCount}</b> calls in scope</span>
-                )}
-              </div>
-            </div>
-
             {/* Interactive Cards Grid across Product-Level Outcomes */}
-            <div className="metrics-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+            <div className="metrics-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(168px, 1fr))' }}>
 
               {/* Card 1: Total Dispatched Calls */}
               <div
@@ -3279,7 +3162,7 @@ export default function App() {
               >
                 <div className="metric-header">
                   <span className="metric-title">Total Dispatched</span>
-                  <div className="metric-icon" style={{ backgroundColor: 'rgba(99, 102, 241, 0.15)', color: '#818cf8' }}>
+                  <div className="metric-icon" style={{ backgroundColor: 'rgba(0, 0, 0, 0.15)', color: 'var(--text-primary)' }}>
                     <PhoneCall size={20} />
                   </div>
                 </div>
@@ -3308,17 +3191,17 @@ export default function App() {
               {/* Card 3: Calls Not Answered */}
               <div
                 className={`metric-card ${dashboardFilter === CALL_OUTCOME_STATUS.NOT_ANSWERED ? 'active-metric-card' : ''}`}
-                style={{ borderColor: dashboardFilter === CALL_OUTCOME_STATUS.NOT_ANSWERED ? '#fb7185' : undefined }}
+                style={{ borderColor: dashboardFilter === CALL_OUTCOME_STATUS.NOT_ANSWERED ? '#f43f5e' : undefined }}
                 onClick={() => setDashboardFilter(CALL_OUTCOME_STATUS.NOT_ANSWERED)}
               >
                 <div className="metric-header">
-                  <span className="metric-title" style={{ color: '#fb7185' }}>Calls Not Answered</span>
-                  <div className="metric-icon" style={{ backgroundColor: 'rgba(244, 63, 94, 0.15)', color: '#fb7185' }}>
+                  <span className="metric-title" style={{ color: '#f43f5e' }}>Calls Not Answered</span>
+                  <div className="metric-icon" style={{ backgroundColor: 'rgba(244, 63, 94, 0.15)', color: '#f43f5e' }}>
                     <XCircle size={20} />
                   </div>
                 </div>
-                <div className="metric-value" style={{ color: '#fb7185' }}>{unansweredCount}</div>
-                <div className="metric-footer" style={{ color: '#fb7185' }}>
+                <div className="metric-value" style={{ color: '#f43f5e' }}>{unansweredCount}</div>
+                <div className="metric-footer" style={{ color: '#f43f5e' }}>
                   {totalDispatchedCount > 0 ? `${Math.round((unansweredCount / totalDispatchedCount) * 100)}% Missed rate` : 'Missed / Unreachable'}
                 </div>
               </div>
@@ -3329,13 +3212,13 @@ export default function App() {
                 onClick={() => setDashboardFilter(CALL_OUTCOME_STATUS.INTERESTED)}
               >
                 <div className="metric-header">
-                  <span className="metric-title" style={{ color: '#4ade80' }}>🟢 Interested</span>
-                  <div className="metric-icon" style={{ backgroundColor: 'rgba(34, 197, 94, 0.2)', color: '#4ade80' }}>
+                  <span className="metric-title" style={{ color: '#22c55e' }}>🟢 Interested</span>
+                  <div className="metric-icon" style={{ backgroundColor: 'rgba(34, 197, 94, 0.2)', color: '#22c55e' }}>
                     <ThumbsUp size={20} />
                   </div>
                 </div>
-                <div className="metric-value" style={{ color: '#4ade80' }}>{interestedCount}</div>
-                <div className="metric-footer" style={{ color: '#86efac' }}>
+                <div className="metric-value" style={{ color: '#22c55e' }}>{interestedCount}</div>
+                <div className="metric-footer" style={{ color: '#4ade80' }}>
                   {totalDispatchedCount > 0 ? `${Math.round((interestedCount / totalDispatchedCount) * 100)}% of Dispatched` : 'Explicitly interested'}
                 </div>
               </div>
@@ -3353,7 +3236,7 @@ export default function App() {
                   </div>
                 </div>
                 <div className="metric-value" style={{ color: '#06b6d4' }}>{applicationSentCount}</div>
-                <div className="metric-footer" style={{ color: '#67e8f9' }}>
+                <div className="metric-footer" style={{ color: '#22d3ee' }}>
                   {totalDispatchedCount > 0 ? `${Math.round((applicationSentCount / totalDispatchedCount) * 100)}% of Dispatched` : 'WhatsApp link sent'}
                 </div>
               </div>
@@ -3364,13 +3247,13 @@ export default function App() {
                 onClick={() => setDashboardFilter(CALL_OUTCOME_STATUS.CALLBACK)}
               >
                 <div className="metric-header">
-                  <span className="metric-title" style={{ color: '#fbbf24' }}>📞 Callback</span>
-                  <div className="metric-icon" style={{ backgroundColor: 'rgba(245, 158, 11, 0.18)', color: '#fbbf24' }}>
+                  <span className="metric-title" style={{ color: '#f59e0b' }}>📞 Callback</span>
+                  <div className="metric-icon" style={{ backgroundColor: 'rgba(245, 158, 11, 0.18)', color: '#f59e0b' }}>
                     <PhoneForwarded size={20} />
                   </div>
                 </div>
-                <div className="metric-value" style={{ color: '#fbbf24' }}>{callbackCount}</div>
-                <div className="metric-footer" style={{ color: '#fde68a' }}>
+                <div className="metric-value" style={{ color: '#f59e0b' }}>{callbackCount}</div>
+                <div className="metric-footer" style={{ color: '#fbbf24' }}>
                   {totalDispatchedCount > 0 ? `${Math.round((callbackCount / totalDispatchedCount) * 100)}% of Dispatched` : 'Requested callback'}
                 </div>
               </div>
@@ -3381,13 +3264,13 @@ export default function App() {
                 onClick={() => setDashboardFilter(CALL_OUTCOME_STATUS.ALREADY_APPLIED)}
               >
                 <div className="metric-header">
-                  <span className="metric-title" style={{ color: '#38bdf8' }}>📝 Already Applied</span>
-                  <div className="metric-icon" style={{ backgroundColor: 'rgba(56, 189, 248, 0.18)', color: '#38bdf8' }}>
+                  <span className="metric-title" style={{ color: '#0ea5e9' }}>📝 Already Applied</span>
+                  <div className="metric-icon" style={{ backgroundColor: 'rgba(56, 189, 248, 0.18)', color: '#0ea5e9' }}>
                     <FileCheck size={20} />
                   </div>
                 </div>
-                <div className="metric-value" style={{ color: '#38bdf8' }}>{alreadyAppliedCount}</div>
-                <div className="metric-footer" style={{ color: '#bae6fd' }}>
+                <div className="metric-value" style={{ color: '#0ea5e9' }}>{alreadyAppliedCount}</div>
+                <div className="metric-footer" style={{ color: '#7dd3fc' }}>
                   {totalDispatchedCount > 0 ? `${Math.round((alreadyAppliedCount / totalDispatchedCount) * 100)}% of Dispatched` : 'Submitted application'}
                 </div>
               </div>
@@ -3404,7 +3287,7 @@ export default function App() {
                   </div>
                 </div>
                 <div className="metric-value" style={{ color: '#a855f7' }}>{alreadyJoinedCount}</div>
-                <div className="metric-footer" style={{ color: '#d8b4fe' }}>
+                <div className="metric-footer" style={{ color: '#c084fc' }}>
                   {totalDispatchedCount > 0 ? `${Math.round((alreadyJoinedCount / totalDispatchedCount) * 100)}% of Dispatched` : 'Enrolled in college'}
                 </div>
               </div>
@@ -3415,13 +3298,13 @@ export default function App() {
                 onClick={() => setDashboardFilter(CALL_OUTCOME_STATUS.NOT_INTERESTED)}
               >
                 <div className="metric-header">
-                  <span className="metric-title" style={{ color: '#f87171' }}>🔴 Not Interested</span>
-                  <div className="metric-icon" style={{ backgroundColor: 'rgba(239, 68, 68, 0.2)', color: '#f87171' }}>
+                  <span className="metric-title" style={{ color: '#ef4444' }}>🔴 Not Interested</span>
+                  <div className="metric-icon" style={{ backgroundColor: 'rgba(239, 68, 68, 0.2)', color: '#ef4444' }}>
                     <ThumbsDown size={20} />
                   </div>
                 </div>
-                <div className="metric-value" style={{ color: '#f87171' }}>{notInterestedCount}</div>
-                <div className="metric-footer" style={{ color: '#fca5a5' }}>
+                <div className="metric-value" style={{ color: '#ef4444' }}>{notInterestedCount}</div>
+                <div className="metric-footer" style={{ color: '#f87171' }}>
                   {totalDispatchedCount > 0 ? `${Math.round((notInterestedCount / totalDispatchedCount) * 100)}% of Dispatched` : 'Declined / Working'}
                 </div>
               </div>
@@ -3432,13 +3315,13 @@ export default function App() {
                 onClick={() => setDashboardFilter(CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID)}
               >
                 <div className="metric-header">
-                  <span className="metric-title" style={{ color: '#fb923c' }}>⚠️ Wrong / Invalid</span>
-                  <div className="metric-icon" style={{ backgroundColor: 'rgba(251, 146, 60, 0.18)', color: '#fb923c' }}>
+                  <span className="metric-title" style={{ color: '#f97316' }}>⚠️ Wrong / Invalid</span>
+                  <div className="metric-icon" style={{ backgroundColor: 'rgba(251, 146, 60, 0.18)', color: '#f97316' }}>
                     <AlertTriangle size={20} />
                   </div>
                 </div>
-                <div className="metric-value" style={{ color: '#fb923c' }}>{wrongNumberCount}</div>
-                <div className="metric-footer" style={{ color: '#fed7aa' }}>
+                <div className="metric-value" style={{ color: '#f97316' }}>{wrongNumberCount}</div>
+                <div className="metric-footer" style={{ color: '#fdba74' }}>
                   {totalDispatchedCount > 0 ? `${Math.round((wrongNumberCount / totalDispatchedCount) * 100)}% of Dispatched` : 'Wrong or invalid number'}
                 </div>
               </div>
@@ -3456,7 +3339,7 @@ export default function App() {
                   </div>
                 </div>
                 <div className="metric-value" style={{ color: '#2dd4bf' }}>{counselorFollowupCount}</div>
-                <div className="metric-footer" style={{ color: '#5eead4' }}>
+                <div className="metric-footer" style={{ color: '#2dd4bf' }}>
                   {interestedCount > 0 ? `${Math.round((counselorFollowupCount / interestedCount) * 100)}% of Interested` : 'Secondary Action'}
                 </div>
               </div>
@@ -3498,7 +3381,7 @@ export default function App() {
                     </div>
                     <div style={{ flex: 1, backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', height: '26px', position: 'relative', overflow: 'hidden' }}>
                       <div style={{ width: '100%', backgroundColor: 'rgba(129, 140, 248, 0.35)', height: '100%' }}></div>
-                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff' }}>
+                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff', textShadow: '0 1px 3px rgba(0,0,0,0.65)' }}>
                         {totalDispatchedCount} leads (100%)
                       </span>
                     </div>
@@ -3526,7 +3409,7 @@ export default function App() {
                         backgroundColor: 'rgba(45, 212, 191, 0.35)',
                         height: '100%'
                       }}></div>
-                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff' }}>
+                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff', textShadow: '0 1px 3px rgba(0,0,0,0.65)' }}>
                         {answeredCount} leads {totalDispatchedCount > 0 && `(${Math.round((answeredCount / totalDispatchedCount) * 100)}% of Dispatched)`}
                       </span>
                     </div>
@@ -3545,7 +3428,7 @@ export default function App() {
                       backgroundColor: dashboardFilter === CALL_OUTCOME_STATUS.NOT_ANSWERED ? 'rgba(244, 63, 94, 0.08)' : 'transparent'
                     }}
                   >
-                    <div style={{ width: '150px', fontSize: '0.8rem', color: '#fb7185', fontWeight: '700' }}>
+                    <div style={{ width: '150px', fontSize: '0.8rem', color: '#f43f5e', fontWeight: '700' }}>
                       3. Calls Not Answered
                     </div>
                     <div style={{ flex: 1, backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', height: '26px', position: 'relative', overflow: 'hidden' }}>
@@ -3554,7 +3437,7 @@ export default function App() {
                         backgroundColor: 'rgba(244, 63, 94, 0.35)',
                         height: '100%'
                       }}></div>
-                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff' }}>
+                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff', textShadow: '0 1px 3px rgba(0,0,0,0.65)' }}>
                         {unansweredCount} leads {totalDispatchedCount > 0 && `(${Math.round((unansweredCount / totalDispatchedCount) * 100)}% of Dispatched)`}
                       </span>
                     </div>
@@ -3573,7 +3456,7 @@ export default function App() {
                       backgroundColor: dashboardFilter === CALL_OUTCOME_STATUS.INTERESTED ? 'rgba(74, 222, 128, 0.08)' : 'transparent'
                     }}
                   >
-                    <div style={{ width: '150px', fontSize: '0.8rem', color: '#4ade80', fontWeight: '700' }}>
+                    <div style={{ width: '150px', fontSize: '0.8rem', color: '#22c55e', fontWeight: '700' }}>
                       4. Interested
                     </div>
                     <div style={{ flex: 1, backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', height: '26px', position: 'relative', overflow: 'hidden' }}>
@@ -3582,7 +3465,7 @@ export default function App() {
                         backgroundColor: 'rgba(74, 222, 128, 0.35)',
                         height: '100%'
                       }}></div>
-                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff' }}>
+                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff', textShadow: '0 1px 3px rgba(0,0,0,0.65)' }}>
                         {interestedCount} leads {answeredCount > 0 && `(${Math.round((interestedCount / answeredCount) * 100)}% of Answered)`}
                       </span>
                     </div>
@@ -3601,7 +3484,7 @@ export default function App() {
                       backgroundColor: dashboardFilter === CALL_OUTCOME_STATUS.CALLBACK ? 'rgba(245, 158, 11, 0.08)' : 'transparent'
                     }}
                   >
-                    <div style={{ width: '150px', fontSize: '0.8rem', color: '#fbbf24', fontWeight: '700' }}>
+                    <div style={{ width: '150px', fontSize: '0.8rem', color: '#f59e0b', fontWeight: '700' }}>
                       5. Callback
                     </div>
                     <div style={{ flex: 1, backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', height: '26px', position: 'relative', overflow: 'hidden' }}>
@@ -3610,7 +3493,7 @@ export default function App() {
                         backgroundColor: 'rgba(245, 158, 11, 0.35)',
                         height: '100%'
                       }}></div>
-                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff' }}>
+                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff', textShadow: '0 1px 3px rgba(0,0,0,0.65)' }}>
                         {callbackCount} leads {answeredCount > 0 && `(${Math.round((callbackCount / answeredCount) * 100)}% of Answered)`}
                       </span>
                     </div>
@@ -3629,7 +3512,7 @@ export default function App() {
                       backgroundColor: dashboardFilter === CALL_OUTCOME_STATUS.ALREADY_APPLIED ? 'rgba(56, 189, 248, 0.08)' : 'transparent'
                     }}
                   >
-                    <div style={{ width: '150px', fontSize: '0.8rem', color: '#38bdf8', fontWeight: '700' }}>
+                    <div style={{ width: '150px', fontSize: '0.8rem', color: '#0ea5e9', fontWeight: '700' }}>
                       6. Already Applied
                     </div>
                     <div style={{ flex: 1, backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', height: '26px', position: 'relative', overflow: 'hidden' }}>
@@ -3638,7 +3521,7 @@ export default function App() {
                         backgroundColor: 'rgba(56, 189, 248, 0.35)',
                         height: '100%'
                       }}></div>
-                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff' }}>
+                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff', textShadow: '0 1px 3px rgba(0,0,0,0.65)' }}>
                         {alreadyAppliedCount} leads {answeredCount > 0 && `(${Math.round((alreadyAppliedCount / answeredCount) * 100)}% of Answered)`}
                       </span>
                     </div>
@@ -3666,7 +3549,7 @@ export default function App() {
                         backgroundColor: 'rgba(168, 85, 247, 0.35)',
                         height: '100%'
                       }}></div>
-                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff' }}>
+                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff', textShadow: '0 1px 3px rgba(0,0,0,0.65)' }}>
                         {alreadyJoinedCount} leads {answeredCount > 0 && `(${Math.round((alreadyJoinedCount / answeredCount) * 100)}% of Answered)`}
                       </span>
                     </div>
@@ -3685,7 +3568,7 @@ export default function App() {
                       backgroundColor: dashboardFilter === CALL_OUTCOME_STATUS.NOT_INTERESTED ? 'rgba(239, 68, 68, 0.08)' : 'transparent'
                     }}
                   >
-                    <div style={{ width: '150px', fontSize: '0.8rem', color: '#f87171', fontWeight: '700' }}>
+                    <div style={{ width: '150px', fontSize: '0.8rem', color: '#ef4444', fontWeight: '700' }}>
                       8. Not Interested
                     </div>
                     <div style={{ flex: 1, backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', height: '26px', position: 'relative', overflow: 'hidden' }}>
@@ -3694,7 +3577,7 @@ export default function App() {
                         backgroundColor: 'rgba(239, 68, 68, 0.35)',
                         height: '100%'
                       }}></div>
-                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff' }}>
+                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff', textShadow: '0 1px 3px rgba(0,0,0,0.65)' }}>
                         {notInterestedCount} leads {answeredCount > 0 && `(${Math.round((notInterestedCount / answeredCount) * 100)}% of Answered)`}
                       </span>
                     </div>
@@ -3713,7 +3596,7 @@ export default function App() {
                       backgroundColor: dashboardFilter === CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID ? 'rgba(251, 146, 60, 0.08)' : 'transparent'
                     }}
                   >
-                    <div style={{ width: '150px', fontSize: '0.8rem', color: '#fb923c', fontWeight: '700' }}>
+                    <div style={{ width: '150px', fontSize: '0.8rem', color: '#f97316', fontWeight: '700' }}>
                       9. Wrong / Invalid
                     </div>
                     <div style={{ flex: 1, backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', height: '26px', position: 'relative', overflow: 'hidden' }}>
@@ -3722,7 +3605,7 @@ export default function App() {
                         backgroundColor: 'rgba(251, 146, 60, 0.35)',
                         height: '100%'
                       }}></div>
-                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff' }}>
+                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff', textShadow: '0 1px 3px rgba(0,0,0,0.65)' }}>
                         {wrongNumberCount} leads {answeredCount > 0 && `(${Math.round((wrongNumberCount / answeredCount) * 100)}% of Answered)`}
                       </span>
                     </div>
@@ -3789,6 +3672,105 @@ export default function App() {
 
             </div>
 
+            {/* Top-Level University Scope Selector (searchable dropdown — scales to many colleges) */}
+            <div style={{ marginBottom: '1.75rem', marginTop: '1.25rem', backgroundColor: 'rgba(0, 0, 0, 0.02)', padding: '1.25rem', borderRadius: '14px', border: '1px solid var(--border)' }}>
+              <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.75rem', display: 'block' }}>
+                Filter Dashboard by University ({universities.length + 1})
+              </label>
+
+              <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                <div style={{ position: 'relative', flex: '1 1 240px', minWidth: '200px', maxWidth: '380px' }}>
+                  <Search size={15} style={{ position: 'absolute', left: '0.8rem', top: '0.8rem', color: 'var(--text-muted)' }} />
+                  <input
+                    className="form-input"
+                    value={uniSearchDashboard}
+                    onChange={(e) => setUniSearchDashboard(e.target.value)}
+                    placeholder={`Search ${universities.length} colleges...`}
+                    style={{ paddingLeft: '2.3rem' }}
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className={`btn ${isAllUniScope ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ padding: '0.55rem 0.9rem', fontSize: '0.82rem' }}
+                    onClick={() => setDashboardUniversityFilter(['ALL'])}
+                  >
+                    🌐 All ({uniStats.ALL.total})
+                  </button>
+                  {!isAllUniScope && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ padding: '0.55rem 0.9rem', fontSize: '0.82rem' }}
+                      onClick={() => { setDashboardUniversityFilter(['ALL']); setUniSearchDashboard(''); }}
+                    >
+                      Clear ({dashboardUniversityFilter.length} selected)
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Multi-select college checkboxes (tick 1, 2 or more) */}
+              <div style={{ marginTop: '0.75rem', maxHeight: '190px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.35rem', paddingRight: '0.25rem' }}>
+                {universities
+                  .filter(u => {
+                    const q = uniSearchDashboard.trim().toLowerCase();
+                    if (!q) return true;
+                    return `${u.name} ${u.place || ''} ${u.languages || ''}`.toLowerCase().includes(q);
+                  })
+                  .map(u => {
+                    const count = (uniStats[u.id] || { total: 0 }).total;
+                    const checked = !isAllUniScope && dashboardUniversityFilter.includes(u.id);
+                    return (
+                      <label
+                        key={u.id}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '0.6rem',
+                          padding: '0.5rem 0.75rem', borderRadius: '8px', cursor: 'pointer',
+                          border: checked ? '1px solid var(--accent)' : '1px solid var(--border)',
+                          backgroundColor: checked ? 'rgba(0, 0, 0, 0.08)' : 'var(--bg-card)',
+                          fontSize: '0.85rem'
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleUniScope(u.id)}
+                          style={{ width: '16px', height: '16px', accentColor: 'var(--accent)', cursor: 'pointer' }}
+                        />
+                        <span style={{ fontWeight: checked ? '700' : '500', flex: 1 }}>
+                          🎓 {u.name}{u.place ? <span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}> — {u.place}</span> : ''}
+                        </span>
+                        <span className="uni-count-badge">{count}</span>
+                      </label>
+                    );
+                  })}
+                {universities.filter(u => {
+                  const q = uniSearchDashboard.trim().toLowerCase();
+                  if (!q) return true;
+                  return `${u.name} ${u.place || ''} ${u.languages || ''}`.toLowerCase().includes(q);
+                }).length === 0 && (
+                  <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>No colleges match your search.</p>
+                )}
+              </div>
+
+              {/* Selected scope summary */}
+              <div style={{ marginTop: '0.75rem', fontSize: '0.83rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <GraduationCap size={15} style={{ color: 'var(--accent)' }} />
+                {isAllUniScope ? (
+                  <span>Showing aggregate metrics across <b>{universities.length}</b> colleges • <b>{uniStats.ALL.total}</b> total calls</span>
+                ) : dashboardUniversityFilter.length === 1 ? (() => {
+                  const sel = universities.find(u => u.id === dashboardUniversityFilter[0]);
+                  const count = (uniStats[dashboardUniversityFilter[0]] || { total: 0 }).total;
+                  if (!sel) return <span>Unknown scope</span>;
+                  return <span>Showing <b>{sel.name}</b>{sel.place ? ` (${sel.place})` : ''} • <b>{count}</b> calls • 🗣️ {sel.languages || 'English, Hindi, Telugu'}</span>;
+                })() : (
+                  <span>Showing combined analytics for <b>{dashboardUniversityFilter.length} colleges</b> • <b>{totalDispatchedCount}</b> calls in scope</span>
+                )}
+              </div>
+            </div>
+
             {/* University-Wise Performance & Outcome Breakdown Matrix (Dynamically Configured) */}
             <div className="card" style={{ marginTop: '1.25rem', padding: '1.25rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
@@ -3807,14 +3789,14 @@ export default function App() {
                       <th>University</th>
                       <th style={{ textAlign: 'center' }}>Total</th>
                       <th style={{ textAlign: 'center', color: '#2dd4bf' }}>Answered</th>
-                      <th style={{ textAlign: 'center', color: '#4ade80' }}>Interested</th>
+                      <th style={{ textAlign: 'center', color: '#22c55e' }}>Interested</th>
                       <th style={{ textAlign: 'center', color: '#06b6d4' }}>App Sent</th>
-                      <th style={{ textAlign: 'center', color: '#fbbf24' }}>Callback</th>
-                      <th style={{ textAlign: 'center', color: '#38bdf8' }}>Already Applied</th>
+                      <th style={{ textAlign: 'center', color: '#f59e0b' }}>Callback</th>
+                      <th style={{ textAlign: 'center', color: '#0ea5e9' }}>Already Applied</th>
                       <th style={{ textAlign: 'center', color: '#a855f7' }}>Already Joined</th>
-                      <th style={{ textAlign: 'center', color: '#f87171' }}>Not Interested</th>
-                      <th style={{ textAlign: 'center', color: '#fb923c' }}>Wrong / Invalid</th>
-                      <th style={{ textAlign: 'center', color: '#fb7185' }}>Not Answered</th>
+                      <th style={{ textAlign: 'center', color: '#ef4444' }}>Not Interested</th>
+                      <th style={{ textAlign: 'center', color: '#f97316' }}>Wrong / Invalid</th>
+                      <th style={{ textAlign: 'center', color: '#f43f5e' }}>Not Answered</th>
                       <th style={{ textAlign: 'center' }}>Conversion</th>
                     </tr>
                   </thead>
@@ -3841,7 +3823,7 @@ export default function App() {
                           title="Click to add/remove this college from the analytics scope"
                           style={{
                             cursor: 'pointer',
-                            backgroundColor: isSelected ? 'rgba(99, 102, 241, 0.08)' : undefined,
+                            backgroundColor: isSelected ? 'rgba(0, 0, 0, 0.08)' : undefined,
                             borderLeft: isSelected ? '4px solid var(--accent)' : '4px solid transparent'
                           }}
                         >
@@ -3850,14 +3832,14 @@ export default function App() {
                           </td>
                           <td style={{ textAlign: 'center', fontWeight: '700' }}>{data.total}</td>
                           <td style={{ textAlign: 'center', color: '#2dd4bf', fontWeight: '600' }}>{data.answered}</td>
-                          <td style={{ textAlign: 'center', color: '#4ade80', fontWeight: '700' }}>{data.interested}</td>
+                          <td style={{ textAlign: 'center', color: '#22c55e', fontWeight: '700' }}>{data.interested}</td>
                           <td style={{ textAlign: 'center', color: '#06b6d4', fontWeight: '700' }}>{data.applicationSent || 0}</td>
-                          <td style={{ textAlign: 'center', color: '#fbbf24', fontWeight: '700' }}>{data.callback}</td>
-                          <td style={{ textAlign: 'center', color: '#38bdf8', fontWeight: '600' }}>{data.alreadyApplied}</td>
+                          <td style={{ textAlign: 'center', color: '#f59e0b', fontWeight: '700' }}>{data.callback}</td>
+                          <td style={{ textAlign: 'center', color: '#0ea5e9', fontWeight: '600' }}>{data.alreadyApplied}</td>
                           <td style={{ textAlign: 'center', color: '#a855f7', fontWeight: '600' }}>{data.alreadyJoined}</td>
-                          <td style={{ textAlign: 'center', color: '#f87171', fontWeight: '600' }}>{data.notInterested}</td>
-                          <td style={{ textAlign: 'center', color: '#fb923c', fontWeight: '600' }}>{data.wrongNumber}</td>
-                          <td style={{ textAlign: 'center', color: '#fb7185', fontWeight: '600' }}>{data.unanswered}</td>
+                          <td style={{ textAlign: 'center', color: '#ef4444', fontWeight: '600' }}>{data.notInterested}</td>
+                          <td style={{ textAlign: 'center', color: '#f97316', fontWeight: '600' }}>{data.wrongNumber}</td>
+                          <td style={{ textAlign: 'center', color: '#f43f5e', fontWeight: '600' }}>{data.unanswered}</td>
                           <td style={{ textAlign: 'center', fontWeight: '700' }}>
                             <span className="status-pill completed" style={{ fontSize: '0.75rem' }}>{convRate}%</span>
                           </td>
@@ -3991,6 +3973,25 @@ export default function App() {
 
               </div>
 
+              {(() => {
+                const cbs = (mergedCalls || [])
+                  .filter(c => (c.final_status || c.finalStatus || c.interestStatus) === CALL_OUTCOME_STATUS.CALLBACK)
+                  .sort((a, b) => new Date(b.callDate || 0) - new Date(a.callDate || 0))
+                  .slice(0, 5);
+                if (cbs.length === 0) return null;
+                return (
+                  <div className="callback-strip">
+                    {cbs.map(c => (
+                      <div key={c.id || c.contactNumber} className="callback-chip" onClick={() => openCallModal(c)} style={{ cursor: 'pointer' }}>
+                        <b>{c.studentName || c.contactNumber}</b>
+                        <span>{c.contactNumber}</span>
+                        <span>{c.callDate ? new Date(c.callDate).toLocaleDateString() : ''}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '1rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                   <Filter size={18} style={{ color: 'var(--accent)' }} />
@@ -4069,7 +4070,7 @@ export default function App() {
                             {/* 1. Student Profile */}
                             <td>
                               <div style={{ fontWeight: '700', fontSize: '0.92rem', color: 'var(--text-primary)' }}>{call.studentName}</div>
-                              <div style={{ fontSize: '0.8rem', color: '#a5b4fc', fontFamily: 'var(--mono)' }}>{call.contactNumber}</div>
+                              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontFamily: 'var(--mono)' }}>{call.contactNumber}</div>
                               {call.email && call.email !== '—' && (
                                 <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{call.email}</div>
                               )}
@@ -4169,7 +4170,7 @@ export default function App() {
                                 <span style={{
                                   fontSize: '0.82rem',
                                   fontWeight: '700',
-                                  color: '#fb7185'
+                                  color: '#f43f5e'
                                 }}>
                                   No Answer
                                 </span>
@@ -4177,7 +4178,7 @@ export default function App() {
                                 <span style={{
                                   fontSize: '0.82rem',
                                   fontWeight: '700',
-                                  color: isInterestedLead(call) ? '#4ade80' : '#f87171'
+                                  color: isInterestedLead(call) ? '#22c55e' : '#ef4444'
                                 }}>
                                   {isInterestedLead(call) ? 'Interested' : 'Not Interested'}
                                 </span>
@@ -4233,12 +4234,12 @@ export default function App() {
 
             </div>
           </div>
+        </section>
         )}
 
-        {/* ========================================== */}
-        {/* TAB 3: RECENT CALL LOGS */}
-        {/* ========================================== */}
-        {activeTab === 'calls' && (
+        {/* Recent Calls */}
+        {view === 'calls' && (
+        <section id="calls" className="home-section">
           <div>
             <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '1rem' }}>
               <div>
@@ -4324,6 +4325,7 @@ export default function App() {
               )}
             </div>
           </div>
+        </section>
         )}
 
       </main>
@@ -4399,7 +4401,7 @@ export default function App() {
 
                     {/* Student Info Card */}
                     <div className="card" style={{ padding: '1.25rem', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)' }}>
-                      <h3 style={{ fontSize: '0.92rem', fontWeight: '700', marginBottom: '0.85rem', color: '#818cf8', textTransform: 'uppercase', letterSpacing: '0.5px' }}>👤 Student Profile</h3>
+                      <h3 style={{ fontSize: '0.92rem', fontWeight: '700', marginBottom: '0.85rem', color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>👤 Student Profile</h3>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
                           <span style={{ color: 'var(--text-muted)' }}>Name:</span>
@@ -4519,13 +4521,13 @@ export default function App() {
                           <span style={{ color: 'var(--text-muted)' }}>Callback Required:</span>
                           <span style={{
                             fontWeight: '700',
-                            color: String(callbackRequired).toLowerCase().includes('yes') || primaryStatus === CALL_OUTCOME_STATUS.CALLBACK ? '#fbbf24' : 'var(--text-primary)'
+                            color: String(callbackRequired).toLowerCase().includes('yes') || primaryStatus === CALL_OUTCOME_STATUS.CALLBACK ? '#f59e0b' : 'var(--text-primary)'
                           }}>{String(callbackRequired).toLowerCase().includes('yes') || primaryStatus === CALL_OUTCOME_STATUS.CALLBACK ? 'Yes' : 'No'}</span>
                         </div>
                         {getCallbackTime(selectedCall) && (
                           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
                             <span style={{ color: 'var(--text-muted)' }}>Callback Time:</span>
-                            <span style={{ fontWeight: '700', color: '#fbbf24' }}>🕒 {getCallbackTime(selectedCall)}</span>
+                            <span style={{ fontWeight: '700', color: '#f59e0b' }}>🕒 {getCallbackTime(selectedCall)}</span>
                           </div>
                         )}
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
@@ -4768,7 +4770,7 @@ export default function App() {
                       <div key={uni.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.45rem 0.75rem', backgroundColor: 'var(--bg-card)', borderRadius: '6px', border: '1px solid var(--border)' }}>
                         <div>
                           <strong style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>🎓 {uni.name}</strong>
-                          {uni.place && <span style={{ fontSize: '0.76rem', color: '#818cf8', marginLeft: '0.4rem' }}>({uni.place})</span>}
+                          {uni.place && <span style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginLeft: '0.4rem' }}>({uni.place})</span>}
                           {uni.kbFileId && <span style={{ fontSize: '0.72rem', color: '#22c55e', marginLeft: '0.4rem' }}>📎 {uni.kbFileName || `KB ${uni.kbFileId}`}</span>}
                           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>🕒 {uni.createdAt ? new Date(uni.createdAt).toLocaleString() : '—'}</div>
                         </div>

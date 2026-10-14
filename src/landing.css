@@ -1,0 +1,18 @@
+/* Floating nav + shared app shells (monochrome, both themes). */
+.land-navwrap { position: sticky; top: 12px; z-index: 50; display: flex; justify-content: center; padding: 0 16px; }
+.land-nav { display: flex; align-items: center; gap: 2rem; background: rgba(255,255,255,0.85); backdrop-filter: blur(12px); border: 1px solid #e5e7eb; border-radius: 999px; padding: 0.55rem 0.6rem 0.55rem 1.2rem; width: 100%; max-width: 1080px; box-shadow: 0 10px 30px rgba(0,0,0,0.06); }
+[data-theme="dark"] .land-nav { background: rgba(11,11,18,0.88); border-color: rgba(255,255,255,0.12); box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+.land-brand { font-weight: 700; font-size: 0.95rem; display: flex; align-items: center; gap: 0.45rem; }
+.land-brand i { font-style: normal; background: #000; color: #fff; border-radius: 7px; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.75rem; }
+[data-theme="dark"] .land-brand i { background: #fff; color: #000; }
+.land-links { display: flex; gap: 1.6rem; margin-right: auto; }
+.land-links a { color: #525252; text-decoration: none; font-size: 0.88rem; font-weight: 500; }
+[data-theme="dark"] .land-links a { color: #a1a1c2; }
+.land-navright { display: flex; align-items: center; gap: 0.4rem; }
+.land-signup { background: #000; color: #fff; border: none; border-radius: 999px; padding: 0.55rem 1.15rem; font-size: 0.88rem; font-weight: 500; cursor: pointer; }
+[data-theme="dark"] .land-signup { background: #fff; color: #000; }
+.home-section { scroll-margin-top: 84px; border-top: 1px solid var(--border); padding-top: 2.5rem; }
+.app-container { padding-bottom: 48px; }
+.land-nav .theme-toggle { border: 1px solid #e5e7eb; color: inherit; padding: 0.45rem 0.6rem; }
+[data-theme="dark"] .land-nav .theme-toggle { border-color: rgba(255,255,255,0.12); }
+@media (max-width: 720px) { .land-links { display: none; } }
