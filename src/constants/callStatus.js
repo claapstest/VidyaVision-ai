@@ -368,10 +368,24 @@ export function isCounselorFollowupRequired(item) {
   const raw = String(
     item.counselorRequired ||
     item.counselor_required ||
-    (item.rawFields && (item.rawFields.counselor_required || item.rawFields.counselor)) ||
+    item.counsellor_follow_up ||
+    item.counselor_follow_up ||
+    item.counselor_followup ||
+    (item.rawFields && (
+      item.rawFields.counselor_required ||
+      item.rawFields.counselor ||
+      item.rawFields.counsellor_follow_up ||
+      item.rawFields.counselor_follow_up ||
+      item.rawFields.counselor_followup
+    )) ||
     ''
   ).toLowerCase().trim();
-  return raw === 'yes' || raw === 'true' || raw === '1' || raw.includes('required');
+  if (raw === 'yes' || raw === 'true' || raw === '1' || raw.includes('required')) return true;
+  if (raw === 'no' || raw === 'false' || raw === '0') return false;
+
+  const text = `${item.call_conversation || ''} ${item.transcript || ''} ${item.summary || ''} ${item.details || ''} ${item.call_summary || ''}`.toLowerCase();
+  return /\b(counselor|counsellor|advisor)\b.{0,60}\b(call|follow\s*up|connect|speak|talk|guidance|guide|assist)\b/i.test(text)
+    || /\b(call|follow\s*up|connect|speak)\b.{0,60}\b(counselor|counsellor|advisor)\b/i.test(text);
 }
 
 /**
