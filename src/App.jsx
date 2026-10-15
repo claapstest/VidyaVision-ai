@@ -10,7 +10,6 @@ import {
   Trash2,
   User,
   Phone,
-  Clock,
   Upload,
   Play,
   Pause,
@@ -19,13 +18,11 @@ import {
   Plus,
   Users,
   CheckCircle,
-  HelpCircle,
   Download,
   Search,
   Volume2,
   Filter,
   GraduationCap,
-  BookOpen,
   ThumbsUp,
   ThumbsDown,
   Edit3,
@@ -37,7 +34,6 @@ import {
 import * as XLSX from 'xlsx';
 import {
   CALL_OUTCOME_STATUS,
-  STATUS_DISPLAY_CONFIG,
   resolveCallFinalStatus,
   getStatusDisplay,
   isCounselorFollowupRequired,
@@ -103,7 +99,7 @@ export default function App() {
       const raw = localStorage.getItem('vv_recent_contacts');
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) return parsed.slice(0, 50);
-    } catch (e) {}
+    } catch {}
     return [];
   };
   const [recentContacts, setRecentContacts] = useState(getInitialRecent);
@@ -113,22 +109,32 @@ export default function App() {
   const pushRecentContacts = (items) => {
     if (!items || items.length === 0) return;
     setRecentContacts(prev => {
+      // Previously saved extras win over incoming blanks (re-dials keep data).
+      const prevExtras = new Map();
+      prev.forEach(p => {
+        const k = String(p.formattedPhone || p.phone || '').replace(/\D/g, '').slice(-10);
+        if (k && p.extra && typeof p.extra === 'object' && Object.keys(p.extra).length > 0 && !prevExtras.has(k)) {
+          prevExtras.set(k, p.extra);
+        }
+      });
       const seen = new Map();
       [...items, ...prev].forEach(c => {
         const key = String(c.formattedPhone || c.phone || '').replace(/\D/g, '').slice(-10);
         if (key && !seen.has(key)) {
+          const incoming = (c.extra && typeof c.extra === 'object') ? c.extra : {};
           seen.set(key, {
             name: c.name || '',
             phone: String(c.phone || '').replace(/\D/g, ''),
             formattedPhone: c.formattedPhone || '',
             universityId: c.universityId || '',
             universityName: c.universityName || c.college || '',
+            extra: Object.keys(incoming).length > 0 ? incoming : (prevExtras.get(key) || {}),
             usedAt: c.usedAt || new Date().toISOString()
           });
         }
       });
       const next = Array.from(seen.values()).slice(0, 50);
-      try { localStorage.setItem('vv_recent_contacts', JSON.stringify(next)); } catch (e) {}
+      try { localStorage.setItem('vv_recent_contacts', JSON.stringify(next)); } catch {}
       return next;
     });
   };
@@ -141,7 +147,8 @@ export default function App() {
         phone: String(r.phone || '').replace(/\D/g, ''),
         formattedPhone: formatted,
         name: (r.name || '').trim(),
-        hasName: Boolean((r.name || '').trim())
+        hasName: Boolean((r.name || '').trim()),
+        extra: (r.extra && typeof r.extra === 'object') ? r.extra : {}
       } : null;
     }).filter(Boolean);
     if (valid.length === 0) {
@@ -167,7 +174,7 @@ export default function App() {
       const raw = localStorage.getItem('vv_recent_files');
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) return parsed.slice(0, RECENT_FILES_MAX);
-    } catch (e) {}
+    } catch {}
     return [];
   };
   const [recentFiles, setRecentFiles] = useState(getInitialRecentFiles);
@@ -176,7 +183,7 @@ export default function App() {
     if (!entry || !entry.fileName) return;
     setRecentFiles(prev => {
       const next = [{ ...entry, id: `file-${Date.now()}` }, ...prev.filter(f => f.fileName !== entry.fileName)].slice(0, RECENT_FILES_MAX);
-      try { localStorage.setItem('vv_recent_files', JSON.stringify(next)); } catch (e) {}
+      try { localStorage.setItem('vv_recent_files', JSON.stringify(next)); } catch {}
       return next;
     });
   };
@@ -193,7 +200,8 @@ export default function App() {
         phone: String(r.phone || '').replace(/\D/g, ''),
         formattedPhone: formatted,
         name: (r.name || '').trim(),
-        hasName: Boolean((r.name || '').trim())
+        hasName: Boolean((r.name || '').trim()),
+        extra: (r.extra && typeof r.extra === 'object') ? r.extra : {}
       } : null;
     }).filter(Boolean);
     if (valid.length === 0) {
@@ -214,7 +222,7 @@ export default function App() {
   const handleDeleteRecentFile = (id) => {
     setRecentFiles(prev => {
       const next = prev.filter(f => f.id !== id);
-      try { localStorage.setItem('vv_recent_files', JSON.stringify(next)); } catch (e) {}
+      try { localStorage.setItem('vv_recent_files', JSON.stringify(next)); } catch {}
       return next;
     });
   };
@@ -344,14 +352,9 @@ export default function App() {
 
   // Transcript Modal State
   const [selectedCall, setSelectedCall] = useState(null);
-  const [editingInterestStatus, setEditingInterestStatus] = useState('PENDING');
   const [showCollegeModal, setShowCollegeModal] = useState(false);
   const [showManageColleges, setShowManageColleges] = useState(true);
   const [isSavingCollege, setIsSavingCollege] = useState(false);
-  const [editingCollege, setEditingCollege] = useState('');
-  const [editingCourse, setEditingCourse] = useState('');
-  const [editingNotes, setEditingNotes] = useState('');
-  const [isSavingInterest, setIsSavingInterest] = useState(false);
   const [deletingCollegeId, setDeletingCollegeId] = useState('');
   const [editingCollegeId, setEditingCollegeId] = useState('');
   const [collegeKbFile, setCollegeKbFile] = useState(null);
@@ -374,7 +377,7 @@ export default function App() {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
-    } catch (e) {}
+    } catch {}
     return DEFAULT_COLLEGES;
   };
 
@@ -386,7 +389,7 @@ export default function App() {
       setSelectedUniversity(universities[0].id);
       setSelectedCourse('');
     }
-  }, [universities]);
+  }, [universities, selectedUniversity]);
 
   // Dashboard multi-select scope helpers (after universities is defined)
   const isAllUniScope = dashboardUniversityFilter.includes('ALL') || dashboardUniversityFilter.length === 0;
@@ -401,7 +404,7 @@ export default function App() {
       setUniversities(items);
       try {
         localStorage.setItem('vv_colleges_cache', JSON.stringify(items));
-      } catch (e) {}
+      } catch {}
     }
   };
 
@@ -653,7 +656,7 @@ export default function App() {
         setTimeout(connectWs, 3000);
       };
 
-      socket.onerror = (err) => {
+      socket.onerror = () => {
         socket.close();
       };
     };
@@ -701,7 +704,7 @@ export default function App() {
       } else {
         setSheetsSyncError(data.error || 'Failed to load call analytics.');
       }
-    } catch (err) {
+    } catch {
       setSheetsSyncError('Network error connecting to backend API.');
     } finally {
       setIsLoadingSheets(false);
@@ -832,6 +835,9 @@ export default function App() {
         }
 
         const headers = jsonData[0].map(h => String(h || '').trim().toLowerCase());
+        // Original header text (case preserved) for extra pass-through columns
+        // like EmailID / State / District — carried into the campaign download.
+        const rawHeaders = jsonData[0].map(h => String(h ?? '').trim());
 
         let phoneIdx = headers.findIndex(h => h.includes('phone') || h.includes('mobile') || h.includes('number') || h.includes('contact'));
         let nameIdx = headers.findIndex(h => h.includes('name') || h.includes('student') || h.includes('person') || h.includes('user'));
@@ -850,12 +856,21 @@ export default function App() {
 
           const formatted = validatePhone(rawPhone);
           if (formatted) {
+            // Every non-phone/name column rides along verbatim (EmailID, State, …)
+            const extra = {};
+            row.forEach((val, ci) => {
+              if (ci === phoneIdx || ci === nameIdx) return;
+              const key = rawHeaders[ci] || `Column_${ci + 1}`;
+              const v = val !== undefined && val !== null ? String(val).trim() : '';
+              if (key && v !== '') extra[key] = v;
+            });
             parsedContacts.push({
               id: `excel-${Date.now()}-${i}`,
               phone: rawPhone.replace(/\D/g, ''),
               formattedPhone: formatted,
               name: rawName.trim(),
-              hasName: Boolean(rawName.trim())
+              hasName: Boolean(rawName.trim()),
+              extra
             });
           }
         }
@@ -876,7 +891,7 @@ export default function App() {
             fileSize: (file.size / 1024).toFixed(1) + ' KB',
             count: parsedContacts.length,
             uploadedAt: new Date().toISOString(),
-            contacts: parsedContacts.slice(0, RECENT_FILE_CONTACTS_MAX).map(c => ({ phone: c.phone, formattedPhone: c.formattedPhone, name: c.name }))
+            contacts: parsedContacts.slice(0, RECENT_FILE_CONTACTS_MAX).map(c => ({ phone: c.phone, formattedPhone: c.formattedPhone, name: c.name, extra: c.extra || {} }))
           });
           addToast(`Imported ${parsedContacts.length} contacts from ${file.name}! Select settings below.`, 'success');
         }
@@ -978,7 +993,7 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contacts: stagedContacts.map(c => ({ phone: c.phone, name: c.name, course: c.course || '' })),
+          contacts: stagedContacts.map(c => ({ phone: c.phone, name: c.name, course: c.course || '', extra: c.extra || {} })),
           delaySeconds: callDelay !== '' ? callDelay : 2,
           agentId: uni.agentId,
           universityId: uni.id,
@@ -998,7 +1013,7 @@ export default function App() {
       } else {
         addToast(data.error || 'Failed to start campaign', 'error');
       }
-    } catch (err) {
+    } catch {
       addToast('Network error starting campaign', 'error');
     }
   };
@@ -1008,21 +1023,21 @@ export default function App() {
     try {
       const res = await fetch('/api/queue/pause', { method: 'POST' });
       if (res.ok) addToast('Campaign paused', 'info');
-    } catch (err) { addToast('Error pausing campaign', 'error'); }
+    } catch { addToast('Error pausing campaign', 'error'); }
   };
 
   const handleResumeCampaign = async () => {
     try {
       const res = await fetch('/api/queue/resume', { method: 'POST' });
       if (res.ok) addToast('Campaign resumed', 'success');
-    } catch (err) { addToast('Error resuming campaign', 'error'); }
+    } catch { addToast('Error resuming campaign', 'error'); }
   };
 
   const handleCancelCampaign = async () => {
     try {
       const res = await fetch('/api/queue/cancel', { method: 'POST' });
       if (res.ok) addToast('Campaign cancelled', 'info');
-    } catch (err) { addToast('Error cancelling campaign', 'error'); }
+    } catch { addToast('Error cancelling campaign', 'error'); }
   };
 
   const handleClearCampaignQueue = async () => {
@@ -1043,7 +1058,7 @@ export default function App() {
         setCurrentCall(null);
         addToast('Campaign queue cleared. You can now stage a new batch.', 'info');
       }
-    } catch (err) {
+    } catch {
       addToast('Error resetting campaign queue', 'error');
     }
   };
@@ -1052,7 +1067,46 @@ export default function App() {
     try {
       const res = await fetch('/api/logs/clear', { method: 'POST' });
       if (res.ok) addToast('Logs cleared', 'success');
-    } catch (err) { addToast('Failed to clear logs', 'error'); }
+    } catch { addToast('Failed to clear logs', 'error'); }
+  };
+
+  // Full workspace reset (with confirmation): stops campaigns, empties the
+  // queue, clears logs/overrides/cache and local history. Dashboard counts
+  // reach 0 only after the sheet's data rows are also cleared (headers kept).
+  const handleResetWorkspace = async () => {
+    const step1 = window.confirm(
+      'Reset workspace?\n\nThis stops any running campaign and clears the queue, logs, manual verdicts and local history.\n\nColleges and dispatch memory are kept.\n\nPress OK to continue.'
+    );
+    if (!step1) return;
+    const step2 = window.confirm(
+      'Final confirmation:\n\n- Sheet data rows cleared (keep row 1 headers)?\n- Downloaded an Excel backup first?\n\nDashboard counts hit 0 only when the sheet is empty.\n\nPress OK to RESET now.'
+    );
+    if (!step2) return;
+    try {
+      const res = await fetch('/api/workspace/reset', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        try {
+          localStorage.removeItem('vv_recent_contacts');
+          localStorage.removeItem('vv_recent_files');
+        } catch {}
+        setRecentContacts([]);
+        setRecentChecked([]);
+        setRecentFiles([]);
+        setStagedContacts([]);
+        setTempContacts([]);
+        setDashboardFilter('ALL');
+        setStatusFilter('ALL');
+        setDashboardUniversityFilter(['ALL']);
+        setDateFilter('ALL');
+        setDashboardSearch('');
+        await fetchCallAnalytics(true);
+        await fetchOmniCalls();
+        addToast('Workspace reset. Syncing fresh from the sheet…', 'success');
+      } else {
+        addToast((data && data.error) || 'Workspace reset failed.', 'error');
+      }
+    } catch { addToast('Network error during workspace reset.', 'error'); }
   };
 
   const triggerReloadCalls = () => {
@@ -1190,63 +1244,8 @@ export default function App() {
     return matches[0];
   };
 
-  // Combine active queue contacts, current dialing call, and OmniDimension call records into single source
-  const allCallRecords = (() => {
-    const mapByPhone = new Map();
-
-    // 1. Add historical call records from OmniDimension API
-    calls.forEach(c => {
-      const phone = c.to_number || c.phone_number || c.to || c.formattedPhone || c.phone || '';
-      const cleanPhone = String(phone).replace(/\D/g, '');
-      if (cleanPhone) {
-        mapByPhone.set(cleanPhone.slice(-10), c);
-      }
-    });
-
-    // 2. Add activeQueue items (overlaying queue info onto historical if matching)
-    activeQueue.forEach(q => {
-      const cleanPhone = String(q.formattedPhone || q.phone || '').replace(/\D/g, '');
-      if (cleanPhone) {
-        const key = cleanPhone.slice(-10);
-        const existingCall = mapByPhone.get(key);
-        if (existingCall) {
-          const isCompleted = (existingCall.call_status || existingCall.status) === 'completed' || Boolean(existingCall.call_conversation || existingCall.transcript);
-          mapByPhone.set(key, {
-            ...existingCall,
-            ...q,
-            status: isCompleted ? existingCall.call_status || existingCall.status : q.status,
-            call_conversation: existingCall.call_conversation || existingCall.transcript || q.call_conversation
-          });
-        } else {
-          mapByPhone.set(key, q);
-        }
-      }
-    });
-
-    // 3. Always include currentCall if a call is actively dialing right now
-    if (currentCall) {
-      const cleanPhone = String(currentCall.formattedPhone || currentCall.phone || '').replace(/\D/g, '');
-      if (cleanPhone) {
-        const key = cleanPhone.slice(-10);
-        const existing = mapByPhone.get(key);
-        const isCompleted = existing && ((existing.call_status || existing.status) === 'completed' || Boolean(existing.call_conversation || existing.transcript));
-
-        if (!isCompleted) {
-          mapByPhone.set(key, {
-            ...(existing || {}),
-            ...currentCall,
-            status: 'in-progress',
-            call_status: 'in-progress'
-          });
-        }
-      }
-    }
-
-    return Array.from(mapByPhone.values());
-  })();
-
-  // Helper to extract interest, college, course, details strictly from real call transcript
-  const getCallInterestInfo = (c) => {
+  // Legacy helper (unused — kept for reference, superseded by resolveCallFinalStatus)
+  const _getCallInterestInfo = (c) => {
     const matched = findMatchedCallLog(c) || c;
     const phone = matched.formattedPhone || matched.to_number || matched.phone_number || matched.to || matched.phone || c.formattedPhone || c.phone || '';
     const name = matched.name || matched.fullName || matched.student_name || c.name || (phone ? `Recipient (${phone})` : 'Recipient');
@@ -1599,7 +1598,8 @@ export default function App() {
   };
 
   // Helper to format a call record for clean Excel presentation with exact required Google Sheets columns
-  const formatCallForExcel = (call, idx) => {
+  // Legacy 19-column dashboard formatter (unused since sheet-mirror switch — kept for reference).
+  const _formatCallForExcel = (call, idx) => {
     // 1. Name: single shared resolver (staged -> context -> fields -> transcript -> phone)
     const excelPhone = String(call.contactNumber || call.to_number || call.phone_number || '').replace(/\D/g, '').slice(-10);
     const excelQueue = excelPhone
@@ -1631,7 +1631,6 @@ export default function App() {
     const rawCallStatus = String(call.rawFields?.call_status || call.call_status || call.callOutcome || '').toLowerCase();
     const isAns = (rawCallStatus === 'completed' || rawCallStatus === 'answered' || isAnswered(call)) && rawCallStatus !== 'no-answer' && !isUnanswered(call);
     const callsAnswered = isAns ? 'Yes' : 'No';
-    const callsNotAnswered = !isAns ? 'Yes' : 'No';
 
     // Google Sheets verdict flags (Interested, Application Sent, Callback, Already Applied, Already Joined, Not Interested, Wrong / Invalid, Counsellor Follow-up)
     const normalizeFlag = (sheetVal, dashboardFallbackBool) => {
@@ -1728,19 +1727,152 @@ export default function App() {
     });
   };
 
+  // 1:1 mirror of the OmniDimension Google Sheet columns (vv_call_data_v2).
+  // All downloadable record sheets use these EXACT names so Excel matches
+  // the sheet cell-for-cell (no renamed columns).
+  const SHEET_MIRROR_COLUMNS = [
+    'student_name', 'already_applied', 'already_joined', 'application_sent',
+    'call_date', 'call_direction', 'call_duration_in_minutes', 'call_duration_in_seconds',
+    'call_status', 'counsellor_follow_up',
+    'from_number', 'full_conversation', 'program_interest', 'recording_url',
+    'sentiment', 'to_number', 'wrong_invalid', 'college_name', 'interested',
+    'call_transfered_status', 'phone_number', 'summary', 'call_feedback'
+  ];
+
+  const formatSheetMirrorFromRf = (rf) => {
+    const src = rf || {};
+    const row = {};
+    SHEET_MIRROR_COLUMNS.forEach(h => {
+      const v = src[h];
+      row[h] = (v !== undefined && v !== null) ? String(v) : '';
+    });
+    return row;
+  };
+
+  // Normalized sheet row -> exact sheet columns (server keeps rawFields keyed
+  // by original header; student_name is pre-patched with the effective name).
+  const formatSheetMirrorRow = (call) => formatSheetMirrorFromRf(call && call.rawFields);
+
+  // Mirror rows + uploaded-file extra columns (EmailID, State, District, …)
+  // resolved per-row from dispatch memory (server uploadExtra). Extra keys are
+  // unioned across the given rows and appended after the sheet columns.
+  const mirrorWithExtras = (list) => {
+    if (!Array.isArray(list) || list.length === 0) return [];
+    const keys = [];
+    list.forEach(r => {
+      const ex = (r && r.uploadExtra) || {};
+      Object.keys(ex).forEach(k => {
+        if (k && !keys.includes(k) && !SHEET_MIRROR_COLUMNS.includes(k)) keys.push(k);
+      });
+    });
+    return list.map(r => {
+      const out = formatSheetMirrorRow(r);
+      if (keys.length === 0) return out;
+      const ex = (r && r.uploadExtra) || {};
+      keys.forEach(k => {
+        out[k] = (ex[k] !== undefined && ex[k] !== null) ? String(ex[k]) : '';
+      });
+      return out;
+    });
+  };
+
+  // Canonical display labels for the sheet's call_feedback values.
+  // Case/space-insensitive match; anything else passes through trimmed so no
+  // sheet value is ever invented or dropped; '' stays '' (no color applied).
+  const normalizeFeedback = (v) => {
+    const t = String(v ?? '').trim();
+    if (!t) return '';
+    const canon = {
+      'interested': 'Interested',
+      'not interested': 'Not Interested',
+      'not_interested': 'Not Interested',
+      'call back': 'Call Back',
+      'callback': 'Call Back',
+      'call_back': 'Call Back',
+      'not answered': 'Not Answered',
+      'not_answered': 'Not Answered',
+      'no answer': 'Not Answered',
+      'no_answer': 'Not Answered',
+      'no-answer': 'Not Answered'
+    };
+    return canon[t.toLowerCase()] || t;
+  };
+
+  // Whole-column conditional-formatting palette (readable dark text on light fill).
+  const FEEDBACK_CF_STYLES = [
+    { value: 'Interested', fill: 'FFC6EFCE', font: 'FF006100' },
+    { value: 'Not Interested', fill: 'FFFFC7CE', font: 'FF9C0006' },
+    { value: 'Call Back', fill: 'FFFFE3B3', font: 'FF7F4D00' },
+    { value: 'Not Answered', fill: 'FFFFEB9C', font: 'FF7A6200' }
+  ];
+
+  // ExcelJS-backed workbook download. SheetJS-CE (used for reading uploads)
+  // cannot write conditional-formatting rules, so downloads go through
+  // ExcelJS (lazy-loaded to keep the main bundle lean).
+  // sheets: [{ title, rows }]. The call_feedback column (when present) gets
+  // normalized values + whole-column CF rules with headroom for added rows.
+  const downloadWorkbookFile = async (sheets, filename) => {
+    const { default: ExcelJS } = await import('exceljs');
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'VidyaVision';
+    wb.created = new Date();
+    (sheets || []).forEach(({ title, rows }) => {
+      const ws = wb.addWorksheet(String(title || 'Sheet').slice(0, 31));
+      const data = Array.isArray(rows) && rows.length > 0 ? rows : [{ Status: 'No records.' }];
+      const headers = Object.keys(data[0]);
+      const widths = calculateColWidths(data);
+      ws.columns = headers.map((h, i) => ({
+        header: h, key: h, width: Math.min(Math.max((widths[i] && widths[i].wch) || 15, 10), 120)
+      }));
+      data.forEach(r => {
+        const row = { ...r };
+        if ('call_feedback' in row) row.call_feedback = normalizeFeedback(row.call_feedback);
+        ws.addRow(row);
+      });
+      if (headers.length > 0) {
+        ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: headers.length } };
+      }
+      ws.views = [{ state: 'frozen', ySplit: 1 }];
+      const fbIdx = headers.indexOf('call_feedback');
+      if (fbIdx !== -1) {
+        const col = ws.getColumn(fbIdx + 1).letter;
+        const ref = `${col}2:${col}${data.length + 5001}`;
+        ws.addConditionalFormatting({
+          ref,
+          rules: FEEDBACK_CF_STYLES.map((s, i) => ({
+            type: 'cellIs',
+            operator: 'equal',
+            priority: i + 1,
+            formulae: [`"${s.value}"`],
+            style: {
+              fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: s.fill } },
+              font: { color: { argb: s.font } }
+            }
+          }))
+        });
+      }
+    });
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  };
+
   // Export Filtered Records to Excel (respects active university scope and dashboard filters)
-  const handleExportFilteredCsv = () => {
-    const workbook = XLSX.utils.book_new();
+  const handleExportFilteredCsv = async () => {
     const activeScopeName = uniScopeLabel;
 
     // Scoped calls based on university and date filter
     const scopedCalls = dateFilteredCalls;
 
-    // 1. Main Call Analytics Report Sheet (populated with exact required columns and dashboard-recovered names)
-    const activeData = finalDashboardList.map((c, i) => formatCallForExcel(c, i));
-    const wsActive = XLSX.utils.json_to_sheet(activeData.length > 0 ? activeData : [{ 'Status': 'No call records match the active filters.' }]);
-    if (activeData.length > 0) wsActive['!cols'] = calculateColWidths(activeData);
-    XLSX.utils.book_append_sheet(workbook, wsActive, "Call Analytics Report");
+    // 1. Main Call Analytics Report Sheet (1:1 mirror + uploaded extras)
+    const activeData = mirrorWithExtras(finalDashboardList);
 
     // 2. Executive Metrics Summary Sheet
     const getUniSummaryRow = (name, list) => {
@@ -1789,34 +1921,34 @@ export default function App() {
       });
     }
 
-    const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
-    wsSummary['!cols'] = calculateColWidths(summaryRows);
-    XLSX.utils.book_append_sheet(workbook, wsSummary, "Outcome Summary");
-
-    // Helper to safely append an outcome sheet with dynamic widths
-    const appendOutcomeSheet = (sheetTitle, callsList, emptyMessage) => {
-      const data = callsList.map((c, i) => formatCallForExcel(c, i));
-      const ws = XLSX.utils.json_to_sheet(data.length > 0 ? data : [{ 'Status': emptyMessage }]);
-      if (data.length > 0) {
-        ws['!cols'] = calculateColWidths(data);
-      }
-      XLSX.utils.book_append_sheet(workbook, ws, sheetTitle);
-    };
-
     // 3. Final Status Categories Sheets (strictly mutually exclusive)
-    appendOutcomeSheet("Interested", scopedCalls.filter(isInterested), "No interested leads recorded.");
-    appendOutcomeSheet("Application Sent", scopedCalls.filter(isApplicationSent), "No WhatsApp application links sent yet.");
-    appendOutcomeSheet("Callback", scopedCalls.filter(isCallback), "No callback requests recorded.");
-    appendOutcomeSheet("Already Applied", scopedCalls.filter(isAlreadyApplied), "No already-applied records.");
-    appendOutcomeSheet("Already Joined", scopedCalls.filter(isAlreadyJoined), "No already-joined records.");
-    appendOutcomeSheet("Not Interested", scopedCalls.filter(isNotInterested), "No not-interested records.");
-    appendOutcomeSheet("Wrong or Invalid", scopedCalls.filter(isWrongNumber), "No wrong-number records.");
-    appendOutcomeSheet("Calls Not Answered", scopedCalls.filter(isUnanswered), "No unanswered calls recorded.");
+    const outcomeSheets = [
+      ["Interested", scopedCalls.filter(isInterested), "No interested leads recorded."],
+      ["Application Sent", scopedCalls.filter(isApplicationSent), "No WhatsApp application links sent yet."],
+      ["Callback", scopedCalls.filter(isCallback), "No callback requests recorded."],
+      ["Already Applied", scopedCalls.filter(isAlreadyApplied), "No already-applied records."],
+      ["Already Joined", scopedCalls.filter(isAlreadyJoined), "No already-joined records."],
+      ["Not Interested", scopedCalls.filter(isNotInterested), "No not-interested records."],
+      ["Wrong or Invalid", scopedCalls.filter(isWrongNumber), "No wrong-number records."],
+      ["Calls Not Answered", scopedCalls.filter(isUnanswered), "No unanswered calls recorded."]
+    ].map(([sheetTitle, callsList, emptyMessage]) => {
+      const data = mirrorWithExtras(callsList);
+      return { title: sheetTitle, rows: data.length > 0 ? data : [{ Status: emptyMessage }] };
+    });
 
-    // Save workbook
+    // Save workbook (ExcelJS: keeps widths/filters + call_feedback conditional formatting)
     const cleanScopeName = activeScopeName.replace(/[^a-zA-Z0-9]/g, '_');
-    XLSX.writeFile(workbook, `${cleanScopeName}_Call_Analytics_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    addToast(`Exported ${activeScopeName} Excel report with dynamically adjusted columns!`, 'success');
+    try {
+      await downloadWorkbookFile([
+        { title: 'Call Analytics Report', rows: activeData.length > 0 ? activeData : [{ Status: 'No call records match the active filters.' }] },
+        { title: 'Outcome Summary', rows: summaryRows },
+        ...outcomeSheets
+      ], `${cleanScopeName}_Call_Analytics_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      addToast(`Exported ${activeScopeName} Excel report with dynamically adjusted columns!`, 'success');
+    } catch (err) {
+      console.error(err);
+      addToast('Excel export failed. Please try again.', 'error');
+    }
   };
 
   // Open Detailed Call View
@@ -1939,40 +2071,11 @@ export default function App() {
           preferredUniversity: (prev.preferredUniversity && prev.preferredUniversity !== '—') ? prev.preferredUniversity : (displayCollege || '—'),
           universitiesDiscussed: (prev.universitiesDiscussed && prev.universitiesDiscussed !== '—') ? prev.universitiesDiscussed : (displayCollege || '—')
         };
-      } else {
-        list.push({
-          ...c,
-          id: callId || `omni-${Date.now()}-${cleanPhone}`,
-          studentName: displayName,
-          contactNumber: c.to_number || c.phone_number || c.to || `+91${cleanPhone}`,
-          email: '—',
-          program: '—',
-          course: cleanCourse(c.target_course || c.course),
-          preferredState: '—',
-          preferredCity: '—',
-          leadStatus: finalStatus,
-          interestLevel: levelForStatus(finalStatus),
-          final_status: finalStatus,
-          finalStatus: finalStatus,
-          counselorRequired: 'No',
-          callbackRequired,
-          callDate: c.time_of_call || c.call_date || c.callDate || new Date().toISOString(),
-          callDuration: c.call_duration || c.duration || '—',
-          duration: c.call_duration || c.duration || '—',
-          callOutcome: outcome,
-          summary: c.interest_details || c.sentiment_analysis_details || c.summary || '',
-          notes: c.interest_details || 'Not provided',
-          entranceExam: '—',
-          educationStatus: '—',
-          recordingUrl: c.recording_url || c.recordingUrl || '—',
-          internal_recording_url: c.internal_recording_url || '',
-          transferStatus: 'No',
-          preferredUniversity: displayCollege || '—',
-          universitiesDiscussed: displayCollege || '—',
-          sentiment: c.sentiment_score || c.sentiment || 'Neutral',
-          botName: c.bot_name || c.botName || '—'
-        });
       }
+      // Sheet is the row universe: live-only calls (pre-sheet agent history)
+      // are NOT appended as extra rows — live data only enriches id-matched
+      // sheet rows above. A just-finished call appears here once OmniDimension
+      // posts its sheet row (next sync).
     });
 
     return list;
@@ -1984,7 +2087,7 @@ export default function App() {
   // All comparisons are punctuation-insensitive so sheet values like "MIT WPU"
   // still match a saved college named "MIT - WPU".
   const normKey = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const getCallUniversityId = (c) => {
+  const getCallUniversityId = React.useCallback((c) => {
     if (!c) return 'vidyavision';
     const bot = String(c.botName || c.bot_name || (c.rawFields && c.rawFields.bot_name) || '').toLowerCase();
     const prefUni = String(c.preferredUniversity || c.preferred_university || (c.rawFields && c.rawFields.preferred_university) || '').toLowerCase();
@@ -2015,7 +2118,7 @@ export default function App() {
       }
     }
     return 'vidyavision';
-  };
+  }, [universities]);
 
   // Compute stats dynamically for every university in configured universities array
   const uniStats = React.useMemo(() => {
@@ -2077,13 +2180,13 @@ export default function App() {
     });
 
     return stats;
-  }, [mergedCalls, universities]);
+  }, [mergedCalls, universities, getCallUniversityId]);
 
   // Filter mergedCalls by selected universities (multi-select scope)
   const universityFilteredCalls = React.useMemo(() => {
     if (dashboardUniversityFilter.includes('ALL') || dashboardUniversityFilter.length === 0) return mergedCalls;
     return mergedCalls.filter(c => dashboardUniversityFilter.includes(getCallUniversityId(c)));
-  }, [mergedCalls, dashboardUniversityFilter]);
+  }, [mergedCalls, dashboardUniversityFilter, getCallUniversityId]);
 
   // Date Filtered Calls (Base subset for dashboard, using university-filtered base)
   const dateFilteredCalls = filterByDate(universityFilteredCalls, dateFilter, customStartDate, customEndDate);
@@ -2146,25 +2249,53 @@ export default function App() {
   const finalDashboardList = sortCalls(searchFiltered, sortBy);
 
   // Export Current/Active Campaign Batch to Excel (Only this session's contacts)
-  const handleExportCampaignBatch = () => {
+  const handleExportCampaignBatch = async () => {
     if (!activeQueue || activeQueue.length === 0) {
       addToast('No active or recent campaign batch to export.', 'warning');
       return;
     }
 
-    const workbook = XLSX.utils.book_new();
     const targetUni = universities.find(u => u.id === selectedUniversity);
     const collegeName = campaignState.universityName || targetUni?.name || 'Campaign_Batch';
 
-    // Map each contact in the active queue to detailed Excel columns
-    const batchData = activeQueue.map((q, idx) => {
+    // Called-only export: numbers never dialed (still 'queued', or canceled
+    // before dispatch — no dispatchTime) are left out entirely.
+    const calledQueue = activeQueue.filter(q =>
+      q.status === 'completed' || q.status === 'no-answer' ||
+      q.status === 'in-progress' || q.dispatchTime
+    );
+    if (calledQueue.length === 0) {
+      addToast('No contacts were dialed yet in this batch — nothing to export.', 'warning');
+      return;
+    }
+
+    // Campaign Excel = SAME sheet data as dashboard Excel (identical columns via
+    // the sheet mirror). Only the rows differ: dialed numbers only.
+    const batchData = calledQueue.map((q) => {
       const cleanPhone = String(q.formattedPhone || q.phone || '').replace(/\D/g, '').slice(-10);
 
-      // 1. Queue contact's own state (direct from live campaign runner)
-      const isQueueAnswered = q.status === 'completed';
-      const isQueueFailedOrCut = q.status === 'no-answer' || (q.reason && q.status !== 'completed');
+      // Sheet-first lookup: newest sheet row for this number (callId, then phone).
+      let sheetMatch = null;
+      if (q.callId) {
+        const qid = String(q.callId);
+        sheetMatch = mergedCalls.find(c => String(c.call_id || c.id || '') === qid) || null;
+      }
+      if (!sheetMatch && q.matchedCall && (q.matchedCall.rawFields || q.matchedCall.contactNumber)) sheetMatch = q.matchedCall;
+      if (!sheetMatch && cleanPhone) {
+        const byPhone = mergedCalls.filter(c => {
+          const cPhone = String(c.contactNumber || c.to_number || c.phone_number || c.to || '').replace(/\D/g, '').slice(-10);
+          return cPhone && cPhone === cleanPhone;
+        });
+        byPhone.sort((a, b) => (Date.parse(b.callDate || '') || 0) - (Date.parse(a.callDate || '') || 0));
+        sheetMatch = byPhone[0] || null;
+      }
+      if (sheetMatch && (sheetMatch.rawFields || sheetMatch.contactNumber || sheetMatch.callDate)) {
+        return formatSheetMirrorRow(sheetMatch);
+      }
+      // No sheet row yet (queued/dialing/just finished — Omni hasn't posted):
+      // fall through to live queue state below so the number still appears.
 
-      // 2. Find matching live call (prioritize live OmniDimension calls sorted newest first, NEVER ancient Google Sheets)
+      // Pending path: live queue state only (sheet rows returned above).
       let match = q.matchedCall || null;
       if (!match && q.callId) {
         match = calls.find(c => String(c.id || c.call_id || '') === String(q.callId)) || null;
@@ -2176,31 +2307,7 @@ export default function App() {
         });
         if (liveMatches.length > 0) match = liveMatches[0];
       }
-      if (!match && !isQueueFailedOrCut) {
-        match = mergedCalls.find(c => {
-          const cPhone = String(c.contactNumber || c.to_number || c.phone_number || c.to || '').replace(/\D/g, '').slice(-10);
-          return cPhone && cPhone === cleanPhone;
-        }) || null;
-      }
-
-      // 3. Determine genuine answered state for THIS call
-      let isAns = false;
-      if (isQueueAnswered) {
-        isAns = true;
-      } else if (isQueueFailedOrCut) {
-        isAns = false;
-      } else if (match) {
-        const mStatus = String(match.call_status || match.status || '').toLowerCase();
-        isAns = (mStatus === 'completed' || isAnswered(match)) && mStatus !== 'no-answer' && !isUnanswered(match);
-      }
-
-      // Duration: if not answered or cut, duration is 0:00
-      let dur = '0:00';
-      if (isAns) {
-        dur = q.duration && q.duration !== '0:00' && q.duration !== '—'
-          ? q.duration
-          : (match ? formatDuration(match.callDuration || match.call_duration || match.duration) : '0:00');
-      }
+      const isAns = q.status === 'completed';
 
       // Dialing Status
       let dialingStatus = 'Not Reached';
@@ -2218,120 +2325,46 @@ export default function App() {
         dialingStatus = String(match.call_status).toUpperCase();
       }
 
-      // Recipient Name: Staged contact name ALWAYS takes precedence over old history!
-      const studentName = (q.name && q.name !== '—' && q.name !== 'Student')
-        ? q.name
-        : (match && match.studentName && match.studentName !== '—' && match.studentName !== 'Student' ? match.studentName : (q.name || 'Student'));
+      const summary = q.reason ? `Call not answered (${q.reason}).` : 'Call was cut / not answered.';
 
-      // If NOT answered (e.g. cut, missed, busy, failed):
-      // All outcome flags MUST be 'No', Application Sent MUST be 'No', Transcript MUST reflect not answered!
-      let callAnswered = 'No';
-      let interestLevel = 'No';
-      let alreadyJoined = 'No';
-      let counsellorFollowup = 'No';
-      let applicationSentStatus = 'No';
-      let alreadyApplied = 'No';
-      let callback = 'No';
-      let notInterested = 'No';
-      let wrongInvalid = 'No';
-      let aiVerdict = 'NOT_ANSWERED';
-      let summary = q.reason ? `Call not answered (${q.reason}).` : 'Call was cut / not answered.';
-      let transcript = 'Call not connected / No conversation';
-
-      if (isAns && match) {
-        callAnswered = 'Yes';
-        aiVerdict = match.final_status || match.finalStatus || match.interestStatus || resolveCallFinalStatus(match);
-
-        const normalizeFlag = (sheetVal, fallbackBool) => {
-          if (sheetVal !== undefined && sheetVal !== null && String(sheetVal).trim() !== '') {
-            const s = String(sheetVal).trim().toLowerCase();
-            if (s === 'yes' || s === 'true' || s === '1') return 'Yes';
-            if (s === 'no' || s === 'false' || s === '0') return 'No';
-          }
-          return fallbackBool ? 'Yes' : 'No';
-        };
-
-        const rf = match.rawFields || {};
-
-        // Interest Level
-        const interestBool = isInterested(match) || isApplicationSent(match);
-        interestLevel = normalizeFlag(rf.Interested ?? rf.interested ?? rf.interest_level, interestBool);
-
-        // Application Sent
-        if (isApplicationSent(match)) {
-          applicationSentStatus = 'Sent';
-        } else if (isInterested(match)) {
-          applicationSentStatus = 'To be sent';
-        } else if (rf.application_sent && String(rf.application_sent).toLowerCase() === 'yes') {
-          applicationSentStatus = 'Sent';
-        }
-
-        // Already Joined
-        alreadyJoined = normalizeFlag(rf.already_joined ?? rf['Already Joined'], isAlreadyJoined(match));
-
-        // Counsellor Follow-up
-        counsellorFollowup = normalizeFlag(rf.counsellor_follow_up ?? rf.counselor_follow_up ?? rf.counselor_followup, isCounselorFollowupRequired(match));
-
-        // Already Applied
-        alreadyApplied = normalizeFlag(rf.already_applied ?? rf['Already Applied'], isAlreadyApplied(match));
-
-        // Callback
-        callback = normalizeFlag(rf.callback ?? rf.Callback, isCallback(match));
-
-        // Not Interested
-        notInterested = normalizeFlag(rf.not_interested ?? rf['Not Interested'], isNotInterested(match));
-
-        // Wrong / Invalid
-        wrongInvalid = normalizeFlag(rf.wrong_invalid ?? rf['Wrong Invalid'] ?? rf.wrong_number, isWrongNumber(match));
-
-        summary = (match.summary && match.summary !== '—' && match.summary !== 'Not provided' ? match.summary : '')
-          || rf.call_summary
-          || rf.summary
-          || 'Call completed.';
-
-        const rawTranscript = match.call_conversation
-          || match.transcript
-          || rf.full_conversation
-          || (Array.isArray(match.interactions) && match.interactions.length > 0
-              ? match.interactions.map(it => `${it.user_query ? `User: ${it.user_query}` : ''}${it.user_query && it.bot_response ? ' | ' : ''}${it.bot_response ? `Bot: ${it.bot_response}` : ''}`).filter(Boolean).join('\n')
-              : '');
-        transcript = rawTranscript ? String(rawTranscript).replace(/<br\s*\/?>/gi, '\n').trim() : 'Call completed (no transcript available)';
-      } else if (isAns && !match) {
-        callAnswered = 'Yes';
-        aiVerdict = 'ANSWERED';
-        summary = 'Call was completed.';
-        transcript = 'Call completed (transcript processing...)';
-      }
-
-      return {
-        'S.No': idx + 1,
-        'Recipient Name': studentName,
-        'Phone Number': q.formattedPhone || q.phone || '—',
-        'College Name': q.universityName || collegeName,
-        'Target Course': q.course || selectedCourse || 'General',
-        'Dialing Status': dialingStatus,
-        'Call Duration': dur,
-        'Call Answered': callAnswered,
-        'Interest Level': interestLevel,
-        'Already Joined': alreadyJoined,
-        'Counsellor Follow-up': counsellorFollowup,
-        'Application Sent': applicationSentStatus,
-        'Already Applied': alreadyApplied,
-        'Callback': callback,
-        'Not Interested': notInterested,
-        'Wrong / Invalid': wrongInvalid,
-        'AI Call Outcome': aiVerdict,
-        'Call Summary': summary,
-        'Call Transcript / Full Conversation': transcript
-      };
+      // No sheet row yet: same 25 sheet columns, staged values where known.
+      return formatSheetMirrorFromRf({
+        student_name: (q.name && q.name !== 'Student') ? q.name : '',
+        to_number: q.formattedPhone || q.phone || '',
+        phone_number: q.formattedPhone || q.phone || '',
+        college_name: q.universityName || collegeName,
+        call_status: dialingStatus,
+        call_date: '',
+        summary
+      });
     });
-    const wsBatch = XLSX.utils.json_to_sheet(batchData);
-    wsBatch['!cols'] = calculateColWidths(batchData);
-    XLSX.utils.book_append_sheet(workbook, wsBatch, "Campaign Batch Calls");
+    // Uploaded-file extra columns (EmailID, State, District, …): union across
+    // the batch, appended after the sheet columns, matched by phone number.
+    const extraByPhone = new Map();
+    calledQueue.forEach(q => {
+      const key = String(q.formattedPhone || q.phone || '').replace(/\D/g, '').slice(-10);
+      if (key && !extraByPhone.has(key)) extraByPhone.set(key, ((q && q.extra) && typeof q.extra === 'object') ? q.extra : {});
+    });
+    const extraKeys = [];
+    extraByPhone.forEach(ex => {
+      Object.keys(ex).forEach(k => {
+        if (k && !extraKeys.includes(k) && !SHEET_MIRROR_COLUMNS.includes(k)) extraKeys.push(k);
+      });
+    });
+    const batchDataWithExtras = batchData.map(row => {
+      const key = String(row.to_number || row.phone_number || '').replace(/\D/g, '').slice(-10);
+      const ex = extraByPhone.get(key) || {};
+      const out = { ...row };
+      extraKeys.forEach(k => {
+        out[k] = (ex[k] !== undefined && ex[k] !== null) ? String(ex[k]) : '';
+      });
+      return out;
+    });
+    const batchSheets = [{ title: 'Campaign Batch Calls', rows: batchDataWithExtras }];
 
-    // 2. Executive Batch Summary Sheet
-    const totalCount = activeQueue.length;
-    const ansCount = activeQueue.filter(q => q.status === 'completed').length;
+    // 2. Executive Batch Summary Sheet (dialed contacts only)
+    const totalCount = calledQueue.length;
+    const ansCount = calledQueue.filter(q => q.status === 'completed').length;
     const unansCount = totalCount - ansCount;
     const ansRate = totalCount > 0 ? `${Math.round((ansCount / totalCount) * 100)}%` : '0%';
 
@@ -2343,84 +2376,68 @@ export default function App() {
       { 'Campaign Metric': 'Answer / Pickup Rate', 'Value': ansRate },
       { 'Campaign Metric': 'Batch Export Date', 'Value': new Date().toLocaleString() }
     ];
-    const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
-    wsSummary['!cols'] = [{ wch: 30 }, { wch: 35 }];
-    XLSX.utils.book_append_sheet(workbook, wsSummary, "Batch Summary");
+    batchSheets.push({ title: 'Batch Summary', rows: summaryRows });
 
-    // 3. Interested Leads Sheet (if any)
-    const interestedCalls = batchData.filter(b => b['AI Call Outcome'] === 'INTERESTED' || b['AI Call Outcome'] === 'APPLICATION_SENT');
+    // 3. Interested Leads Sheet (same sheet columns, genuine-interest rows only)
+    const isYes = (v) => String(v || '').trim().toLowerCase() === 'yes';
+    const isAnsweredStatus = (s) => String(s || '').trim().toLowerCase() === 'completed';
+    // Genuine interest only: interested=Yes AND the caller actually answered.
+    // (WhatsApp goes out after every call by design, so application_sent=Yes
+    // alone — even on no-answer rows — must not qualify as a lead.)
+    // application_sent keeps its recorded Yes/No on every row.
+    const interestedCalls = batchDataWithExtras.filter(b => isYes(b.interested) && isAnsweredStatus(b.call_status));
     if (interestedCalls.length > 0) {
-      const wsInt = XLSX.utils.json_to_sheet(interestedCalls);
-      wsInt['!cols'] = calculateColWidths(interestedCalls);
-      XLSX.utils.book_append_sheet(workbook, wsInt, "Interested Leads");
+      batchSheets.push({ title: 'Interested Leads', rows: interestedCalls });
     }
 
     const cleanScopeName = collegeName.replace(/[^a-zA-Z0-9]/g, '_');
-    XLSX.writeFile(workbook, `${cleanScopeName}_Campaign_Batch_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    addToast(`Exported ${totalCount} campaign batch calls to Excel!`, 'success');
+    try {
+      await downloadWorkbookFile(batchSheets, `${cleanScopeName}_Campaign_Batch_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      addToast(`Exported ${totalCount} campaign batch calls to Excel!`, 'success');
+    } catch (err) {
+      console.error(err);
+      addToast('Campaign Excel export failed. Please try again.', 'error');
+    }
   };
 
   // Export Recent OmniDimension Calls to Excel
-  const handleExportRecentCalls = () => {
+  const handleExportRecentCalls = async () => {
     if (!calls || calls.length === 0) {
       addToast('No recent calls available to export.', 'warning');
       return;
     }
 
-    const workbook = XLSX.utils.book_new();
-    const data = calls.map((c, idx) => {
-      const contact = c.to_number || c.phone_number || c.to || '—';
-      const status = c.call_status || c.status || '—';
-      const dur = formatDuration(c.call_duration || c.duration || '—');
-      const id = c.id || c.call_log_id || `call-${idx}`;
+    // Same sheet columns: live Omni fields mapped into their sheet names.
+    const data = calls.map((c) => {
       const rawTranscript = c.call_conversation || c.transcript || c.conversation || '';
-      const transcript = rawTranscript ? String(rawTranscript).replace(/<br\s*\/?>/gi, '\n').trim() : '—';
-      const summary = c.interest_details || c.summary || c.call_summary || '—';
-      const outcome = c.final_status || c.finalStatus || c.interestStatus || status;
-
-      const isAns = status.toLowerCase() === 'completed' || isAnswered(c);
-      const callAnswered = isAns ? 'Yes' : 'No';
-      const interestLevel = isInterestedLead(c) ? 'Yes' : 'No';
-      const applicationSent = isApplicationSent(c) ? 'Sent' : (isInterested(c) ? 'To be sent' : 'No');
-      const alreadyJoined = isAlreadyJoined(c) ? 'Yes' : 'No';
-      const alreadyApplied = isAlreadyApplied(c) ? 'Yes' : 'No';
-      const callback = isCallback(c) ? 'Yes' : 'No';
-      const notInterested = isNotInterested(c) ? 'Yes' : 'No';
-      const wrongInvalid = isWrongNumber(c) ? 'Yes' : 'No';
-      const counsellorFollowup = isCounselorFollowupRequired(c) ? 'Yes' : 'No';
-
-      return {
-        'S.No': idx + 1,
-        'Recipient Name': c.studentName || c.name || 'Student',
-        'Phone Number': contact,
-        'College Name': c.target_college || c.college || 'MIT WPU',
-        'Target Course': c.target_course || c.course || 'General',
-        'Dialing Status': isAns ? 'Answered' : status,
-        'Call Duration': dur,
-        'Call Answered': callAnswered,
-        'Interest Level': interestLevel,
-        'Already Joined': alreadyJoined,
-        'Counsellor Follow-up': counsellorFollowup,
-        'Application Sent': applicationSent,
-        'Already Applied': alreadyApplied,
-        'Callback': callback,
-        'Not Interested': notInterested,
-        'Wrong / Invalid': wrongInvalid,
-        'AI Call Outcome': outcome,
-        'Date / Time': c.time_of_call || c.call_date || '—',
-        'Call Summary': summary,
-        'Call Transcript / Full Conversation': transcript,
-        'Call ID': id,
-        'Recording URL': c.recording_url || c.recordingUrl || '—'
-      };
+      return formatSheetMirrorFromRf({
+        student_name: c.student_name || c.studentName || c.name || '',
+        to_number: c.to_number || c.phone_number || c.to || '',
+        phone_number: c.phone_number || c.to_number || c.to || '',
+        from_number: c.from_number || c.from || '',
+        call_status: c.call_status || c.status || '',
+        call_date: c.call_date || c.time_of_call || '',
+        call_duration_in_seconds: c.call_duration_in_seconds ?? c.duration_in_seconds ?? c.call_duration ?? c.duration ?? '',
+        full_conversation: rawTranscript ? String(rawTranscript).replace(/<br\s*\/?>/gi, '\n').trim() : '',
+        summary: c.summary || c.call_summary || c.interest_details || '',
+        recording_url: c.recording_url || c.recordingUrl || c.internal_recording_url || '',
+        sentiment: c.sentiment || '',
+        program_interest: c.program_interest || c.course || '',
+        college_name: c.college_name || c.target_college || c.preferredUniversity || '',
+        call_feedback: c.call_feedback || ''
+      });
     });
 
-    const ws = XLSX.utils.json_to_sheet(data);
-    ws['!cols'] = calculateColWidths(data);
-    XLSX.utils.book_append_sheet(workbook, ws, "Recent Outbound Calls");
-
-    XLSX.writeFile(workbook, `Recent_Omni_Calls_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    addToast(`Exported ${calls.length} recent calls to Excel!`, 'success');
+    try {
+      await downloadWorkbookFile(
+        [{ title: 'Recent Outbound Calls', rows: data }],
+        `Recent_Omni_Calls_${new Date().toISOString().slice(0, 10)}.xlsx`
+      );
+      addToast(`Exported ${calls.length} recent calls to Excel!`, 'success');
+    } catch (err) {
+      console.error(err);
+      addToast('Recent calls export failed. Please try again.', 'error');
+    }
   };
 
   // Extract unique statuses dynamically from mergedCalls
@@ -2432,7 +2449,7 @@ export default function App() {
 
   return (
     <div className="app-container" data-theme={theme}>
-      <LandingNav onEnter={go} theme={theme} onToggleTheme={() => setTheme(t => (t === 'dark' ? 'light' : 'dark'))} />
+      <LandingNav onEnter={go} theme={theme} onToggleTheme={() => setTheme(t => (t === 'dark' ? 'light' : 'dark'))} active={view} />
 
       {/* Main Container */}
       <main className="main-content">
@@ -2825,7 +2842,7 @@ export default function App() {
                           setRecentContacts([]);
                           setRecentChecked([]);
                           setRecentPage(0);
-                          try { localStorage.removeItem('vv_recent_contacts'); } catch (e) {}
+                          try { localStorage.removeItem('vv_recent_contacts'); } catch {}
                           addToast('Recent contacts history cleared.', 'info');
                         }}
                       >
@@ -3481,17 +3498,9 @@ export default function App() {
                         Dialing Queue Contacts Progress ({activeQueue.length})
                       </h3>
                       <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '0.2rem 0 0' }}>
-                        Session contacts and live results. Download below for the exact batch report.
+                        Session contacts and live results.
                       </p>
                     </div>
-
-                    <button
-                      className="btn btn-primary"
-                      style={{ backgroundColor: '#059669', borderColor: '#10b981', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: '700', fontSize: '0.85rem', padding: '0.5rem 1rem' }}
-                      onClick={handleExportCampaignBatch}
-                    >
-                      <Download size={15} /> Download Campaign Batch (.xlsx)
-                    </button>
                   </div>
 
                   <div className="staged-table-container" style={{ maxHeight: '450px', overflowY: 'auto' }}>
@@ -3618,6 +3627,111 @@ export default function App() {
                 <button onClick={handleExportFilteredCsv} className="btn btn-primary" style={{ backgroundColor: '#059669', borderColor: '#10b981', display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.6rem 1.2rem', fontWeight: '700' }}>
                   <Download size={16} /> Download Excel Report (.xlsx)
                 </button>
+                <button onClick={handleExportCampaignBatch} className="btn btn-secondary" title="Download the current/recent campaign batch as Excel (same sheet columns)" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.6rem 1.2rem', fontWeight: '700' }}>
+                  <Download size={16} /> Recent Campaign (.xlsx)
+                </button>
+                <button onClick={handleResetWorkspace} className="btn btn-danger-outline" title="Stop campaigns and clear queue, logs, overrides and history (sheet rows must be cleared for counts to reach 0)" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.6rem 1.2rem', fontWeight: '700' }}>
+                  <Trash2 size={16} /> Reset
+                </button>
+              </div>
+            </div>
+
+            {/* Top-Level University Scope Selector (searchable dropdown — scales to many colleges) */}
+            <div style={{ marginBottom: '1.75rem', marginTop: '1.25rem', backgroundColor: 'rgba(0, 0, 0, 0.02)', padding: '1.25rem', borderRadius: '14px', border: '1px solid var(--border)' }}>
+              <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.75rem', display: 'block' }}>
+                Filter Dashboard by University ({universities.length + 1})
+              </label>
+
+              <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                <div style={{ position: 'relative', flex: '1 1 240px', minWidth: '200px', maxWidth: '380px' }}>
+                  <Search size={15} style={{ position: 'absolute', left: '0.8rem', top: '0.8rem', color: 'var(--text-muted)' }} />
+                  <input
+                    className="form-input"
+                    value={uniSearchDashboard}
+                    onChange={(e) => setUniSearchDashboard(e.target.value)}
+                    placeholder={`Search ${universities.length} colleges...`}
+                    style={{ paddingLeft: '2.3rem' }}
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    className={`btn ${isAllUniScope ? 'btn-primary' : 'btn-secondary'}`}
+                    style={{ padding: '0.55rem 0.9rem', fontSize: '0.82rem' }}
+                    onClick={() => setDashboardUniversityFilter(['ALL'])}
+                  >
+                    🌐 All ({uniStats.ALL.total})
+                  </button>
+                  {!isAllUniScope && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ padding: '0.55rem 0.9rem', fontSize: '0.82rem' }}
+                      onClick={() => { setDashboardUniversityFilter(['ALL']); setUniSearchDashboard(''); }}
+                    >
+                      Clear ({dashboardUniversityFilter.length} selected)
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Multi-select college checkboxes (tick 1, 2 or more) */}
+              <div style={{ marginTop: '0.75rem', maxHeight: '190px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.35rem', paddingRight: '0.25rem' }}>
+                {universities
+                  .filter(u => {
+                    const q = uniSearchDashboard.trim().toLowerCase();
+                    if (!q) return true;
+                    return `${u.name} ${u.place || ''} ${u.languages || ''}`.toLowerCase().includes(q);
+                  })
+                  .map(u => {
+                    const count = (uniStats[u.id] || { total: 0 }).total;
+                    const checked = !isAllUniScope && dashboardUniversityFilter.includes(u.id);
+                    return (
+                      <label
+                        key={u.id}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: '0.6rem',
+                          padding: '0.5rem 0.75rem', borderRadius: '8px', cursor: 'pointer',
+                          border: checked ? '1px solid var(--accent)' : '1px solid var(--border)',
+                          backgroundColor: checked ? 'rgba(0, 0, 0, 0.08)' : 'var(--bg-card)',
+                          fontSize: '0.85rem'
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleUniScope(u.id)}
+                          style={{ width: '16px', height: '16px', accentColor: 'var(--accent)', cursor: 'pointer' }}
+                        />
+                        <span style={{ fontWeight: checked ? '700' : '500', flex: 1 }}>
+                          🎓 {u.name}{u.place ? <span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}> — {u.place}</span> : ''}
+                        </span>
+                        <span className="uni-count-badge">{count}</span>
+                      </label>
+                    );
+                  })}
+                {universities.filter(u => {
+                  const q = uniSearchDashboard.trim().toLowerCase();
+                  if (!q) return true;
+                  return `${u.name} ${u.place || ''} ${u.languages || ''}`.toLowerCase().includes(q);
+                }).length === 0 && (
+                  <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>No colleges match your search.</p>
+                )}
+              </div>
+
+              {/* Selected scope summary */}
+              <div style={{ marginTop: '0.75rem', fontSize: '0.83rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <GraduationCap size={15} style={{ color: 'var(--accent)' }} />
+                {isAllUniScope ? (
+                  <span>Showing aggregate metrics across <b>{universities.length}</b> colleges • <b>{uniStats.ALL.total}</b> total calls</span>
+                ) : dashboardUniversityFilter.length === 1 ? (() => {
+                  const sel = universities.find(u => u.id === dashboardUniversityFilter[0]);
+                  const count = (uniStats[dashboardUniversityFilter[0]] || { total: 0 }).total;
+                  if (!sel) return <span>Unknown scope</span>;
+                  return <span>Showing <b>{sel.name}</b>{sel.place ? ` (${sel.place})` : ''} • <b>{count}</b> calls • 🗣️ {sel.languages || 'English, Hindi, Telugu'}</span>;
+                })() : (
+                  <span>Showing combined analytics for <b>{dashboardUniversityFilter.length} colleges</b> • <b>{totalDispatchedCount}</b> calls in scope</span>
+                )}
               </div>
             </div>
 
@@ -3647,7 +3761,9 @@ export default function App() {
               {/* Card 1: Total Dispatched Calls */}
               <div
                 className={`metric-card ${dashboardFilter === 'ALL' ? 'active-metric-card' : ''}`}
-                onClick={() => setDashboardFilter('ALL')}
+                onClick={() => { setDashboardFilter('ALL'); go('calls'); }}
+                style={{ cursor: 'pointer' }}
+                title="Open Calls page"
               >
                 <div className="metric-header">
                   <span className="metric-title">Total Dispatched</span>
@@ -4161,105 +4277,6 @@ export default function App() {
 
             </div>
 
-            {/* Top-Level University Scope Selector (searchable dropdown — scales to many colleges) */}
-            <div style={{ marginBottom: '1.75rem', marginTop: '1.25rem', backgroundColor: 'rgba(0, 0, 0, 0.02)', padding: '1.25rem', borderRadius: '14px', border: '1px solid var(--border)' }}>
-              <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.75rem', display: 'block' }}>
-                Filter Dashboard by University ({universities.length + 1})
-              </label>
-
-              <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                <div style={{ position: 'relative', flex: '1 1 240px', minWidth: '200px', maxWidth: '380px' }}>
-                  <Search size={15} style={{ position: 'absolute', left: '0.8rem', top: '0.8rem', color: 'var(--text-muted)' }} />
-                  <input
-                    className="form-input"
-                    value={uniSearchDashboard}
-                    onChange={(e) => setUniSearchDashboard(e.target.value)}
-                    placeholder={`Search ${universities.length} colleges...`}
-                    style={{ paddingLeft: '2.3rem' }}
-                  />
-                </div>
-                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    className={`btn ${isAllUniScope ? 'btn-primary' : 'btn-secondary'}`}
-                    style={{ padding: '0.55rem 0.9rem', fontSize: '0.82rem' }}
-                    onClick={() => setDashboardUniversityFilter(['ALL'])}
-                  >
-                    🌐 All ({uniStats.ALL.total})
-                  </button>
-                  {!isAllUniScope && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      style={{ padding: '0.55rem 0.9rem', fontSize: '0.82rem' }}
-                      onClick={() => { setDashboardUniversityFilter(['ALL']); setUniSearchDashboard(''); }}
-                    >
-                      Clear ({dashboardUniversityFilter.length} selected)
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Multi-select college checkboxes (tick 1, 2 or more) */}
-              <div style={{ marginTop: '0.75rem', maxHeight: '190px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.35rem', paddingRight: '0.25rem' }}>
-                {universities
-                  .filter(u => {
-                    const q = uniSearchDashboard.trim().toLowerCase();
-                    if (!q) return true;
-                    return `${u.name} ${u.place || ''} ${u.languages || ''}`.toLowerCase().includes(q);
-                  })
-                  .map(u => {
-                    const count = (uniStats[u.id] || { total: 0 }).total;
-                    const checked = !isAllUniScope && dashboardUniversityFilter.includes(u.id);
-                    return (
-                      <label
-                        key={u.id}
-                        style={{
-                          display: 'flex', alignItems: 'center', gap: '0.6rem',
-                          padding: '0.5rem 0.75rem', borderRadius: '8px', cursor: 'pointer',
-                          border: checked ? '1px solid var(--accent)' : '1px solid var(--border)',
-                          backgroundColor: checked ? 'rgba(0, 0, 0, 0.08)' : 'var(--bg-card)',
-                          fontSize: '0.85rem'
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleUniScope(u.id)}
-                          style={{ width: '16px', height: '16px', accentColor: 'var(--accent)', cursor: 'pointer' }}
-                        />
-                        <span style={{ fontWeight: checked ? '700' : '500', flex: 1 }}>
-                          🎓 {u.name}{u.place ? <span style={{ color: 'var(--text-secondary)', fontWeight: '600' }}> — {u.place}</span> : ''}
-                        </span>
-                        <span className="uni-count-badge">{count}</span>
-                      </label>
-                    );
-                  })}
-                {universities.filter(u => {
-                  const q = uniSearchDashboard.trim().toLowerCase();
-                  if (!q) return true;
-                  return `${u.name} ${u.place || ''} ${u.languages || ''}`.toLowerCase().includes(q);
-                }).length === 0 && (
-                  <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>No colleges match your search.</p>
-                )}
-              </div>
-
-              {/* Selected scope summary */}
-              <div style={{ marginTop: '0.75rem', fontSize: '0.83rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                <GraduationCap size={15} style={{ color: 'var(--accent)' }} />
-                {isAllUniScope ? (
-                  <span>Showing aggregate metrics across <b>{universities.length}</b> colleges • <b>{uniStats.ALL.total}</b> total calls</span>
-                ) : dashboardUniversityFilter.length === 1 ? (() => {
-                  const sel = universities.find(u => u.id === dashboardUniversityFilter[0]);
-                  const count = (uniStats[dashboardUniversityFilter[0]] || { total: 0 }).total;
-                  if (!sel) return <span>Unknown scope</span>;
-                  return <span>Showing <b>{sel.name}</b>{sel.place ? ` (${sel.place})` : ''} • <b>{count}</b> calls • 🗣️ {sel.languages || 'English, Hindi, Telugu'}</span>;
-                })() : (
-                  <span>Showing combined analytics for <b>{dashboardUniversityFilter.length} colleges</b> • <b>{totalDispatchedCount}</b> calls in scope</span>
-                )}
-              </div>
-            </div>
-
             {/* University-Wise Performance & Outcome Breakdown Matrix (Dynamically Configured) */}
             <div className="card" style={{ marginTop: '1.25rem', padding: '1.25rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
@@ -4591,9 +4608,9 @@ export default function App() {
                               </div>
                             </td>
 
-                            {/* 4. Application Status (WhatsApp admission link state) */}
+                            {/* 4. Application Status (sheet application_sent flag wins) */}
                             <td>
-                              {primaryStatus === CALL_OUTCOME_STATUS.APPLICATION_SENT ? (
+                              {String(call.rawFields?.application_sent ?? '').trim().toLowerCase() === 'yes' || primaryStatus === CALL_OUTCOME_STATUS.APPLICATION_SENT ? (
                                 <span
                                   style={{
                                     fontSize: '0.74rem',
@@ -4631,6 +4648,25 @@ export default function App() {
                                   <span>❌</span>
                                   <span>No Answer</span>
                                 </span>
+                              ) : String(call.rawFields?.application_sent ?? '').trim().toLowerCase() === 'no' ? (
+                                <span
+                                  style={{
+                                    fontSize: '0.74rem',
+                                    fontWeight: '800',
+                                    width: 'fit-content',
+                                    backgroundColor: 'rgba(148, 163, 184, 0.15)',
+                                    color: '#94a3b8',
+                                    border: '1px solid rgba(148, 163, 184, 0.25)',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.35rem',
+                                    padding: '0.25rem 0.65rem',
+                                    borderRadius: '6px'
+                                  }}
+                                >
+                                  <span>➖</span>
+                                  <span>Not Sent</span>
+                                </span>
                               ) : (
                                 <span
                                   style={{
@@ -4653,25 +4689,28 @@ export default function App() {
                               )}
                             </td>
 
-                            {/* 5. Interest Level (pure transcript verdict) */}
+                            {/* 5. Interest Level (sheet interested flag wins) */}
                             <td>
-                              {primaryStatus === CALL_OUTCOME_STATUS.NOT_ANSWERED ? (
-                                <span style={{
-                                  fontSize: '0.82rem',
-                                  fontWeight: '700',
-                                  color: '#f43f5e'
-                                }}>
-                                  No Answer
-                                </span>
-                              ) : (
-                                <span style={{
-                                  fontSize: '0.82rem',
-                                  fontWeight: '700',
-                                  color: isInterestedLead(call) ? '#22c55e' : '#ef4444'
-                                }}>
-                                  {isInterestedLead(call) ? 'Interested' : 'Not Interested'}
-                                </span>
-                              )}
+                              {(() => {
+                                const flag = String(call.rawFields?.interested ?? '').trim().toLowerCase();
+                                if (primaryStatus === CALL_OUTCOME_STATUS.NOT_ANSWERED && flag !== 'yes') {
+                                  return (
+                                    <span style={{ fontSize: '0.82rem', fontWeight: '700', color: '#f43f5e' }}>
+                                      No Answer
+                                    </span>
+                                  );
+                                }
+                                const shown = flag === 'yes' ? true : flag === 'no' ? false : isInterestedLead(call);
+                                return (
+                                  <span style={{
+                                    fontSize: '0.82rem',
+                                    fontWeight: '700',
+                                    color: shown ? '#22c55e' : '#ef4444'
+                                  }}>
+                                    {shown ? 'Interested' : 'Not Interested'}
+                                  </span>
+                                );
+                              })()}
                             </td>
 
                             {/* 6. Counsellor Follow-up (Secondary Metric) */}
@@ -4779,10 +4818,23 @@ export default function App() {
                         const id = call.id || call.call_log_id || `call-${idx}`;
                         const transcript = call.call_conversation || call.transcript || call.conversation || '';
                         const hasTranscript = Boolean(transcript && String(transcript).trim().length > 0);
+                        // Recipient name: same sheet row (by call id, then phone),
+                        // else staged queue name, else transcript greeting recovery.
+                        const liveId = String(call.call_id || call.id || '').trim();
+                        const liveClean = String(call.to_number || call.phone_number || call.to || '').replace(/\D/g, '').slice(-10);
+                        const sheetHit = (liveId && mergedCalls.find(m => String(m.call_id || m.id || '').trim() === liveId))
+                          || (liveClean && mergedCalls.find(m => String(m.contactNumber || '').replace(/\D/g, '').slice(-10) === liveClean))
+                          || null;
+                        const queueHit = (liveClean && activeQueue.find(q => String(q.formattedPhone || q.phone || '').replace(/\D/g, '').slice(-10) === liveClean)) || null;
+                        const recipientName = resolveDisplayName(sheetHit || call, queueHit);
+                        const showName = recipientName && !/^\+?[\d\s]+$/.test(recipientName);
 
                         return (
                           <tr key={id}>
-                            <td style={{ fontWeight: '600', fontFamily: 'var(--mono)', fontSize: '0.9rem' }}>{contact}</td>
+                            <td>
+                              {showName && <div style={{ fontWeight: '700', fontSize: '0.9rem' }}>{recipientName}</div>}
+                              <div style={{ fontFamily: 'var(--mono)', fontSize: showName ? '0.78rem' : '0.9rem', fontWeight: showName ? '400' : '600', color: showName ? 'var(--text-secondary)' : 'inherit' }}>{contact}</div>
+                            </td>
                             <td>
                               <span className={`status-pill ${status.toLowerCase() === 'completed' || hasTranscript ? 'completed' : 'canceled'}`}>
                                 {status.toLowerCase() === 'completed' || hasTranscript ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
@@ -4854,7 +4906,6 @@ export default function App() {
         const preferredCity = selectedCall.preferredCity || selectedCall.preferred_city || '—';
         const entranceExam = selectedCall.entranceExam || selectedCall.entrance_exam || '—';
 
-        const counselorRequired = selectedCall.counselorRequired || selectedCall.counselor_required || '—';
         const callbackRequired = selectedCall.callbackRequired || selectedCall.callback_required || '—';
         const universitiesDiscussed = selectedCall.universitiesDiscussed || selectedCall.universities_discussed || '—';
         const questionsAsked = selectedCall.questionsAsked || selectedCall.questions_asked || '—';
@@ -4871,7 +4922,6 @@ export default function App() {
         const transferStatus = selectedCall.transferStatus || selectedCall.call_transfered_status || (selectedCall.rawFields && selectedCall.rawFields.call_transfered_status) || '—';
         const preferredUniversity = selectedCall.preferredUniversity || selectedCall.preferred_university || (selectedCall.rawFields && selectedCall.rawFields.preferred_university) || '—';
         const sentiment = selectedCall.sentiment || (selectedCall.rawFields && selectedCall.rawFields.sentiment) || '—';
-        const botName = selectedCall.botName || selectedCall.bot_name || (selectedCall.rawFields && selectedCall.rawFields.bot_name) || '—';
         const callDuration = selectedCall.callDuration || selectedCall.duration || selectedCall.call_duration_in_seconds || (selectedCall.rawFields && selectedCall.rawFields.call_duration_in_seconds) || '—';
 
         const isHot = String(leadStatus).toUpperCase().includes('HOT');

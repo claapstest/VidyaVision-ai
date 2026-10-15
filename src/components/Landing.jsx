@@ -2,16 +2,26 @@ import React from 'react';
 import { Sun, Moon } from 'lucide-react';
 import '../landing.css';
 
-export function LandingNav({ onEnter, theme, onToggleTheme }) {
+export function LandingNav({ onEnter, theme, onToggleTheme, active }) {
+  const link = (id, label) => (
+    <a
+      href={`#${id}`}
+      onClick={(e) => { e.preventDefault(); onEnter(id); }}
+      className={active === id ? 'active' : ''}
+      aria-current={active === id ? 'page' : undefined}
+    >
+      {label}
+    </a>
+  );
   return (
     <>
       <div className="land-navwrap">
-        <nav className="land-nav">
+        <nav className="land-nav" aria-label="Primary">
           <span className="land-brand" onClick={() => onEnter('dashboard')} style={{ cursor: 'pointer' }}><i>◈</i> VidyaVision</span>
           <span className="land-links">
-            <a href="#dashboard" onClick={(e) => { e.preventDefault(); onEnter('dashboard'); }}>Dashboard</a>
-            <a href="#dialer" onClick={(e) => { e.preventDefault(); onEnter('dialer'); }}>Dialer</a>
-            <a href="#calls" onClick={(e) => { e.preventDefault(); onEnter('calls'); }}>Calls</a>
+            {link('dashboard', 'Dashboard')}
+            {link('dialer', 'Dialer')}
+            {link('calls', 'Calls')}
           </span>
           <span className="land-navright">
             <button className="theme-toggle" onClick={onToggleTheme} title="Toggle theme">

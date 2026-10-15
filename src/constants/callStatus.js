@@ -219,7 +219,8 @@ export function resolveCallFinalStatus(item) {
   // spoke — or only a stray "hello" in a ≤5s call) is NOT_ANSWERED, even if
   // the carrier marks the leg "completed". A verdict of interest is
   // impossible without engagement, so this guard runs before any stored
-  // final_status.
+  // final_status. Exception: a CONNECTED call with real talk time (>5s) counts
+  // as answered even when silent — it falls through to NOT_INTERESTED below.
   const durSecPre = parseTalkSeconds(item.call_duration_in_seconds ?? item.duration_in_seconds ?? item.callDuration ?? item.duration ?? item.call_duration ?? NaN);
   const talkCharsPre = String(item.call_conversation || item.transcript || item.conversation || '').replace(/(bot|agent|user)\s*:/gi, ' ').replace(/[^a-z0-9]/gi, '').length;
   const userCharsPre = userText.replace(/[^a-z0-9]/gi, '').length;
@@ -230,7 +231,9 @@ export function resolveCallFinalStatus(item) {
   // Factual identity verdicts ("wrong number", "already joined/applied") stay
   // valid even in a 4-second call — only interest-style verdicts need talk time.
   const strongFactPre = /(wrong number|wrong person|invalid number|not the right person|already joined|already enrolled|already admitted|already applied|submitted application|filled application)/i.test(userText);
-  if (noEngagementPre && !strongFactPre) {
+  const lowerPreStatus = String(item.call_status || item.status || '').toLowerCase().trim();
+  const connectedWithTalk = (lowerPreStatus === 'completed' || lowerPreStatus === 'answered') && !isNaN(durSecPre) && durSecPre > 5;
+  if (noEngagementPre && !strongFactPre && !connectedWithTalk) {
     return CALL_OUTCOME_STATUS.NOT_ANSWERED;
   }
 
@@ -332,8 +335,12 @@ export function resolveCallFinalStatus(item) {
   // 9. If answered and transcript/summary exists without positive interest
   // DO NOT blindly mark as INTERESTED!
   if (lowerCallStatus === 'completed' || outcome.includes('COMPLETED') || outcome.includes('ANSWERED')) {
-    // Cut before engaging (caller never spoke) = not answered, not interested
+    // Silent but connected with real talk time (>5s) = picked up, no interest.
+    // Instant (<=5s) silent cuts stay NOT_ANSWERED.
     if (!hasUserSpeech) {
+      if (!isNaN(durSecPre) && durSecPre > 5) {
+        return CALL_OUTCOME_STATUS.NOT_INTERESTED;
+      }
       return CALL_OUTCOME_STATUS.NOT_ANSWERED;
     }
     // Positive signal needs the CALLER's own words — agent-only speech is a hang-up

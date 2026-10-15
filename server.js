@@ -251,13 +251,27 @@ function rememberCallTarget(formattedPhone, info) {
       name: prev.name || '', dispatchedAt: prev.updatedAt || nowIso
     });
   }
+  const infoExtra = (info.extra && typeof info.extra === 'object') ? info.extra : {};
   history.push({
     collegeName: info.collegeName || '', universityId: info.universityId || '',
     applicationUrl: info.applicationUrl || '', course: info.course || '',
-    name: info.name || '', dispatchedAt: nowIso
+    name: info.name || '', dispatchedAt: nowIso, extra: infoExtra
   });
-  CALL_TARGETS[key] = { ...prev, ...info, updatedAt: nowIso, history };
-  fs.writeFile(CALL_TARGETS_FILE, JSON.stringify(CALL_TARGETS, null, 2), 'utf8').catch(() => {});
+  CALL_TARGETS[key] = { ...prev, ...info, extra: infoExtra, updatedAt: nowIso, history };
+  persistTargets();
+}
+
+// Serialized atomic persistence: concurrent dispatches queue their writes
+// (temp file + rename) instead of racing on the same file — a race here
+// previously corrupted call_targets.json with interleaved snapshots.
+let targetsWriteChain = Promise.resolve();
+function persistTargets() {
+  const snapshot = JSON.stringify(CALL_TARGETS, null, 2);
+  targetsWriteChain = targetsWriteChain
+    .then(() => fs.writeFile(CALL_TARGETS_FILE + '.tmp', snapshot, 'utf8'))
+    .then(() => fs.rename(CALL_TARGETS_FILE + '.tmp', CALL_TARGETS_FILE))
+    .catch(err => console.error('Failed to save call targets:', err.message));
+  return targetsWriteChain;
 }
 
 // Campaign record for THIS call: nearest dispatch at or before the call date.
@@ -422,7 +436,7 @@ async function getGoogleSheetsClient() {
         credentials = JSON.parse(fileContent);
         console.log(`Google Sheets: Loaded credentials from local file: ${p}`);
         break;
-      } catch (err) {
+      } catch {
         // search next
       }
     }
@@ -614,10 +628,17 @@ function resolveFinalCallStatus(item) {
     return CALL_OUTCOME_STATUS.INTERESTED;
   }
 
-  // 8. Answered call fallback: completed but the caller NEVER spoke (cut/ignored
-  // in the first seconds) is NOT_ANSWERED — interest needs engagement.
+  // 8. Answered call fallback: a CONNECTED call (completed) counts as answered.
+  // Caller never spoke + real talk time (>5s) = picked up then hung up with no
+  // interest shown -> NOT_INTERESTED. Instant (<=5s) silent cuts stay NOT_ANSWERED.
   if (lowerCallStatus === 'completed' || outcome.includes('COMPLETED') || outcome.includes('ANSWERED')) {
     if (!__hasUserSpeech) {
+      const durRaw = item.call_duration_in_seconds ?? item.duration_in_seconds ?? item.callDuration ?? item.duration ?? item.call_duration ?? NaN;
+      const durMatch = String(durRaw ?? '').trim().match(/^(\d+):(\d{1,2})/);
+      const durSec = durMatch ? Number(durMatch[1]) * 60 + Number(durMatch[2]) : parseFloat(durRaw);
+      if (!isNaN(durSec) && durSec > 5) {
+        return CALL_OUTCOME_STATUS.NOT_INTERESTED;
+      }
       return CALL_OUTCOME_STATUS.NOT_ANSWERED;
     }
     return CALL_OUTCOME_STATUS.NOT_INTERESTED;
@@ -700,7 +721,12 @@ function normalizeRow(row, headers) {
     summary,
     notes,
     sentiment,
-    call_status: callOutcome
+    call_status: callOutcome,
+    // Engagement truth needs the transcript: without it every silent completed
+    // call looks identical to a cut line.
+    call_conversation: fullConversation,
+    call_duration_in_seconds: findValue(['call duration in seconds', 'call_duration_in_seconds', 'call duration_in_seconds'])
+      || (parseFloat(findValue(['call duration in minutes', 'call_duration_in_minutes'])) * 60 || '')
   });
 
   let effectiveLeadStatus = leadStatus;
@@ -823,7 +849,10 @@ function normalizeRow(row, headers) {
     sentiment,
     botName,
     call_conversation: fullConversation,
-    rawFields
+    rawFields,
+    // Uploaded-file extra columns (EmailID, State, District, …) captured at
+    // dispatch for this exact call — echoed by the Excel exports.
+    uploadExtra: (target && target.extra && typeof target.extra === 'object') ? target.extra : {}
   };
 }
 
@@ -967,7 +996,7 @@ function extractStudentName(callRecord) {
   const selfM = userText.match(/\bmy name is\s+([a-z][a-z'.\- ]{1,40})/i);
   if (selfM) {
     const name = titleCase(selfM[1].split(/[.,!?]/)[0]).split(/\s+/).filter((w) => !/^(and|uh|um|er|ah|yeah)$/i.test(w)).slice(0, 4).join(' ');
-    if (/^[A-Za-z][A-Za-z .'\-]{1,40}$/.test(name)) return name;
+    if (/^[A-Za-z][A-Za-z .'-]{1,40}$/.test(name)) return name;
   }
 
   // 2. Telugu honorific: "<name> garu" (e.g. "కార్తిక్ గారు")
@@ -2019,7 +2048,6 @@ app.post('/api/queue/start', async (req, res) => {
 
   // Validate and parse contacts
   const parsedQueue = [];
-  const invalidCount = 0;
 
   contacts.forEach((c, idx) => {
     const formatted = validateAndFormatMobile(c.phone);
@@ -2032,6 +2060,9 @@ app.post('/api/queue/start', async (req, res) => {
         universityId: universityId ? String(universityId) : '',
         universityName: universityName ? String(universityName) : '',
         course: (c.course ? String(c.course).trim() : '') || (course ? String(course).trim() : ''),
+        // Uploaded-file extra columns (EmailID, State, District, …) ride the
+        // queue so the campaign download can echo them back verbatim.
+        extra: (c.extra && typeof c.extra === 'object') ? c.extra : {},
         status: 'queued',
         duration: '—',
         reason: ''
@@ -2075,7 +2106,8 @@ app.post('/api/queue/start', async (req, res) => {
     collegeName: CAMPAIGN_STATE.universityName || '',
     universityId: CAMPAIGN_STATE.universityId || '',
     applicationUrl: CAMPAIGN_STATE.applicationUrl || '',
-    course: ct.course || CAMPAIGN_STATE.course || ''
+    course: ct.course || CAMPAIGN_STATE.course || '',
+    extra: ct.extra || {}
   }));
 
   // KB isolation: attach ONLY this college's PDF to the shared agent (best-effort).
@@ -2204,6 +2236,48 @@ app.post('/api/logs/clear', (req, res) => {
   LOGS.length = 0;
   addLog('info', 'Activity logs cleared.');
   res.json({ success: true, logs: LOGS });
+});
+
+// 7b. Full workspace reset: stops any campaign, empties the queue, clears
+// logs, manual verdict overrides and the sheets cache. Colleges, dispatch
+// memory and registrations are kept. NOTE: dashboard counts come from the
+// Google Sheet itself — for counts to reach 0, sheet data rows must also be
+// cleared (keep row 1 headers); the next sync then loads an empty sheet.
+app.post('/api/workspace/reset', async (req, res) => {
+  try {
+    if (queueNextTimer) {
+      clearTimeout(queueNextTimer);
+      queueNextTimer = null;
+    }
+    CALL_QUEUE = [];
+    CAMPAIGN_STATE = {
+      isRunning: false,
+      isPaused: false,
+      currentContactIndex: 0,
+      totalCount: 0,
+      completedCount: 0,
+      answeredCount: 0,
+      unansweredCount: 0,
+      delayMs: 2000,
+      universityName: '',
+      universityId: '',
+      agentId: getAgentId()
+    };
+    CURRENT_CALL = null;
+    PENDING_CALLS.clear();
+    CALL_INTERESTS = {};
+    await saveInterests();
+    LOGS.length = 0;
+    try {
+      await fs.unlink(GOOGLE_SHEETS_CACHE_FILE);
+    } catch {}
+    lastSheetsDataJson = '';
+    broadcastQueueUpdate();
+    addLog('info', 'Workspace reset: queue, logs, overrides and sheet cache cleared.');
+    res.json({ success: true, message: 'Workspace reset. Clear the sheet data rows (keep headers) for counts to reach 0.' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // 8. Get recent call logs from OmniDimension

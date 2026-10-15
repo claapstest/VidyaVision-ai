@@ -1,0 +1,1 @@
+call_date,call_id,call_request_id,from_number,to_number,student_name,college_name,target_course,call_status,call_direction,call_duration_in_seconds,lead_status,interest_level,callback,callback_reason,counsellor_follow_up,call_summary,full_conversation,sentiment,recording_url
