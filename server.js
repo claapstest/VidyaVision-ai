@@ -24,7 +24,41 @@ function getApiKey() {
 function getAgentId() {
   dotenv.config();
   const id = Number(process.env.AGENT_ID);
-  return !isNaN(id) && id > 0 ? id : 257941;
+  return !isNaN(id) && id > 0 ? id : 270604;
+}
+
+function getUgAgentId() {
+  dotenv.config();
+  const id = Number(process.env.UG_AGENT_ID);
+  return !isNaN(id) && id > 0 ? id : 270740;
+}
+
+function getPgAgentId() {
+  dotenv.config();
+  const id = Number(process.env.PG_AGENT_ID || process.env.AGENT_ID);
+  return !isNaN(id) && id > 0 ? id : 270604;
+}
+
+function isUgCourse(courseName) {
+  if (!courseName) return false;
+  const c = String(courseName).toLowerCase().trim();
+  if (c.includes('b.tech') || c.includes('btech') || c.includes('b.e') || c.includes('be ') || c.startsWith('be-') || c.includes('engineering')) return true;
+  if (c.includes('bba') || c.includes('bca') || c.includes('b.sc') || c.includes('bsc')) return true;
+  if (c.includes('b.com') || c.includes('bcom') || c.includes('b.a') || c.includes('ba ') || c.includes('b.pharm')) return true;
+  if (c.includes('b.arch') || c.includes('b.des') || c.includes('bdes') || c.includes('undergraduate') || c.includes('ug') || c.includes('12th') || c.includes('inter')) return true;
+  if (c.startsWith('b.') || c.startsWith('b ') || c.startsWith('bachelor')) return true;
+  return false;
+}
+
+function resolveAgentIdForCourse(courseName, fallbackAgentId) {
+  if (isUgCourse(courseName)) {
+    return getUgAgentId();
+  }
+  const c = String(courseName || '').toLowerCase();
+  if (c.includes('mba') || c.includes('m.tech') || c.includes('mtech') || c.includes('mca') || c.includes('m.sc') || c.includes('m.com') || c.includes('pg') || c.includes('master')) {
+    return getPgAgentId();
+  }
+  return fallbackAgentId ? Number(fallbackAgentId) : getAgentId();
 }
 
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -33,13 +67,169 @@ const INTERESTS_FILE = path.join(DATA_DIR, 'call_interests.json');
 const COLLEGES_FILE = path.join(DATA_DIR, 'colleges.json');
 const GOOGLE_SHEETS_CACHE_FILE = path.join(DATA_DIR, 'google_sheets_cache.json');
 const CALL_TARGETS_FILE = path.join(DATA_DIR, 'call_targets.json');
+const CAMPAIGNS_FILE = path.join(DATA_DIR, 'campaigns.json');
+const OMNI_CALLS_CACHE_FILE = path.join(DATA_DIR, 'omni_calls_cache.json');
+
+async function loadCampaigns() {
+  try {
+    const raw = await fs.readFile(CAMPAIGNS_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    return [];
+  }
+}
+
+async function saveCampaigns(campaigns) {
+  try {
+    await fs.writeFile(CAMPAIGNS_FILE, JSON.stringify(campaigns, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Error saving campaigns:', err.message);
+  }
+}
+
+async function loadOmniCache() {
+  try {
+    const raw = await fs.readFile(OMNI_CALLS_CACHE_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveOmniCache(data) {
+  try {
+    if (!Array.isArray(data)) return;
+    await fs.writeFile(OMNI_CALLS_CACHE_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Error saving Omni calls cache:', err.message);
+  }
+}
+
+function mergeOmniCallLists(existingList, newList) {
+  const map = new Map();
+  (existingList || []).forEach(c => {
+    const idKey = c.id ? `id_${c.id}` : null;
+    const phone = String(c.to_number || c.phone_number || c.to || '').replace(/\D/g, '').slice(-10);
+    const timeKey = phone && c.time_of_call ? `pt_${phone}_${c.time_of_call}` : null;
+    const key = idKey || timeKey || (phone ? `p_${phone}` : null);
+    if (key) map.set(key, c);
+  });
+  (newList || []).forEach(c => {
+    const idKey = c.id ? `id_${c.id}` : null;
+    const phone = String(c.to_number || c.phone_number || c.to || '').replace(/\D/g, '').slice(-10);
+    const timeKey = phone && c.time_of_call ? `pt_${phone}_${c.time_of_call}` : null;
+    const key = idKey || timeKey || (phone ? `p_${phone}` : null);
+    if (key) {
+      const prev = map.get(key) || {};
+      map.set(key, { ...prev, ...c });
+    }
+  });
+  const result = Array.from(map.values());
+  result.sort((a, b) => {
+    const tA = new Date(a.time_of_call || a.call_date || a.timestamp || 0).getTime();
+    const tB = new Date(b.time_of_call || b.call_date || b.timestamp || 0).getTime();
+    return (isNaN(tB) ? 0 : tB) - (isNaN(tA) ? 0 : tA);
+  });
+  return result;
+}
+
+function enrichCampaignContact(c, omniCalls, sheetsCalls) {
+  if (!c || typeof c !== 'object') return c;
+  const cleanPhone = String(c.phone || c.formattedPhone || '').replace(/\D/g, '').slice(-10);
+  if (!cleanPhone) return c;
+
+  const omniMatch = (omniCalls || []).find(o => {
+    const p = String(o.to_number || o.phone_number || o.to || '').replace(/\D/g, '').slice(-10);
+    return p === cleanPhone;
+  });
+
+  const sheetMatch = (sheetsCalls || []).find(s => {
+    const p = String(s.contactNumber || s.rawFields?.to_number || s.to_number || '').replace(/\D/g, '').slice(-10);
+    return p === cleanPhone;
+  });
+
+  const match = omniMatch || sheetMatch;
+  if (!match) return c;
+
+  const rf = match.rawFields || {};
+  const ev = match.extracted_variables || {};
+
+  // Resolve Recording URL
+  let recUrl = c.recordingUrl || c.recording_url || '';
+  if (!recUrl || recUrl === '—' || recUrl === 'false') {
+    const raw = match.internal_recording_url || match.recordingUrl || match.recording_url || rf.recording_url || match.recording;
+    if (raw && typeof raw === 'string' && raw !== 'false' && raw !== '—') {
+      const trimmed = raw.trim();
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) recUrl = trimmed;
+      else if (trimmed.startsWith('/')) recUrl = `https://backend.omnidim.io${trimmed}`;
+      else recUrl = trimmed;
+    }
+  }
+
+  // Resolve Call Summary
+  let summary = c.callSummary || c.summary || '';
+  if (!summary || summary === '—' || summary === 'Completed' || summary === 'Not provided') {
+    summary = match.sentiment_analysis_details || rf.call_summary || rf.summary || match.call_summary || match.summary || match.interest_details || '';
+    if (summary === 'Not provided' || summary === '—') summary = '';
+  }
+
+  // Resolve Call Transcript
+  let transcript = c.callTranscript || c.call_conversation || c.transcript || '';
+  if (!transcript || transcript === '—') {
+    if (typeof match.call_conversation === 'string' && match.call_conversation.trim()) {
+      transcript = match.call_conversation.replace(/<br\s*\/?>/gi, '\n').trim();
+    } else if (Array.isArray(match.call_conversation)) {
+      transcript = match.call_conversation.map(t => `${t.user_query ? `User: ${t.user_query}` : ''}${t.user_query && t.bot_response ? '\n' : ''}${t.bot_response ? `Bot: ${t.bot_response}` : ''}`).filter(Boolean).join('\n');
+    } else if (Array.isArray(match.interactions) && match.interactions.length > 0) {
+      transcript = match.interactions.map(t => `${t.user_query ? `User: ${t.user_query}` : ''}${t.user_query && t.bot_response ? '\n' : ''}${t.bot_response ? `Bot: ${t.bot_response}` : ''}`).filter(Boolean).join('\n');
+    } else if (rf.full_conversation || rf.call_conversation) {
+      transcript = String(rf.full_conversation || rf.call_conversation).replace(/<br\s*\/?>/gi, '\n').replace(/\s*\|\s*/g, '\n').trim();
+    }
+  }
+
+  // Duration
+  let duration = c.callDuration || '';
+  if (!duration || duration === '0:00' || duration === '—') {
+    const rawD = match.call_duration || match.duration || (rf && rf.call_duration_in_seconds);
+    if (rawD && rawD !== '—' && rawD !== '0:00') {
+      duration = formatDuration(rawD);
+    }
+  }
+
+  // Status & Outcome
+  const isAnswered = Boolean(
+    (match.call_status || match.status) === 'completed' ||
+    (recUrl && recUrl !== '—') ||
+    (transcript && transcript !== '—') ||
+    (duration && duration !== '0:00' && duration !== '—')
+  );
+
+  return {
+    ...c,
+    status: isAnswered ? 'completed' : (c.status || 'no-answer'),
+    callOutcome: isAnswered ? (c.callOutcome && c.callOutcome !== 'no-answer' ? c.callOutcome : 'Completed') : (c.callOutcome || 'No Answer'),
+    callDuration: duration || c.callDuration || '0:00',
+    recordingUrl: recUrl || c.recordingUrl || '—',
+    callSummary: summary || c.callSummary || '—',
+    summary: summary || c.summary || '—',
+    callTranscript: transcript || c.callTranscript || '—',
+    call_conversation: transcript || c.call_conversation || '',
+    graduationStatus: match.graduation_status || rf.graduation_status || ev.graduation_status || match.educationStatus || c.graduationStatus || '—',
+    admissionTimeline: match.admission_timeline || rf.admission_timeline || ev.admission_timeline || match.timeline || c.admissionTimeline || '—',
+    entranceExam: match.entrance_exam || rf.entrance_exam || ev.entrance_exam || match.entranceExam || c.entranceExam || '—',
+    counselorRequired: (rf.counsellor_follow_up === 'Yes' || ev.counsellor_follow_up === 'Yes' || match.counselorRequired === 'Yes') ? 'Yes' : (c.counselorRequired || 'No'),
+    transferStatus: (rf.call_transfered_status === 'Yes' || ev.call_transfered_status === 'Yes' || match.transferStatus === 'Yes') ? 'Yes' : (c.transferStatus || 'No')
+  };
+}
 
 const DEFAULT_COLLEGES = [
   {
     id: 'vidyavision',
     name: 'Vidyavision AI Assistant',
     place: 'Hyderabad, Telangana',
-    agentId: 257941,
+    agentId: 270604,
     languages: 'Telugu, English, Hindi, Tamil, Malayalam',
     courses: ['B.Tech CSE', 'B.Tech ECE', 'B.Tech IT', 'MBA'],
     status: 'active',
@@ -50,7 +240,7 @@ const DEFAULT_COLLEGES = [
     id: 'gitam',
     name: 'GITAM University',
     place: 'Visakhapatnam & Hyderabad',
-    agentId: 257941,
+    agentId: 270604,
     languages: 'English, Hindi',
     courses: ['B.Tech CSE', 'B.Tech ECE', 'MBA'],
     status: 'active',
@@ -61,7 +251,7 @@ const DEFAULT_COLLEGES = [
     id: 'kl',
     name: 'KL University',
     place: 'Vijayawada & Hyderabad',
-    agentId: 257941,
+    agentId: 270604,
     languages: 'English, Hindi',
     courses: ['B.Tech CSE', 'B.Tech ECE', 'MBA'],
     status: 'active',
@@ -72,7 +262,7 @@ const DEFAULT_COLLEGES = [
     id: 'icfai',
     name: 'ICFAI Foundation for Higher Education',
     place: 'Hyderabad, Telangana',
-    agentId: 257941,
+    agentId: 270604,
     languages: 'English, Hindi',
     courses: ['MBA', 'BBA', 'B.Tech CSE'],
     status: 'active',
@@ -83,7 +273,7 @@ const DEFAULT_COLLEGES = [
     id: 'mnr',
     name: 'MNR University',
     place: 'Sangareddy, Telangana',
-    agentId: 257941,
+    agentId: 270604,
     languages: 'Telugu, English, Hindi',
     courses: ['B.Tech CSE', 'B.Tech ECE', 'MBA'],
     status: 'active',
@@ -94,7 +284,7 @@ const DEFAULT_COLLEGES = [
     id: 'mitwpu',
     name: 'MIT WPU',
     place: 'Pune, Maharashtra',
-    agentId: 257941,
+    agentId: 270604,
     languages: 'English, Hindi',
     courses: ['MBA', 'B.Tech CSE', 'B.Tech ECE', 'BBA'],
     status: 'active',
@@ -609,15 +799,33 @@ function normalizeRow(row, headers) {
     rawFields.student_name = effectiveStudentName;
   }
 
+  let effectiveEmail = email;
+  if ((!effectiveEmail || effectiveEmail === '—') && target && target.email) {
+    effectiveEmail = target.email;
+  }
+  let effectiveState = preferredState;
+  if ((!effectiveState || effectiveState === '—') && target && target.state) {
+    effectiveState = target.state;
+  }
+  let effectiveDistrict = preferredCity;
+  if ((!effectiveDistrict || effectiveDistrict === '—') && target && target.district) {
+    effectiveDistrict = target.district;
+  }
+  let effectiveProgram = program;
+  if ((!effectiveProgram || effectiveProgram === '—') && target && (target.program || target.course)) {
+    effectiveProgram = target.program || target.course;
+  }
+
   return {
     id,
     studentName: effectiveStudentName,
     contactNumber,
-    email,
-    program,
-    course,
-    preferredState,
-    preferredCity,
+    email: effectiveEmail,
+    program: effectiveProgram,
+    course: course || effectiveProgram,
+    preferredState: effectiveState,
+    preferredCity: effectiveDistrict,
+    extraFields: target?.extraFields || {},
     leadStatus: effectiveLeadStatus,
     interestLevel,
     final_status,
@@ -1200,31 +1408,116 @@ function broadcast(message) {
 let lastCallsJson = '';
 let pollInterval = null;
 
-async function fetchCallsFromOmni() {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    return null;
-  }
-  const target = `https://backend.omnidim.io/api/v1/calls/logs?pageno=1&pagesize=50`;
+async function enrichAllCampaigns() {
   try {
-    const response = await fetch(target, {
-      headers: { Authorization: `Bearer ${apiKey}` }
-    });
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error(`OmniDimension API error (${response.status}): ${errText}`);
-      return null;
+    const all = await loadCampaigns();
+    if (!all || all.length === 0) return;
+    const omni = await loadOmniCache();
+    const sheets = await loadCache();
+    let updated = false;
+
+    for (const camp of all) {
+      if (!Array.isArray(camp.contacts)) continue;
+      let answered = 0;
+      camp.contacts = camp.contacts.map(c => {
+        const enriched = enrichCampaignContact(c, omni, sheets);
+        if (enriched.status === 'completed' || (enriched.recordingUrl && enriched.recordingUrl !== '—')) {
+          answered++;
+        }
+        if (
+          enriched.recordingUrl !== c.recordingUrl ||
+          enriched.callSummary !== c.callSummary ||
+          enriched.callTranscript !== c.callTranscript ||
+          enriched.status !== c.status ||
+          enriched.callDuration !== c.callDuration
+        ) {
+          updated = true;
+        }
+        return enriched;
+      });
+      if (answered > 0) {
+        camp.answeredCount = Math.max(camp.answeredCount || 0, answered);
+        camp.unansweredCount = Math.max(0, (camp.totalCount || camp.contacts.length) - camp.answeredCount);
+      }
     }
-    const data = await response.json();
-    const rawCalls = data.call_log_data || data.calls || data.data || data || [];
-    if (Array.isArray(rawCalls)) {
-      return rawCalls.map(c => enrichCallWithInterest(c));
+
+    if (updated) {
+      await saveCampaigns(all);
+      broadcast({ type: 'campaigns', data: all });
     }
-    return [];
-  } catch (error) {
-    console.error('Error fetching calls from OmniDimension:', error);
-    return null;
+  } catch (err) {
+    console.error('Error enriching campaigns:', err.message);
   }
+}
+
+async function fetchCallsFromOmni(pages = 1) {
+  const apiKey = getApiKey();
+  const existingCache = await loadOmniCache();
+  if (!apiKey) {
+    return existingCache.map(c => enrichCallWithInterest(c));
+  }
+
+  const newlyFetched = [];
+  const maxPages = Math.max(1, Math.min(Number(pages) || 1, 10));
+
+  for (let page = 1; page <= maxPages; page++) {
+    const target = `https://backend.omnidim.io/api/v1/calls/logs?pageno=${page}&pagesize=50`;
+    try {
+      const response = await fetch(target, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(12000)
+      });
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error(`OmniDimension API error on page ${page} (${response.status}): ${errText}`);
+        break;
+      }
+      const data = await response.json();
+      const rawCalls = data.call_log_data || data.calls || data.data || data || [];
+      if (!Array.isArray(rawCalls) || rawCalls.length === 0) {
+        break;
+      }
+
+      for (const raw of rawCalls) {
+        // Normalize recording_url & internal_recording_url
+        let recUrl = raw.internal_recording_url || raw.recording_url || raw.recordingUrl;
+        if (recUrl && typeof recUrl === 'string' && recUrl !== 'false' && recUrl !== '—') {
+          const trimmed = recUrl.trim();
+          if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+            raw.recordingUrl = trimmed;
+            raw.recording_url = trimmed;
+            raw.internal_recording_url = raw.internal_recording_url || trimmed;
+          } else if (trimmed.startsWith('/')) {
+            raw.recordingUrl = `https://omnidim.io${trimmed}`;
+            raw.recording_url = `https://backend.omnidim.io${trimmed}`;
+            raw.internal_recording_url = `https://omnidim.io${trimmed}`;
+          }
+        }
+
+        // Normalize summary
+        const summary = raw.sentiment_analysis_details || raw.summary || raw.call_summary || raw.interest_details || '';
+        if (summary && summary !== 'Not provided' && summary !== '—') {
+          raw.summary = summary;
+          raw.call_summary = summary;
+          raw.sentiment_analysis_details = raw.sentiment_analysis_details || summary;
+        }
+
+        newlyFetched.push(raw);
+      }
+    } catch (error) {
+      console.error(`Error fetching calls from OmniDimension (page ${page}):`, error.message);
+      break;
+    }
+  }
+
+  if (newlyFetched.length > 0) {
+    const merged = mergeOmniCallLists(existingCache, newlyFetched);
+    await saveOmniCache(merged);
+    enrichAllCampaigns().catch(() => {});
+    return merged.map(c => enrichCallWithInterest(c));
+  }
+
+  return existingCache.map(c => enrichCallWithInterest(c));
 }
 
 // Handle completion of a call in queue and trigger next contact
@@ -1246,6 +1539,32 @@ function handleQueueContactFinished(contact, isAnswered, statusText, durationStr
   CAMPAIGN_STATE.completedCount++;
   CURRENT_CALL = null;
   broadcastQueueUpdate();
+
+  // Update active campaign record in campaigns.json
+  if (CAMPAIGN_STATE && CAMPAIGN_STATE.campaignId) {
+    loadCampaigns().then(async (all) => {
+      const camp = all.find(c => c.id === CAMPAIGN_STATE.campaignId);
+      if (camp) {
+        if (isAnswered) camp.answeredCount = (camp.answeredCount || 0) + 1;
+        else camp.unansweredCount = (camp.unansweredCount || 0) + 1;
+        camp.completedCount = (camp.completedCount || 0) + 1;
+        if (Array.isArray(camp.contacts)) {
+          const cMatch = camp.contacts.find(c => c.phone === contact.phone || c.formattedPhone === contact.formattedPhone);
+          if (cMatch) {
+            cMatch.status = isAnswered ? 'completed' : 'no-answer';
+            cMatch.callOutcome = isAnswered ? 'Completed' : (statusText || 'No Answer');
+            cMatch.callDuration = durationStr || '0:00';
+          }
+        }
+        if (camp.completedCount >= camp.totalCount) {
+          camp.status = 'completed';
+          camp.completedAt = new Date().toISOString();
+        }
+        await saveCampaigns(all);
+        broadcast({ type: 'campaigns', data: all });
+      }
+    }).catch(() => {});
+  }
 
   if (isAnswered) {
     // Push fresh data immediately so the dashboard shows this call at once:
@@ -1443,9 +1762,11 @@ async function processNextInQueue() {
 
   const nameDisplay = contact.name ? `"${contact.name}"` : 'Not provided';
   const universityDisplay = CAMPAIGN_STATE.universityName || 'Vidyavision AI Admission Assistant';
-  const activeAgentId = CAMPAIGN_STATE.agentId || getAgentId();
+  const targetCourse = contact.course || CAMPAIGN_STATE.course || '';
+  const activeAgentId = resolveAgentIdForCourse(targetCourse, CAMPAIGN_STATE.agentId);
+  const botLabel = isUgCourse(targetCourse) ? 'UG Bot (#270740)' : 'PG Bot (#270604)';
   const apiKey = getApiKey();
-  addLog('info', `Sequential Dialing [${nextIndex + 1}/${CAMPAIGN_STATE.totalCount}] using ${universityDisplay} (Agent ID: ${activeAgentId}): Initiating call to ${contact.formattedPhone} (Name: ${nameDisplay})...`);
+  addLog('info', `Sequential Dialing [${nextIndex + 1}/${CAMPAIGN_STATE.totalCount}] using ${universityDisplay} [${botLabel}]: Initiating call to ${contact.formattedPhone} (Name: ${nameDisplay}, Course: ${targetCourse || 'General'})...`);
 
   if (!apiKey) {
     addLog('error', 'OMNIDIM_API_KEY is missing! Call dispatch aborted.');
@@ -1455,12 +1776,22 @@ async function processNextInQueue() {
 
   try {
     const collegeName = CAMPAIGN_STATE.universityName || 'Vidyavision AI';
-    const collegePlace = CAMPAIGN_STATE.collegePlace || '';
+    let collegePlace = CAMPAIGN_STATE.collegePlace || contact.collegePlace || '';
+    if (!collegePlace && (CAMPAIGN_STATE.universityId || contact.universityId)) {
+      try {
+        const rawColleges = JSON.parse(await fs.readFile(COLLEGES_FILE, 'utf8'));
+        const targetId = CAMPAIGN_STATE.universityId || contact.universityId;
+        const found = rawColleges.find(c => String(c.id) === String(targetId));
+        if (found && (found.place || found.location)) {
+          collegePlace = found.place || found.location;
+        }
+      } catch (_) {}
+    }
     const applicationUrl = CAMPAIGN_STATE.applicationUrl || '';
     const targetCourse = contact.course || CAMPAIGN_STATE.course || '';
     const studentName = contact.name || 'Student';
     // Explicit self-introduction line so the agent always says the selected
-    // college name first, even if its dashboard prompt is generic.
+    // college name and place/city first, even if its dashboard prompt is generic.
     const agentIntro = `You are calling from ${collegeName}${collegePlace ? `, ${collegePlace}` : ''}${targetCourse ? ` about ${targetCourse} admissions` : ''}. Introduce yourself as calling from ${collegeName} and answer only about ${collegeName} admissions unless the caller asks about other colleges.`;
     const dispatchPayload = {
       agent_id: activeAgentId,
@@ -1473,6 +1804,11 @@ async function processNextInQueue() {
         university_name: collegeName,
         target_college: collegeName,
         college_place: collegePlace,
+        place: collegePlace,
+        city: collegePlace,
+        location: collegePlace,
+        college_city: collegePlace,
+        college_location: collegePlace,
         target_course: targetCourse,
         course: targetCourse,
         application_url: applicationUrl,
@@ -1487,6 +1823,11 @@ async function processNextInQueue() {
         university_name: collegeName,
         target_college: collegeName,
         college_place: collegePlace,
+        place: collegePlace,
+        city: collegePlace,
+        location: collegePlace,
+        college_city: collegePlace,
+        college_location: collegePlace,
         target_course: targetCourse,
         course: targetCourse,
         application_url: applicationUrl,
@@ -1730,7 +2071,7 @@ app.delete('/api/colleges/:id', async (req, res) => {
 
 // 1. Batch & Sequential Calling API
 app.post('/api/queue/start', (req, res) => {
-  const { contacts, delaySeconds, agentId, universityName, universityId, collegePlace, applicationUrl, course } = req.body;
+  const { contacts, delaySeconds, agentId, universityName, universityId, collegePlace, applicationUrl, course, campaignName } = req.body;
 
   if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
     addLog('error', 'Batch call failed: No contacts provided.');
@@ -1739,7 +2080,6 @@ app.post('/api/queue/start', (req, res) => {
 
   // Validate and parse contacts
   const parsedQueue = [];
-  const invalidCount = 0;
 
   contacts.forEach((c, idx) => {
     const formatted = validateAndFormatMobile(c.phone);
@@ -1754,7 +2094,12 @@ app.post('/api/queue/start', (req, res) => {
         course: (c.course ? String(c.course).trim() : '') || (course ? String(course).trim() : ''),
         status: 'queued',
         duration: '—',
-        reason: ''
+        reason: '',
+        email: c.email ? String(c.email).trim() : '',
+        state: c.state ? String(c.state).trim() : '',
+        district: c.district ? String(c.district).trim() : '',
+        program: (c.program ? String(c.program).trim() : '') || (c.course ? String(c.course).trim() : '') || (course ? String(course).trim() : ''),
+        extraFields: (c.extraFields && typeof c.extraFields === 'object') ? c.extraFields : {}
       });
     }
   });
@@ -1764,19 +2109,25 @@ app.post('/api/queue/start', (req, res) => {
     return res.status(400).json({ error: 'No valid mobile numbers found in submission.' });
   }
 
+  const defaultCampaignName = `${universityName || 'University'} - ${course ? course + ' ' : ''}Campaign (${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}, ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })})`;
+  const finalCampaignName = campaignName && campaignName.trim() ? campaignName.trim() : defaultCampaignName;
+  const newCampaignId = `camp-${Date.now()}`;
+
   // Reset campaign state
   CALL_QUEUE = parsedQueue;
   CURRENT_CALL = null;
   CAMPAIGN_STATE = {
     isRunning: true,
     isPaused: false,
+    campaignId: newCampaignId,
+    campaignName: finalCampaignName,
     totalCount: parsedQueue.length,
     completedCount: 0,
     answeredCount: 0,
     unansweredCount: 0,
     delayMs: (Number(delaySeconds) || 2) * 1000,
     currentContactIndex: -1,
-    agentId: agentId ? Number(agentId) : getAgentId(),
+    agentId: resolveAgentIdForCourse(course || parsedQueue[0]?.course, agentId),
     universityId: universityId ? String(universityId) : '',
     universityName: universityName ? String(universityName) : 'Vidyavision AI Admission Assistant',
     collegePlace: collegePlace ? String(collegePlace) : '',
@@ -1784,9 +2135,52 @@ app.post('/api/queue/start', (req, res) => {
     course: course ? String(course).trim() : ''
   };
 
+  const initialBotLabel = isUgCourse(CAMPAIGN_STATE.course || parsedQueue[0]?.course) ? 'UG Bot (#270740)' : 'PG Bot (#270604)';
+  addLog('info', `Campaign "${finalCampaignName}" initialized with ${initialBotLabel} for course "${CAMPAIGN_STATE.course || 'General'}".`);
+
+  // Persist new campaign into campaigns.json
+  const campaignRecord = {
+    id: newCampaignId,
+    name: finalCampaignName,
+    universityId: universityId || '',
+    universityName: universityName || 'Vidyavision AI',
+    collegePlace: collegePlace || '',
+    course: course || '',
+    agentId: CAMPAIGN_STATE.agentId,
+    startedAt: new Date().toISOString(),
+    totalCount: parsedQueue.length,
+    completedCount: 0,
+    answeredCount: 0,
+    unansweredCount: 0,
+    status: 'in-progress',
+    contacts: parsedQueue.map(c => ({
+      id: c.id,
+      name: c.name || '',
+      phone: c.phone || '',
+      formattedPhone: c.formattedPhone || (c.phone ? `+91${c.phone}` : ''),
+      course: c.course || course || '',
+      universityName: universityName || '',
+      email: c.email || '',
+      state: c.state || '',
+      district: c.district || '',
+      program: c.program || c.course || course || '',
+      extraFields: c.extraFields || {},
+      status: 'queued',
+      callDuration: '—',
+      callOutcome: 'Pending',
+      timestamp: new Date().toISOString()
+    }))
+  };
+
+  loadCampaigns().then(async (all) => {
+    const updated = [campaignRecord, ...all];
+    await saveCampaigns(updated);
+    broadcast({ type: 'campaigns', data: updated });
+  }).catch(() => {});
+
   const universityDisplay = CAMPAIGN_STATE.universityName;
   const activeAgentId = CAMPAIGN_STATE.agentId || getAgentId();
-  addLog('success', `Campaign initialized for ${universityDisplay} (Agent ID: ${activeAgentId}) with ${parsedQueue.length} contacts! Starting sequential calling...`);
+  addLog('success', `Campaign "${finalCampaignName}" initialized for ${universityDisplay} (Agent ID: ${activeAgentId}) with ${parsedQueue.length} contacts! Starting sequential calling...`);
   broadcastQueueUpdate();
 
   // Remember which college + name each number was called with (persists restarts)
@@ -1795,7 +2189,12 @@ app.post('/api/queue/start', (req, res) => {
     collegeName: CAMPAIGN_STATE.universityName || '',
     universityId: CAMPAIGN_STATE.universityId || '',
     applicationUrl: CAMPAIGN_STATE.applicationUrl || '',
-    course: ct.course || CAMPAIGN_STATE.course || ''
+    course: ct.course || CAMPAIGN_STATE.course || '',
+    email: ct.email || '',
+    state: ct.state || '',
+    district: ct.district || '',
+    program: ct.program || '',
+    extraFields: ct.extraFields || {}
   }));
 
   // Kick off sequential execution
@@ -1803,9 +2202,252 @@ app.post('/api/queue/start', (req, res) => {
 
   res.json({
     success: true,
-    message: `Started sequential calling campaign with ${parsedQueue.length} contacts.`,
+    campaignId: newCampaignId,
+    campaignName: finalCampaignName,
+    message: `Started sequential calling campaign "${finalCampaignName}" with ${parsedQueue.length} contacts.`,
     totalCount: parsedQueue.length
   });
+});
+
+// Campaign Management Endpoints
+app.get('/api/campaigns', async (req, res) => {
+  try {
+    const { universityId } = req.query;
+    const all = await loadCampaigns();
+    if (universityId && universityId !== 'ALL') {
+      return res.json({ success: true, data: all.filter(c => c.universityId === universityId) });
+    }
+    res.json({ success: true, data: all });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/campaigns/:id', async (req, res) => {
+  try {
+    const all = await loadCampaigns();
+    const camp = all.find(c => c.id === req.params.id);
+    if (!camp) return res.status(404).json({ success: false, error: 'Campaign not found' });
+    res.json({ success: true, data: camp });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.put('/api/campaigns/:id', async (req, res) => {
+  try {
+    const { name } = req.body;
+    const all = await loadCampaigns();
+    const camp = all.find(c => c.id === req.params.id);
+    if (!camp) return res.status(404).json({ success: false, error: 'Campaign not found' });
+    if (name && name.trim()) camp.name = name.trim();
+    await saveCampaigns(all);
+    broadcast({ type: 'campaigns', data: all });
+    res.json({ success: true, data: camp });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/campaigns/:id', async (req, res) => {
+  try {
+    const all = await loadCampaigns();
+    const updated = all.filter(c => c.id !== req.params.id);
+    await saveCampaigns(updated);
+    broadcast({ type: 'campaigns', data: updated });
+    res.json({ success: true, deletedId: req.params.id });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/campaigns/:id/export', async (req, res) => {
+  try {
+    const all = await loadCampaigns();
+    const camp = all.find(c => c.id === req.params.id);
+    if (!camp) return res.status(404).json({ success: false, error: 'Campaign not found' });
+
+    const cachedSheets = await loadCache();
+    const cachedOmni = await loadOmniCache();
+    const phoneMap = new Map();
+    (cachedSheets || []).forEach(s => {
+      const p = String(s.contactNumber || s.rawFields?.to_number || s.to_number || s.phone_number || '').replace(/\D/g, '').slice(-10);
+      if (p && !phoneMap.has(p)) phoneMap.set(p, s);
+    });
+    (cachedOmni || []).forEach(o => {
+      const p = String(o.to_number || o.phone_number || o.to || '').replace(/\D/g, '').slice(-10);
+      if (p) {
+        const prev = phoneMap.get(p) || {};
+        phoneMap.set(p, { ...prev, ...o });
+      }
+    });
+
+    // Helper to test if a key represents one of the standard columns
+    const isStandardKey = (key) => {
+      const norm = String(key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      return ['name', 'fullname', 'studentname', 'student', 'phone', 'phonenumber', 'mobile', 'mobilenumber', 'contact', 'contactnumber', 'email', 'emailid', 'mail', 'mailid', 'state', 'preferredstate', 'stateut', 'district', 'preferredcity', 'city', 'town', 'program', 'course', 'degree', 'branch', 'university', 'college', 'collegename', 'targetcollege', 'preferreduniversity'].includes(norm);
+    };
+
+    // Helper to find best matching value for a field from multiple object sources
+    const resolveField = (sources, patterns) => {
+      for (const src of sources) {
+        if (!src || typeof src !== 'object') continue;
+        for (const pat of patterns) {
+          if (src[pat] !== undefined && src[pat] !== null) {
+            const val = String(src[pat]).trim();
+            if (val && val !== '—' && val.toLowerCase() !== 'null' && val.toLowerCase() !== 'undefined') return val;
+          }
+        }
+        const srcKeys = Object.keys(src);
+        for (const pat of patterns) {
+          const cleanPat = pat.toLowerCase().replace(/[^a-z0-9]/g, '');
+          for (const k of srcKeys) {
+            if (k === 'extraFields' || k === 'rawFields') continue;
+            const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (cleanK === cleanPat || (cleanPat.length >= 4 && cleanK.includes(cleanPat))) {
+              const val = String(src[k]).trim();
+              if (val && val !== '—' && val.toLowerCase() !== 'null' && val.toLowerCase() !== 'undefined') return val;
+            }
+          }
+        }
+      }
+      return '—';
+    };
+
+    // Discover dynamic extra columns from uploaded Excel sheets
+    const extraFieldKeys = [];
+    (camp.contacts || []).forEach(c => {
+      if (c.extraFields && typeof c.extraFields === 'object') {
+        Object.keys(c.extraFields).forEach(k => {
+          if (!isStandardKey(k) && !extraFieldKeys.includes(k)) {
+            extraFieldKeys.push(k);
+          }
+        });
+      }
+    });
+
+    const csvHeaders = [
+      'S.No', 'Full Name', 'Phone Number', 'Email ID', 'State', 'District',
+      ...extraFieldKeys,
+      'Program', 'University',
+      'Lead Status', 'Graduation Status', 'Admission Timeline', 'Entrance Exam', 'Counsellor Follow-up',
+      'Live Transferred', 'Call Duration', 'Call Date & Time', 'Call Summary', 'Call Recording URL', 'Call Transcript / Full Conversation'
+    ];
+
+    const escapeCsv = (val) => {
+      if (val === undefined || val === null) return '""';
+      const str = String(val).replace(/"/g, '""');
+      return `"${str}"`;
+    };
+
+    const rows = (camp.contacts || []).map((c, i) => {
+      const cleanPhone = String(c.formattedPhone || c.phone || '').replace(/\D/g, '').slice(-10);
+      const match = cleanPhone ? phoneMap.get(cleanPhone) : null;
+      const rf = match?.rawFields || {};
+      const ev = match?.extracted_variables || {};
+
+      const st = String(c.status || match?.status || match?.call_status || '').toLowerCase();
+      const outcome = String(c.callOutcome || match?.callOutcome || match?.leadStatus || '').toLowerCase();
+      let statusLabel = '❌ Not Answered';
+      if (st === 'queued') statusLabel = '⏳ Queued';
+      else if (outcome.includes('interest')) statusLabel = '🟢 Interested';
+      else if (outcome.includes('app') || outcome.includes('sent')) statusLabel = '📩 Application Sent';
+      else if (outcome.includes('callback')) statusLabel = '📞 Callback';
+      else if (outcome.includes('joined')) statusLabel = '🎓 Already Joined';
+      else if (outcome.includes('not') || outcome.includes('decline')) statusLabel = '🔴 Not Interested';
+      else if (outcome.includes('wrong') || outcome.includes('invalid')) statusLabel = '⚠️ Wrong / Invalid';
+      else if (st === 'completed' || st === 'answered') statusLabel = '📞 Answered';
+
+      const studentName = c.name && c.name !== 'Student' ? c.name : (match?.studentName || match?.name || c.name || 'Student');
+      const phone = c.formattedPhone || (cleanPhone ? `+91${cleanPhone}` : '') || match?.contactNumber || '—';
+      const email = resolveField([c, c.extraFields, match, match?.extraFields, rf], ['email', 'email id', 'emailid', 'email address', 'mail', 'mail id', 'student email']);
+      const state = resolveField([c, c.extraFields, match, match?.extraFields, rf], ['state', 'preferred state', 'preferredstate', 'state ut', 'region', 'province']);
+      const district = resolveField([c, c.extraFields, match, match?.extraFields, rf], ['district', 'preferred city', 'preferredcity', 'city', 'town', 'location']);
+      const program = resolveField([c, c.extraFields, match, match?.extraFields, rf], ['program', 'course', 'degree', 'branch', 'specialization', 'target_course']);
+      const university = resolveField([c, c.extraFields, match, match?.extraFields, rf], ['university', 'university name', 'college', 'college name', 'target_college', 'preferred university']);
+
+      const gradStatus = c.graduationStatus || match?.graduation_status || rf.graduation_status || ev.graduation_status || match?.educationStatus || '—';
+      const admTimeline = c.admissionTimeline || match?.admission_timeline || rf.admission_timeline || ev.admission_timeline || match?.timeline || '—';
+      const entExam = c.entranceExam || match?.entrance_exam || rf.entrance_exam || ev.entrance_exam || match?.entranceExam || '—';
+      const counselorFollowup = (c.counselorRequired === 'Yes' || rf.counsellor_follow_up === 'Yes' || ev.counsellor_follow_up === 'Yes' || match?.counselorRequired === 'Yes') ? 'Yes' : 'No';
+      const liveTransferred = (c.transferStatus === 'Yes' || rf.call_transfered_status === 'Yes' || ev.call_transfered_status === 'Yes' || match?.transferStatus === 'Yes') ? 'Yes' : 'No';
+      const duration = (match?.callDuration && match.callDuration !== '—') ? match.callDuration : (c.callDuration || '—');
+      const callDateTime = match?.callDate || match?.time_of_call || rf.call_date || c.timestamp || camp.startedAt || '—';
+
+      // Summary
+      let summary = c.callSummary || c.summary || '';
+      if (!summary || summary === '—' || summary === 'Completed' || summary === 'Not provided') {
+        summary = match?.sentiment_analysis_details || rf.call_summary || rf.summary || match?.call_summary || match?.summary || match?.interest_details || '—';
+        if (summary === 'Not provided') summary = '—';
+      }
+
+      // Recording URL
+      let recUrl = c.recordingUrl || c.recording_url || '';
+      if (!recUrl || recUrl === '—' || recUrl === 'false') {
+        const raw = match?.internal_recording_url || match?.recordingUrl || match?.recording_url || rf.recording_url || match?.recording;
+        if (raw && typeof raw === 'string' && raw !== 'false' && raw !== '—') {
+          const trimmed = raw.trim();
+          if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) recUrl = trimmed;
+          else if (trimmed.startsWith('/')) recUrl = `https://backend.omnidim.io${trimmed}`;
+          else recUrl = trimmed;
+        } else {
+          recUrl = '—';
+        }
+      }
+
+      // Transcript
+      let transcript = c.callTranscript || c.call_conversation || c.transcript || '';
+      if (!transcript || transcript === '—') {
+        if (typeof match?.call_conversation === 'string' && match.call_conversation.trim()) {
+          transcript = match.call_conversation.replace(/<br\s*\/?>/gi, '\n').trim();
+        } else if (Array.isArray(match?.call_conversation)) {
+          transcript = match.call_conversation.map(t => `${t.user_query ? `User: ${t.user_query}` : ''}${t.user_query && t.bot_response ? '\n' : ''}${t.bot_response ? `Bot: ${t.bot_response}` : ''}`).filter(Boolean).join('\n');
+        } else if (Array.isArray(match?.interactions) && match.interactions.length > 0) {
+          transcript = match.interactions.map(t => `${t.user_query ? `User: ${t.user_query}` : ''}${t.user_query && t.bot_response ? '\n' : ''}${t.bot_response ? `Bot: ${t.bot_response}` : ''}`).filter(Boolean).join('\n');
+        } else if (rf.full_conversation || rf.call_conversation) {
+          transcript = String(rf.full_conversation || rf.call_conversation).replace(/<br\s*\/?>/gi, '\n').replace(/\s*\|\s*/g, '\n').trim();
+        } else {
+          transcript = '—';
+        }
+      }
+
+      const extraVals = extraFieldKeys.map(k => {
+        const val = c.extraFields?.[k] || match?.extraFields?.[k] || rf?.[k] || '—';
+        return escapeCsv(val);
+      });
+
+      return [
+        i + 1,
+        escapeCsv(studentName),
+        escapeCsv(phone),
+        escapeCsv(email),
+        escapeCsv(state),
+        escapeCsv(district),
+        ...extraVals,
+        escapeCsv(program !== '—' ? program : (camp.course || 'MBA')),
+        escapeCsv(university !== '—' ? university : (camp.universityName || 'MIT WPU')),
+        escapeCsv(statusLabel),
+        escapeCsv(gradStatus),
+        escapeCsv(admTimeline),
+        escapeCsv(entExam),
+        escapeCsv(counselorFollowup),
+        escapeCsv(liveTransferred),
+        escapeCsv(duration),
+        escapeCsv(callDateTime),
+        escapeCsv(summary),
+        escapeCsv(recUrl),
+        escapeCsv(transcript)
+      ];
+    });
+
+    const csvContent = '\uFEFF' + [csvHeaders.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const safeName = (camp.name || 'campaign').replace(/[^a-zA-Z0-9_-]/g, '_');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}.csv"`);
+    res.send(csvContent);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // 2. Pause Sequential Queue
@@ -1888,11 +2530,20 @@ app.post('/api/logs/clear', (req, res) => {
 
 // 8. Get recent call logs from OmniDimension
 app.get('/api/calls', async (req, res) => {
-  const calls = await fetchCallsFromOmni();
-  if (calls) {
-    res.json({ success: true, data: calls });
-  } else {
-    res.status(502).json({ error: 'Could not fetch calls from OmniDimension' });
+  try {
+    const pages = req.query.pages ? parseInt(req.query.pages, 10) : 1;
+    const calls = await fetchCallsFromOmni(pages);
+    if (calls && calls.length > 0) {
+      return res.json({ success: true, data: calls });
+    }
+    const cached = await loadOmniCache();
+    res.json({ success: true, data: cached.map(c => enrichCallWithInterest(c)) });
+  } catch (err) {
+    const cached = await loadOmniCache();
+    if (cached && cached.length > 0) {
+      return res.json({ success: true, data: cached.map(c => enrichCallWithInterest(c)) });
+    }
+    res.status(502).json({ error: 'Could not fetch calls from OmniDimension: ' + err.message });
   }
 });
 
@@ -2026,10 +2677,10 @@ app.get('/api/call-analytics', async (req, res) => {
       const saved = await saveCache(records);
       if (saved === false) {
         const cached = await loadCache();
+        console.warn(`Sheets cache guard: kept existing cache (${cached.length} records). Fresh fetch had ${records.length} rows.`);
         return res.json({
           success: true,
           source: 'cache_kept',
-          error: `Fresh sheet fetch returned only ${records.length} rows — kept the last healthy cache (${cached.length} records). If you cleaned the sheet on purpose, tell the team to reset the cache.`,
           data: cached.length > 0 ? cached : records
         });
       }
@@ -2089,6 +2740,13 @@ server.listen(PORT, () => {
   console.log(`OmniDimension Backend running on port ${PORT}`);
   console.log(`WebSocket endpoint: ws://localhost:${PORT}/api/stream`);
   console.log(`========================================`);
+
+  // Initial OmniDimension call logs fetch & campaign data enrichment
+  setTimeout(() => {
+    fetchCallsFromOmni(6)
+      .then(() => enrichAllCampaigns())
+      .catch(err => console.error('Initial Omni sync error:', err.message));
+  }, 2000);
 });
 
 

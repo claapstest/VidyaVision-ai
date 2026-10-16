@@ -33,7 +33,13 @@ import {
   Save,
   PhoneForwarded,
   FileCheck,
-  AlertTriangle
+  AlertTriangle,
+  FolderOpen,
+  Layers,
+  ChevronDown,
+  ChevronUp,
+  Calendar,
+  ArrowRight
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import {
@@ -45,6 +51,17 @@ import {
   getCallbackTime
 } from './constants/callStatus';
 import CallOutcomePieChart from './components/CallOutcomePieChart';
+
+export const isUgCourse = (courseName) => {
+  if (!courseName) return false;
+  const c = String(courseName).toLowerCase().trim();
+  if (c.includes('b.tech') || c.includes('btech') || c.includes('b.e') || c.includes('be ') || c.startsWith('be-') || c.includes('engineering')) return true;
+  if (c.includes('bba') || c.includes('bca') || c.includes('b.sc') || c.includes('bsc')) return true;
+  if (c.includes('b.com') || c.includes('bcom') || c.includes('b.a') || c.includes('ba ') || c.includes('b.pharm')) return true;
+  if (c.includes('b.arch') || c.includes('b.des') || c.includes('bdes') || c.includes('undergraduate') || c.includes('ug') || c.includes('12th') || c.includes('inter')) return true;
+  if (c.startsWith('b.') || c.startsWith('b ') || c.startsWith('bachelor')) return true;
+  return false;
+};
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard'); // 'dispatch' | 'dashboard' | 'calls'
@@ -84,6 +101,20 @@ export default function App() {
   const [recentSearch, setRecentSearch] = useState('');
   const [recentChecked, setRecentChecked] = useState([]);
 
+  // Campaign Management State
+  const [campaigns, setCampaigns] = useState([]);
+  const [campaignCustomName, setCampaignCustomName] = useState('');
+  const [showCampaignsInDashboard, setShowCampaignsInDashboard] = useState(false);
+  const [showPastCampaignsModal, setShowPastCampaignsModal] = useState(false);
+  const [selectedCampaignDetail, setSelectedCampaignDetail] = useState(null);
+  const [cameFromPastCampaignsModal, setCameFromPastCampaignsModal] = useState(false);
+  const [campaignCheckedContacts, setCampaignCheckedContacts] = useState([]);
+  const [editingCampaignId, setEditingCampaignId] = useState(null);
+  const [editingCampaignName, setEditingCampaignName] = useState('');
+  const [pastCampaignSearch, setPastCampaignSearch] = useState('');
+  const [pastCampaignUniFilter, setPastCampaignUniFilter] = useState('ALL');
+  const [campaignContactStatusFilter, setCampaignContactStatusFilter] = useState('ALL');
+
   const pushRecentContacts = (items) => {
     if (!items || items.length === 0) return;
     setRecentContacts(prev => {
@@ -97,6 +128,12 @@ export default function App() {
             formattedPhone: c.formattedPhone || '',
             universityId: c.universityId || '',
             universityName: c.universityName || c.college || '',
+            email: c.email || '',
+            state: c.state || '',
+            district: c.district || '',
+            program: c.program || c.course || '',
+            course: c.course || c.program || '',
+            extraFields: c.extraFields || {},
             usedAt: c.usedAt || new Date().toISOString()
           });
         }
@@ -115,7 +152,13 @@ export default function App() {
         phone: String(r.phone || '').replace(/\D/g, ''),
         formattedPhone: formatted,
         name: (r.name || '').trim(),
-        hasName: Boolean((r.name || '').trim())
+        hasName: Boolean((r.name || '').trim()),
+        email: r.email || '',
+        state: r.state || '',
+        district: r.district || '',
+        program: r.program || r.course || '',
+        course: r.course || r.program || '',
+        extraFields: r.extraFields || {}
       } : null;
     }).filter(Boolean);
     if (valid.length === 0) {
@@ -167,7 +210,13 @@ export default function App() {
         phone: String(r.phone || '').replace(/\D/g, ''),
         formattedPhone: formatted,
         name: (r.name || '').trim(),
-        hasName: Boolean((r.name || '').trim())
+        hasName: Boolean((r.name || '').trim()),
+        email: r.email || '',
+        state: r.state || '',
+        district: r.district || '',
+        program: r.program || r.course || '',
+        course: r.course || r.program || '',
+        extraFields: r.extraFields || {}
       } : null;
     }).filter(Boolean);
     if (valid.length === 0) {
@@ -203,7 +252,7 @@ export default function App() {
       id: 'vidyavision',
       name: 'Vidyavision AI Assistant',
       place: 'Hyderabad, Telangana',
-      agentId: 257941,
+      agentId: 270604,
       languages: 'Telugu, English, Hindi, Tamil, Malayalam',
       courses: ['B.Tech CSE', 'B.Tech ECE', 'B.Tech IT', 'MBA'],
       status: 'active',
@@ -214,7 +263,7 @@ export default function App() {
       id: 'gitam',
       name: 'GITAM University',
       place: 'Visakhapatnam & Hyderabad',
-      agentId: 257941,
+      agentId: 270604,
       languages: 'English, Hindi',
       courses: ['B.Tech CSE', 'B.Tech ECE', 'MBA'],
       status: 'active',
@@ -225,7 +274,7 @@ export default function App() {
       id: 'kl',
       name: 'KL University',
       place: 'Vijayawada & Hyderabad',
-      agentId: 257941,
+      agentId: 270604,
       languages: 'English, Hindi',
       courses: ['B.Tech CSE', 'B.Tech ECE', 'MBA'],
       status: 'active',
@@ -236,7 +285,7 @@ export default function App() {
       id: 'icfai',
       name: 'ICFAI Foundation for Higher Education',
       place: 'Hyderabad, Telangana',
-      agentId: 257941,
+      agentId: 270604,
       languages: 'English, Hindi',
       courses: ['MBA', 'BBA', 'B.Tech CSE'],
       status: 'active',
@@ -247,7 +296,7 @@ export default function App() {
       id: 'mnr',
       name: 'MNR University',
       place: 'Sangareddy, Telangana',
-      agentId: 257941,
+      agentId: 270604,
       languages: 'Telugu, English, Hindi',
       courses: ['B.Tech CSE', 'B.Tech ECE', 'MBA'],
       status: 'active',
@@ -258,7 +307,7 @@ export default function App() {
       id: 'mitwpu',
       name: 'MIT WPU',
       place: 'Pune, Maharashtra',
-      agentId: 257941,
+      agentId: 270604,
       languages: 'English, Hindi',
       courses: ['MBA', 'B.Tech CSE', 'B.Tech ECE', 'BBA'],
       status: 'active',
@@ -320,7 +369,7 @@ export default function App() {
   const [selectedCall, setSelectedCall] = useState(null);
   const [editingInterestStatus, setEditingInterestStatus] = useState('PENDING');
   const [showCollegeModal, setShowCollegeModal] = useState(false);
-  const [showManageColleges, setShowManageColleges] = useState(true);
+  const [showManageColleges, setShowManageColleges] = useState(false);
   const [isSavingCollege, setIsSavingCollege] = useState(false);
   const [editingCollege, setEditingCollege] = useState('');
   const [editingCourse, setEditingCourse] = useState('');
@@ -333,7 +382,7 @@ export default function App() {
     place: '',
     websiteUrl: '',
     description: '',
-    agentId: '257941',
+    agentId: '270604',
     languages: 'English, Hindi, Telugu',
     courses: ''
   });
@@ -398,7 +447,7 @@ export default function App() {
       place: '',
       websiteUrl: '',
       description: '',
-      agentId: '257941',
+      agentId: '270604',
       languages: 'English, Hindi, Telugu',
       courses: ''
     });
@@ -412,7 +461,7 @@ export default function App() {
       place: college.place || '',
       websiteUrl: college.websiteUrl || '',
       description: college.description || '',
-      agentId: String(college.agentId || 257941),
+      agentId: String(college.agentId || 270604),
       languages: college.languages || 'English, Hindi, Telugu',
       courses: Array.isArray(college.courses) ? college.courses.join(', ') : (college.courses || '')
     });
@@ -443,7 +492,7 @@ export default function App() {
           place: collegeForm.place.trim(),
           websiteUrl: collegeForm.websiteUrl.trim(),
           description: collegeForm.description.trim(),
-          agentId: Number(collegeForm.agentId) || 257941,
+          agentId: Number(collegeForm.agentId) || 270604,
           languages: (collegeForm.languages || '').trim() || 'English, Hindi, Telugu',
           courses: String(collegeForm.courses || '').split(',').map(s => s.trim()).filter(Boolean)
         })
@@ -518,6 +567,7 @@ export default function App() {
   const logsEndRef = useRef(null);
   const wsRef = useRef(null);
   const fileInputRef = useRef(null);
+  const addMoreFileInputRef = useRef(null);
 
   // Add Toast Notification helper
   const addToast = (message, type = 'info') => {
@@ -574,6 +624,8 @@ export default function App() {
             setSheetsSyncError(null);
           } else if (msg.type === 'colleges') {
             syncColleges(msg.data);
+          } else if (msg.type === 'campaigns') {
+            if (Array.isArray(msg.data)) setCampaigns(msg.data);
           } else if (msg.type === 'queue_update') {
             if (msg.data.campaignState) setCampaignState(msg.data.campaignState);
             if (msg.data.queue) setActiveQueue(msg.data.queue);
@@ -599,6 +651,23 @@ export default function App() {
     return () => {
       if (wsRef.current) wsRef.current.close();
     };
+  }, []);
+
+  // Fetch campaigns
+  const fetchCampaigns = async () => {
+    try {
+      const res = await fetch('/api/campaigns');
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.data)) {
+        setCampaigns(data.data);
+      }
+    } catch (err) {
+      console.error('Failed to load campaigns:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchCampaigns();
   }, []);
 
   // Fetch live OmniDimension call logs via REST (no WebSocket dependency, so the
@@ -760,10 +829,15 @@ export default function App() {
           return;
         }
 
-        const headers = jsonData[0].map(h => String(h || '').trim().toLowerCase());
+        const rawHeaders = jsonData[0].map(h => String(h || '').trim());
+        const headers = rawHeaders.map(h => h.toLowerCase());
 
         let phoneIdx = headers.findIndex(h => h.includes('phone') || h.includes('mobile') || h.includes('number') || h.includes('contact'));
-        let nameIdx = headers.findIndex(h => h.includes('name') || h.includes('student') || h.includes('person') || h.includes('user'));
+        let nameIdx = headers.findIndex(h => h.includes('fullname') || h.includes('full_name') || h.includes('name') || h.includes('student') || h.includes('person') || h.includes('user'));
+        let emailIdx = headers.findIndex(h => h.includes('email') || h.includes('e-mail') || h.includes('mail'));
+        let stateIdx = headers.findIndex(h => h.includes('state') || h.includes('province') || h.includes('region'));
+        let distIdx = headers.findIndex(h => h.includes('district') || h.includes('city') || h.includes('town') || h.includes('location'));
+        let progIdx = headers.findIndex(h => h.includes('program') || h.includes('course') || h.includes('degree') || h.includes('branch') || h.includes('stream') || h.includes('specialization'));
 
         if (phoneIdx === -1) phoneIdx = 0;
         if (nameIdx === -1 && headers.length > 1) nameIdx = phoneIdx === 0 ? 1 : 0;
@@ -776,6 +850,36 @@ export default function App() {
 
           const rawPhone = row[phoneIdx] !== undefined ? String(row[phoneIdx]) : '';
           const rawName = nameIdx !== -1 && row[nameIdx] !== undefined ? String(row[nameIdx]) : '';
+          let rawEmail = emailIdx !== -1 && row[emailIdx] !== undefined ? String(row[emailIdx]) : '';
+          let rawState = stateIdx !== -1 && row[stateIdx] !== undefined ? String(row[stateIdx]) : '';
+          let rawDist = distIdx !== -1 && row[distIdx] !== undefined ? String(row[distIdx]) : '';
+          let rawProg = progIdx !== -1 && row[progIdx] !== undefined ? String(row[progIdx]) : '';
+
+          // Capture any extra student/parent columns
+          const extraFields = {};
+          rawHeaders.forEach((hdr, colIdx) => {
+            if (colIdx !== phoneIdx && colIdx !== nameIdx && row[colIdx] !== undefined && String(row[colIdx]).trim() !== '') {
+              extraFields[hdr] = String(row[colIdx]).trim();
+            }
+          });
+
+          // Intelligent fallbacks from extraFields if standard index was not found or empty
+          if (!rawEmail.trim()) {
+            const k = Object.keys(extraFields).find(key => /email|mail/i.test(key));
+            if (k) rawEmail = extraFields[k];
+          }
+          if (!rawState.trim()) {
+            const k = Object.keys(extraFields).find(key => /state/i.test(key));
+            if (k) rawState = extraFields[k];
+          }
+          if (!rawDist.trim()) {
+            const k = Object.keys(extraFields).find(key => /district|city|town/i.test(key));
+            if (k) rawDist = extraFields[k];
+          }
+          if (!rawProg.trim()) {
+            const k = Object.keys(extraFields).find(key => /program|course|degree|branch/i.test(key));
+            if (k) rawProg = extraFields[k];
+          }
 
           const formatted = validatePhone(rawPhone);
           if (formatted) {
@@ -784,7 +888,13 @@ export default function App() {
               phone: rawPhone.replace(/\D/g, ''),
               formattedPhone: formatted,
               name: rawName.trim(),
-              hasName: Boolean(rawName.trim())
+              hasName: Boolean(rawName.trim()),
+              email: rawEmail.trim(),
+              state: rawState.trim(),
+              district: rawDist.trim(),
+              program: rawProg.trim(),
+              course: rawProg.trim(),
+              extraFields
             });
           }
         }
@@ -805,7 +915,17 @@ export default function App() {
             fileSize: (file.size / 1024).toFixed(1) + ' KB',
             count: parsedContacts.length,
             uploadedAt: new Date().toISOString(),
-            contacts: parsedContacts.slice(0, RECENT_FILE_CONTACTS_MAX).map(c => ({ phone: c.phone, formattedPhone: c.formattedPhone, name: c.name }))
+            contacts: parsedContacts.slice(0, RECENT_FILE_CONTACTS_MAX).map(c => ({
+              phone: c.phone,
+              formattedPhone: c.formattedPhone,
+              name: c.name,
+              email: c.email || '',
+              state: c.state || '',
+              district: c.district || '',
+              program: c.program || '',
+              course: c.course || '',
+              extraFields: c.extraFields || {}
+            }))
           });
           addToast(`Imported ${parsedContacts.length} contacts from ${file.name}! Select settings below.`, 'success');
         }
@@ -819,13 +939,133 @@ export default function App() {
     e.target.value = null;
   };
 
+  // Upload and APPEND more numbers from Excel / CSV to current tempContacts
+  const handleAddMoreFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target.result;
+        const workbook = XLSX.read(bstr, { type: 'binary' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+        if (jsonData.length < 1) {
+          addToast('Selected Excel/CSV file is empty.', 'error');
+          return;
+        }
+
+        const rawHeaders = jsonData[0].map(h => String(h || '').trim());
+        const headers = rawHeaders.map(h => h.toLowerCase());
+
+        let phoneIdx = headers.findIndex(h => h.includes('phone') || h.includes('mobile') || h.includes('number') || h.includes('contact'));
+        let nameIdx = headers.findIndex(h => h.includes('fullname') || h.includes('full_name') || h.includes('name') || h.includes('student') || h.includes('person') || h.includes('user'));
+        let emailIdx = headers.findIndex(h => h.includes('email') || h.includes('e-mail') || h.includes('mail'));
+        let stateIdx = headers.findIndex(h => h.includes('state') || h.includes('province') || h.includes('region'));
+        let distIdx = headers.findIndex(h => h.includes('district') || h.includes('city') || h.includes('town') || h.includes('location'));
+        let progIdx = headers.findIndex(h => h.includes('program') || h.includes('course') || h.includes('degree') || h.includes('branch') || h.includes('stream') || h.includes('specialization'));
+
+        if (phoneIdx === -1) phoneIdx = 0;
+        if (nameIdx === -1 && headers.length > 1) nameIdx = phoneIdx === 0 ? 1 : 0;
+
+        const newParsed = [];
+
+        for (let i = (headers.length > 0 && phoneIdx !== -1 && isNaN(jsonData[0][phoneIdx]) ? 1 : 0); i < jsonData.length; i++) {
+          const row = jsonData[i];
+          if (!row || row.length === 0) continue;
+
+          const rawPhone = row[phoneIdx] !== undefined ? String(row[phoneIdx]) : '';
+          const rawName = nameIdx !== -1 && row[nameIdx] !== undefined ? String(row[nameIdx]) : '';
+          let rawEmail = emailIdx !== -1 && row[emailIdx] !== undefined ? String(row[emailIdx]) : '';
+          let rawState = stateIdx !== -1 && row[stateIdx] !== undefined ? String(row[stateIdx]) : '';
+          let rawDist = distIdx !== -1 && row[distIdx] !== undefined ? String(row[distIdx]) : '';
+          let rawProg = progIdx !== -1 && row[progIdx] !== undefined ? String(row[progIdx]) : '';
+
+          const extraFields = {};
+          rawHeaders.forEach((hdr, colIdx) => {
+            if (colIdx !== phoneIdx && colIdx !== nameIdx && row[colIdx] !== undefined && String(row[colIdx]).trim() !== '') {
+              extraFields[hdr] = String(row[colIdx]).trim();
+            }
+          });
+
+          // Intelligent fallbacks from extraFields if standard index was not found or empty
+          if (!rawEmail.trim()) {
+            const k = Object.keys(extraFields).find(key => /email|mail/i.test(key));
+            if (k) rawEmail = extraFields[k];
+          }
+          if (!rawState.trim()) {
+            const k = Object.keys(extraFields).find(key => /state/i.test(key));
+            if (k) rawState = extraFields[k];
+          }
+          if (!rawDist.trim()) {
+            const k = Object.keys(extraFields).find(key => /district|city|town/i.test(key));
+            if (k) rawDist = extraFields[k];
+          }
+          if (!rawProg.trim()) {
+            const k = Object.keys(extraFields).find(key => /program|course|degree|branch/i.test(key));
+            if (k) rawProg = extraFields[k];
+          }
+
+          const formatted = validatePhone(rawPhone);
+          if (formatted) {
+            newParsed.push({
+              id: `excel-add-${Date.now()}-${i}`,
+              phone: rawPhone.replace(/\D/g, ''),
+              formattedPhone: formatted,
+              name: rawName.trim(),
+              hasName: Boolean(rawName.trim()),
+              email: rawEmail.trim(),
+              state: rawState.trim(),
+              district: rawDist.trim(),
+              program: rawProg.trim(),
+              course: rawProg.trim(),
+              source: 'excel',
+              extraFields
+            });
+          }
+        }
+
+        if (newParsed.length === 0) {
+          addToast('Could not extract any valid 10-digit numbers from Excel sheet.', 'error');
+          return;
+        }
+
+        const phoneMap = new Map();
+        (tempContacts || []).forEach(c => {
+          const p = String(c.phone || c.formattedPhone || '').replace(/\D/g, '').slice(-10);
+          if (p) phoneMap.set(p, c);
+        });
+
+        let addedCount = 0;
+        newParsed.forEach(c => {
+          const p = String(c.phone || c.formattedPhone || '').replace(/\D/g, '').slice(-10);
+          if (p) {
+            if (!phoneMap.has(p)) addedCount++;
+            phoneMap.set(p, c);
+          }
+        });
+
+        const merged = Array.from(phoneMap.values());
+        setTempContacts(merged);
+        addToast(`Added ${addedCount} new numbers from ${file.name}! Total batch now: ${merged.length} contacts.`, 'success');
+      } catch (err) {
+        console.error(err);
+        addToast('Error reading Excel file.', 'error');
+      }
+    };
+    reader.readAsBinaryString(file);
+    e.target.value = null;
+  };
+
   // Remove Uploaded Excel File
   const handleRemoveUploadedFile = () => {
     setUploadedFileInfo(null);
     setTempContacts([]);
-    setStagedContacts([]);
     setCallDelay('');
-    addToast('Uploaded file and contacts cleared.', 'info');
+    addToast('Contacts cleared.', 'info');
   };
 
   // Download Sample CSV Helper
@@ -868,13 +1108,19 @@ export default function App() {
       return;
     }
 
-    const enrichedContacts = tempContacts.map(c => ({
-      ...c,
-      universityId: uni.id,
-      universityName: uni.name,
-      agentId: uni.agentId,
-      course: selectedCourse || ''
-    }));
+    const targetCourse = selectedCourse || '';
+    const enrichedContacts = tempContacts.map(c => {
+      const contactCourse = c.course || targetCourse;
+      const contactAgentId = isUgCourse(contactCourse) ? 270740 : (uni.agentId || 270604);
+      return {
+        ...c,
+        universityId: uni.id,
+        universityName: uni.name,
+        collegePlace: uni.place || uni.location || '',
+        agentId: contactAgentId,
+        course: contactCourse
+      };
+    });
 
     setStagedContacts(prev => [...prev, ...enrichedContacts]);
     setTempContacts([]);
@@ -896,33 +1142,151 @@ export default function App() {
       return;
     }
 
+    const campaignCourse = selectedCourse || stagedContacts[0]?.course || '';
+    const campaignAgentId = isUgCourse(campaignCourse) ? 270740 : (uni.agentId || 270604);
+    const botLabel = isUgCourse(campaignCourse) ? 'UG Bot (#270740)' : 'PG Bot (#270604)';
+
     try {
       const res = await fetch('/api/queue/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contacts: stagedContacts.map(c => ({ phone: c.phone, name: c.name, course: c.course || '' })),
+          contacts: stagedContacts.map(c => {
+            const cCourse = c.course || selectedCourse || '';
+            const cAgentId = isUgCourse(cCourse) ? 270740 : (uni.agentId || 270604);
+            return {
+              phone: c.phone,
+              formattedPhone: c.formattedPhone || (c.phone ? `+91${c.phone}` : ''),
+              name: c.name || '',
+              course: cCourse,
+              agentId: cAgentId,
+              email: c.email || '',
+              state: c.state || '',
+              district: c.district || '',
+              program: c.program || cCourse,
+              extraFields: c.extraFields || {}
+            };
+          }),
           delaySeconds: callDelay !== '' ? callDelay : 2,
-          agentId: uni.agentId,
+          agentId: campaignAgentId,
           universityId: uni.id,
           universityName: uni.name,
           collegePlace: uni.place || uni.location || '',
           applicationUrl: uni.websiteUrl || uni.applicationUrl || uni.admissionLink || '',
-          course: selectedCourse || stagedContacts[0]?.course || ''
+          course: campaignCourse,
+          campaignName: campaignCustomName && campaignCustomName.trim() ? campaignCustomName.trim() : undefined
         })
       });
 
       const data = await res.json();
       if (res.ok) {
-        addToast(`Campaign Started! Dialing ${data.totalCount} contacts sequentially using ${uni.name}...`, 'success');
+        addToast(`Campaign Started! Dialing ${data.totalCount} contacts sequentially using ${uni.name} [${botLabel}]...`, 'success');
         pushRecentContacts(stagedContacts.map(c => ({ ...c, usedAt: new Date().toISOString() })));
         setStagedContacts([]);
+        setCampaignCustomName('');
         setShowLogs(true); // Auto-expand logs terminal
+        fetchCampaigns();
       } else {
         addToast(data.error || 'Failed to start campaign', 'error');
       }
     } catch (err) {
       addToast('Network error starting campaign', 'error');
+    }
+  };
+
+  // Campaign Management Action Handlers
+  const handleLoadContactsToNewCampaign = (contactsToLoad) => {
+    if (!contactsToLoad || contactsToLoad.length === 0) {
+      addToast('Please select at least one contact to add.', 'error');
+      return;
+    }
+
+    const valid = contactsToLoad.map(c => {
+      const formatted = validatePhone(c.phone || c.formattedPhone);
+      return formatted ? {
+        id: `staged-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        phone: String(c.phone || c.formattedPhone || '').replace(/\D/g, '').slice(-10),
+        formattedPhone: formatted,
+        name: (c.name || '').trim(),
+        hasName: Boolean((c.name || '').trim()),
+        course: c.course || c.program || '',
+        program: c.program || c.course || '',
+        email: c.email || '',
+        state: c.state || '',
+        district: c.district || '',
+        extraFields: c.extraFields || {},
+        source: 'campaign'
+      } : null;
+    }).filter(Boolean);
+
+    if (valid.length === 0) {
+      addToast('No valid phone numbers found in selection.', 'error');
+      return;
+    }
+
+    const existing = tempContacts || [];
+    const phoneMap = new Map();
+    existing.forEach(c => {
+      const p = String(c.phone || c.formattedPhone || '').replace(/\D/g, '').slice(-10);
+      if (p) phoneMap.set(p, c);
+    });
+
+    let newAdded = 0;
+    valid.forEach(c => {
+      const p = String(c.phone || c.formattedPhone || '').replace(/\D/g, '').slice(-10);
+      if (p) {
+        if (!phoneMap.has(p)) newAdded++;
+        phoneMap.set(p, c);
+      }
+    });
+
+    const combined = Array.from(phoneMap.values());
+    setTempContacts(combined);
+    setTempInputMode('campaign');
+    setShowPastCampaignsModal(false);
+    setSelectedCampaignDetail(null);
+    setCameFromPastCampaignsModal(false);
+    setCampaignCheckedContacts([]);
+    setActiveTab('dispatch');
+    if (existing.length > 0) {
+      addToast(`Added ${newAdded} contacts from campaign! Total batch now: ${combined.length} contacts. You can also upload files to add more numbers.`, 'success');
+    } else {
+      addToast(`Loaded ${valid.length} contact${valid.length > 1 ? 's' : ''} into Step 2! You can also upload files to add more numbers to this campaign.`, 'success');
+    }
+  };
+
+
+
+  const handleSaveCampaignName = async (id, newName) => {
+    if (!newName || !newName.trim()) return;
+    try {
+      const res = await fetch(`/api/campaigns/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: newName.trim() })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setCampaigns(prev => prev.map(c => c.id === id ? { ...c, name: newName.trim() } : c));
+        setEditingCampaignId(null);
+        addToast('Campaign name updated.', 'success');
+      }
+    } catch (e) {
+      addToast('Failed to update campaign name.', 'error');
+    }
+  };
+
+  const handleDeleteCampaign = async (id, name) => {
+    if (!window.confirm(`Are you sure you want to delete campaign "${name}"?`)) return;
+    try {
+      const res = await fetch(`/api/campaigns/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setCampaigns(prev => prev.filter(c => c.id !== id));
+        if (selectedCampaignDetail?.id === id) setSelectedCampaignDetail(null);
+        addToast(`Campaign "${name}" deleted.`, 'info');
+      }
+    } catch (e) {
+      addToast('Failed to delete campaign.', 'error');
     }
   };
 
@@ -1488,22 +1852,106 @@ export default function App() {
     };
 
     const rf = call.rawFields || {};
-    const interested = normalizeFlag(rf.Interested ?? rf.interested, isInterested(call));
-    const applicationSent = normalizeFlag(rf.application_sent ?? rf['Application Sent'], isApplicationSent(call));
-    const callback = normalizeFlag(rf.callback ?? rf.Callback, isCallback(call));
-    const alreadyApplied = normalizeFlag(rf.already_applied ?? rf['Already Applied'], isAlreadyApplied(call));
-    const alreadyJoined = normalizeFlag(rf.already_joined ?? rf['Already Joined'], isAlreadyJoined(call));
-    const notInterested = normalizeFlag(rf.not_interested ?? rf['Not Interested'], isNotInterested(call));
-    const wrongInvalid = normalizeFlag(rf.wrong_invalid ?? rf['Wrong Invalid'] ?? rf.wrong_number, isWrongNumber(call));
-    const counsellorFollowup = normalizeFlag(rf.counsellor_follow_up ?? rf.counselor_follow_up ?? rf.counselor_followup, isCounselorFollowupRequired(call));
 
-    // Call Summary (from Google Sheets call_summary / summary)
-    const callSummary = (rf.call_summary && rf.call_summary !== 'Not provided' && rf.call_summary !== '—' ? rf.call_summary : '')
+    // Determine clean consolidated Lead Status with visual color cue
+    let leadStatusLabel = '❌ Not Answered';
+    if (call.status === 'queued' || call.leadStatus === 'QUEUED' || call.final_status === 'QUEUED') {
+      leadStatusLabel = '⏳ Queued';
+    } else if (isInterested(call)) {
+      leadStatusLabel = '🟢 Interested';
+    } else if (isApplicationSent(call)) {
+      leadStatusLabel = '📩 Application Sent';
+    } else if (isCallback(call)) {
+      leadStatusLabel = '📞 Callback';
+    } else if (isAlreadyApplied(call)) {
+      leadStatusLabel = '📝 Already Applied';
+    } else if (isAlreadyJoined(call)) {
+      leadStatusLabel = '🎓 Already Joined';
+    } else if (isNotInterested(call)) {
+      leadStatusLabel = '🔴 Not Interested';
+    } else if (isWrongNumber(call)) {
+      leadStatusLabel = '⚠️ Wrong / Invalid';
+    } else if (isAns) {
+      leadStatusLabel = '📞 Answered';
+    }
+
+    // Helper to test if a key represents one of the standard columns
+    const isStandardKey = (key) => {
+      const norm = String(key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      return ['name', 'fullname', 'studentname', 'student', 'phone', 'phonenumber', 'mobile', 'mobilenumber', 'contact', 'contactnumber', 'email', 'emailid', 'mail', 'mailid', 'state', 'preferredstate', 'stateut', 'district', 'preferredcity', 'city', 'town', 'program', 'course', 'degree', 'branch', 'university', 'college', 'collegename', 'targetcollege', 'preferreduniversity'].includes(norm);
+    };
+
+    // Helper to find best matching value for a field from multiple object sources
+    const resolveField = (sources, patterns) => {
+      for (const src of sources) {
+        if (!src || typeof src !== 'object') continue;
+        for (const pat of patterns) {
+          if (src[pat] !== undefined && src[pat] !== null) {
+            const val = String(src[pat]).trim();
+            if (val && val !== '—' && val.toLowerCase() !== 'null' && val.toLowerCase() !== 'undefined') return val;
+          }
+        }
+        const srcKeys = Object.keys(src);
+        for (const pat of patterns) {
+          const cleanPat = pat.toLowerCase().replace(/[^a-z0-9]/g, '');
+          for (const k of srcKeys) {
+            if (k === 'extraFields' || k === 'rawFields') continue;
+            const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (cleanK === cleanPat || (cleanPat.length >= 4 && cleanK.includes(cleanPat))) {
+              const val = String(src[k]).trim();
+              if (val && val !== '—' && val.toLowerCase() !== 'null' && val.toLowerCase() !== 'undefined') return val;
+            }
+          }
+        }
+      }
+      return '—';
+    };
+
+    // Student & Parent Metadata from Excel Sheet / Google Sheets
+    const email = resolveField([call, call.extraFields, rf], ['email', 'email id', 'emailid', 'email address', 'mail', 'mail id', 'student email']);
+    const state = resolveField([call, call.extraFields, rf], ['state', 'preferred state', 'preferredstate', 'state ut', 'region', 'province']);
+    const district = resolveField([call, call.extraFields, rf], ['district', 'preferred city', 'preferredcity', 'city', 'town', 'location']);
+    const program = resolveField([call, call.extraFields, rf], ['program', 'course', 'degree', 'branch', 'specialization', 'target_course']);
+
+    // AI Extracted Intelligence (OmniDimension Variables)
+    const graduationStatus = call.graduation_status || rf.graduation_status || call.educationStatus || '—';
+    const admissionTimeline = call.admission_timeline || rf.admission_timeline || call.timeline || '—';
+    const entranceExam = call.entrance_exam || rf.entrance_exam || call.entranceExam || '—';
+    const counsellorFollowup = isCounselorFollowupRequired(call) ? 'Yes' : 'No';
+    const liveTransferred = (String(call.call_transferred_status || rf.call_transfered_status || call.transferStatus || '').toLowerCase() === 'yes') ? 'Yes' : 'No';
+
+    // Call Duration & Date
+    const rawDur = call.callDuration || call.duration || (rf && rf.call_duration_in_seconds) || '';
+    const formattedDuration = rawDur ? (Number(rawDur) > 0 ? `${rawDur}s` : String(rawDur)) : '—';
+    const callDateTime = call.callDate || rf.call_date || rf.timestamp || call.timestamp || '—';
+    // Call Recording Link
+    const rawRec = call.recordingUrl || call.internal_recording_url || call.recording_url || rf.recording_url || call.recording;
+    let recordingLink = '—';
+    if (rawRec && typeof rawRec === 'string' && rawRec.trim() && rawRec !== 'false' && rawRec !== '—') {
+      const trimmed = rawRec.trim();
+      if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+        recordingLink = trimmed;
+      } else if (trimmed.startsWith('/')) {
+        recordingLink = `https://backend.omnidim.io${trimmed}`;
+      } else {
+        recordingLink = trimmed;
+      }
+    }
+
+    // Call Summary (from Google Sheets call_summary / summary or Omni sentiment_analysis_details)
+    const callSummary = (call.sentiment_analysis_details && call.sentiment_analysis_details !== 'Not provided' && call.sentiment_analysis_details !== '—' ? call.sentiment_analysis_details : '')
+      || (call.callSummary && call.callSummary !== 'Not provided' && call.callSummary !== '—' ? call.callSummary : '')
+      || (rf.call_summary && rf.call_summary !== 'Not provided' && rf.call_summary !== '—' ? rf.call_summary : '')
       || (rf.summary && rf.summary !== 'Not provided' && rf.summary !== '—' ? rf.summary : '')
-      || (call.summary && call.summary !== '—' ? call.summary : '—');
+      || (call.call_summary && call.call_summary !== 'Not provided' && call.call_summary !== '—' ? call.call_summary : '')
+      || (call.summary && call.summary !== 'Not provided' && call.summary !== '—' ? call.summary : '')
+      || (call.interest_details && call.interest_details !== 'Not provided' && call.interest_details !== '—' ? call.interest_details : '')
+      || '—';
 
-    // Call Transcript / Full Conversation (from Google Sheets full_conversation / call_conversation)
-    const rawTranscript = rf.full_conversation
+    // Call Transcript / Full Conversation
+    const rawTranscript = (typeof getTranscriptText === 'function' ? getTranscriptText(call) : '')
+      || call.callTranscript
+      || rf.full_conversation
       || rf.call_conversation
       || call.call_conversation
       || (Array.isArray(call.interactions) && call.interactions.length > 0
@@ -1511,24 +1959,45 @@ export default function App() {
           : '');
     const callTranscript = rawTranscript ? String(rawTranscript).replace(/<br\s*\/?>/gi, '\n').trim() : '—';
 
-    return {
+    // Base ordered row object
+    const rowObj = {
       'S.No': idx + 1,
-      'Name': studentName,
+      'Full Name': studentName,
       'Phone Number': phoneNumber,
-      'College Name': collegeName,
-      'Calls Answered': callsAnswered,
-      'Calls Not Answered': callsNotAnswered,
-      'Interested': interested,
-      'Application Sent': applicationSent,
-      'Callback': callback,
-      'Already Applied': alreadyApplied,
-      'Already Joined': alreadyJoined,
-      'Not Interested': notInterested,
-      'Wrong / Invalid': wrongInvalid,
-      'Counsellor Follow-up': counsellorFollowup,
-      'Call Summary': callSummary,
-      'Call Transcript / Full Conversation': callTranscript
+      'Email ID': email,
+      'State': state,
+      'District': district
     };
+
+    // Dynamically insert any other extra calling sheet columns (e.g. Father Name, Parent Phone, Remarks)
+    if (call.extraFields && typeof call.extraFields === 'object') {
+      Object.keys(call.extraFields).forEach(k => {
+        if (!isStandardKey(k)) {
+          const val = call.extraFields[k];
+          rowObj[k] = (val !== undefined && val !== null && String(val).trim() !== '') ? String(val).trim() : '—';
+        }
+      });
+    }
+
+    rowObj['Program'] = program !== '—' ? program : (call.course || 'MBA');
+    rowObj['University'] = collegeName;
+
+    // Lead Status (Prominent Outcome Column)
+    rowObj['Lead Status'] = leadStatusLabel;
+
+    // AI Extracted Variables & Readiness Signals
+    rowObj['Graduation Status'] = graduationStatus;
+    rowObj['Admission Timeline'] = admissionTimeline;
+    rowObj['Entrance Exam'] = entranceExam;
+    rowObj['Counsellor Follow-up'] = counsellorFollowup;
+    rowObj['Live Transferred'] = liveTransferred;
+    rowObj['Call Duration'] = formattedDuration;
+    rowObj['Call Date & Time'] = callDateTime;
+    rowObj['Call Summary'] = callSummary;
+    rowObj['Call Recording URL'] = recordingLink;
+    rowObj['Call Transcript / Full Conversation'] = callTranscript;
+
+    return rowObj;
   };
 
   // Helper to dynamically calculate custom column widths based on content lengths
@@ -1854,6 +2323,301 @@ export default function App() {
     return 'vidyavision';
   };
 
+  // Format campaign contacts with all rich call intelligence, matching the exact columns of the Excel Analytics Report
+  const formatCampaignContactsForExport = (camp) => {
+    if (!camp || !Array.isArray(camp.contacts) || camp.contacts.length === 0) return [];
+    const contacts = camp.contacts;
+
+    // Helper to test if a key represents one of the standard columns
+    const isStandardKey = (key) => {
+      const norm = String(key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      return ['name', 'fullname', 'studentname', 'student', 'phone', 'phonenumber', 'mobile', 'mobilenumber', 'contact', 'contactnumber', 'email', 'emailid', 'mail', 'mailid', 'state', 'preferredstate', 'stateut', 'district', 'preferredcity', 'city', 'town', 'program', 'course', 'degree', 'branch', 'university', 'college', 'collegename', 'targetcollege', 'preferreduniversity'].includes(norm);
+    };
+
+    // Collect all unique extra field keys across all contacts to maintain column alignment
+    const extraFieldKeys = [];
+    contacts.forEach(c => {
+      if (c.extraFields && typeof c.extraFields === 'object') {
+        Object.keys(c.extraFields).forEach(k => {
+          if (!isStandardKey(k) && !extraFieldKeys.includes(k)) {
+            extraFieldKeys.push(k);
+          }
+        });
+      }
+    });
+
+    return contacts.map((c, i) => {
+      const cleanPhone = String(c.formattedPhone || c.phone || '').replace(/\D/g, '').slice(-10);
+
+      // Find matching call in mergedCalls, calls, or sheetsCalls
+      let matchedCall = null;
+      if (cleanPhone) {
+        const candidateCalls = (mergedCalls || []).filter(call => {
+          const p = String(call.contactNumber || call.to_number || call.phone_number || call.to || call.rawFields?.to_number || call.rawFields?.phone_number || '').replace(/\D/g, '').slice(-10);
+          return p === cleanPhone;
+        });
+
+        if (candidateCalls.length === 1) {
+          matchedCall = candidateCalls[0];
+        } else if (candidateCalls.length > 1) {
+          const campUni = String(camp.universityName || camp.universityId || '').toLowerCase();
+          const uniMatch = candidateCalls.find(call => {
+            const u = String(call.preferredUniversity || call.college_name || call.target_college || call.universitiesDiscussed || '').toLowerCase();
+            return campUni && u && (campUni.includes(u) || u.includes(campUni));
+          });
+
+          if (uniMatch) {
+            matchedCall = uniMatch;
+          } else {
+            const campTime = new Date(c.timestamp || camp.startedAt || 0).getTime();
+            candidateCalls.sort((a, b) => {
+              const tA = new Date(a.callDate || a.timestamp || 0).getTime();
+              const tB = new Date(b.callDate || b.timestamp || 0).getTime();
+              return Math.abs(tA - campTime) - Math.abs(tB - campTime);
+            });
+            matchedCall = candidateCalls[0];
+          }
+        }
+
+        if (!matchedCall && Array.isArray(calls)) {
+          matchedCall = calls.find(call => {
+            const p = String(call.to_number || call.phone_number || call.to || '').replace(/\D/g, '').slice(-10);
+            return p === cleanPhone;
+          });
+        }
+
+        if (!matchedCall && Array.isArray(sheetsCalls)) {
+          matchedCall = sheetsCalls.find(call => {
+            const p = String(call.contactNumber || call.rawFields?.to_number || '').replace(/\D/g, '').slice(-10);
+            return p === cleanPhone;
+          });
+        }
+      }
+
+      const isGenericName = (n) => !n || n === '—' || n === 'Student' || n === 'Not provided' || /^recipient\s*\(/i.test(String(n));
+      const studentName = !isGenericName(c.name) ? c.name : (!isGenericName(matchedCall?.studentName) ? matchedCall.studentName : (matchedCall?.name || c.name || 'Student'));
+
+      const cStatus = String(c.status || '').toLowerCase();
+      const cOutcome = String(c.callOutcome || '').toLowerCase();
+      const isContactUnanswered = cStatus === 'no-answer' || cStatus === 'unanswered' || cStatus === 'failed' || cStatus === 'busy' || cOutcome.includes('no answer') || cOutcome.includes('no-answer');
+
+      const rf = matchedCall?.rawFields || {};
+      const ev = matchedCall?.extracted_variables || {};
+
+      let resolvedStatus = undefined;
+      const cleanOutcomeUpper = String(c.callOutcome || '').toUpperCase().trim();
+      if (cStatus === 'queued') {
+        resolvedStatus = 'QUEUED';
+      } else if (cleanOutcomeUpper === 'INTERESTED' || cleanOutcomeUpper.includes('INTEREST')) {
+        resolvedStatus = CALL_OUTCOME_STATUS.INTERESTED;
+      } else if (cleanOutcomeUpper === 'CALLBACK' || cleanOutcomeUpper.includes('CALLBACK')) {
+        resolvedStatus = CALL_OUTCOME_STATUS.CALLBACK;
+      } else if (cleanOutcomeUpper.includes('NOT INTERESTED')) {
+        resolvedStatus = CALL_OUTCOME_STATUS.NOT_INTERESTED;
+      } else if (cleanOutcomeUpper.includes('APPLICATION SENT')) {
+        resolvedStatus = CALL_OUTCOME_STATUS.APPLICATION_SENT;
+      } else if (cleanOutcomeUpper.includes('ALREADY JOINED')) {
+        resolvedStatus = CALL_OUTCOME_STATUS.ALREADY_JOINED;
+      } else if (cleanOutcomeUpper.includes('ALREADY APPLIED')) {
+        resolvedStatus = CALL_OUTCOME_STATUS.ALREADY_APPLIED;
+      } else if (cleanOutcomeUpper.includes('WRONG') || cleanOutcomeUpper.includes('INVALID')) {
+        resolvedStatus = CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID;
+      } else if (isContactUnanswered) {
+        resolvedStatus = CALL_OUTCOME_STATUS.NOT_ANSWERED;
+      }
+
+      // Merge extra fields ensuring all discovered keys exist with default '—'
+      const mergedExtraFields = {};
+      extraFieldKeys.forEach(k => {
+        const val = c.extraFields?.[k] || matchedCall?.extraFields?.[k] || rf?.[k];
+        mergedExtraFields[k] = (val !== undefined && val !== null && String(val).trim() !== '') ? String(val).trim() : '—';
+      });
+
+      // Robust resolver for Call Recording URL
+      const rawRec = c.recordingUrl || c.recording_url || matchedCall?.internal_recording_url || matchedCall?.recordingUrl || matchedCall?.recording_url || rf.recording_url || matchedCall?.recording;
+      let resolvedRecordingUrl = '—';
+      if (rawRec && typeof rawRec === 'string' && rawRec.trim() && rawRec !== 'false' && rawRec !== '—') {
+        const trimmed = rawRec.trim();
+        if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) resolvedRecordingUrl = trimmed;
+        else if (trimmed.startsWith('/')) resolvedRecordingUrl = `https://backend.omnidim.io${trimmed}`;
+        else resolvedRecordingUrl = trimmed;
+      }
+
+      // Robust resolver for Call Summary
+      let resolvedSummary = c.callSummary || c.summary || '';
+      if (!resolvedSummary || resolvedSummary === '—' || resolvedSummary === 'Completed' || resolvedSummary === 'Not provided') {
+        resolvedSummary = matchedCall?.sentiment_analysis_details || rf.call_summary || rf.summary || matchedCall?.call_summary || matchedCall?.summary || matchedCall?.interest_details || '—';
+        if (resolvedSummary === 'Not provided') resolvedSummary = '—';
+      }
+
+      // Robust resolver for Call Transcript
+      let resolvedTranscript = c.callTranscript || c.call_conversation || c.transcript || '';
+      if (!resolvedTranscript || resolvedTranscript === '—') {
+        if (typeof matchedCall?.call_conversation === 'string' && matchedCall.call_conversation.trim()) {
+          resolvedTranscript = matchedCall.call_conversation.replace(/<br\s*\/?>/gi, '\n').trim();
+        } else if (Array.isArray(matchedCall?.call_conversation)) {
+          resolvedTranscript = matchedCall.call_conversation.map(t => `${t.user_query ? `User: ${t.user_query}` : ''}${t.user_query && t.bot_response ? '\n' : ''}${t.bot_response ? `Bot: ${t.bot_response}` : ''}`).filter(Boolean).join('\n');
+        } else if (Array.isArray(matchedCall?.interactions) && matchedCall.interactions.length > 0) {
+          resolvedTranscript = matchedCall.interactions.map(t => `${t.user_query ? `User: ${t.user_query}` : ''}${t.user_query && t.bot_response ? '\n' : ''}${t.bot_response ? `Bot: ${t.bot_response}` : ''}`).filter(Boolean).join('\n');
+        } else if (rf.full_conversation || rf.call_conversation) {
+          resolvedTranscript = String(rf.full_conversation || rf.call_conversation).replace(/<br\s*\/?>/gi, '\n').replace(/\s*\|\s*/g, '\n').trim();
+        }
+      }
+
+      const synthesizedCall = {
+        ...(matchedCall || {}),
+        studentName,
+        name: studentName,
+        fullName: studentName,
+        contactNumber: c.formattedPhone || (cleanPhone ? (cleanPhone.length === 10 ? `+91${cleanPhone}` : `+${cleanPhone}`) : '') || matchedCall?.contactNumber || '—',
+        to_number: c.formattedPhone || c.phone || matchedCall?.to_number,
+        phone_number: c.phone || matchedCall?.phone_number,
+        preferredUniversity: c.universityName || camp.universityName || matchedCall?.preferredUniversity || '—',
+        college_name: c.universityName || camp.universityName || matchedCall?.college_name || rf.college_name || '—',
+        target_college: c.universityName || camp.universityName || matchedCall?.target_college || '—',
+        college: c.universityName || camp.universityName || matchedCall?.college || '—',
+        program: c.program || c.course || camp.course || matchedCall?.program || matchedCall?.course || '—',
+        course: c.course || c.program || camp.course || matchedCall?.course || matchedCall?.program || '—',
+        email: c.email || matchedCall?.email || c.extraFields?.EmailID || c.extraFields?.Email || rf.EmailID || rf.Email || '—',
+        preferredState: c.state || matchedCall?.preferredState || c.extraFields?.State || rf.State || '—',
+        preferredCity: c.district || matchedCall?.preferredCity || c.extraFields?.District || rf.District || rf.City || '—',
+        extraFields: mergedExtraFields,
+        status: resolvedStatus === 'QUEUED' ? 'queued' : (isContactUnanswered ? 'no-answer' : (matchedCall?.status || c.status || 'completed')),
+        call_status: resolvedStatus === 'QUEUED' ? 'queued' : (isContactUnanswered ? 'no-answer' : (matchedCall?.call_status || c.status || 'completed')),
+        callOutcome: isContactUnanswered ? 'No Answer' : (matchedCall?.callOutcome || c.callOutcome || 'Completed'),
+        final_status: resolvedStatus || (isContactUnanswered ? CALL_OUTCOME_STATUS.NOT_ANSWERED : (matchedCall?.final_status || matchedCall?.finalStatus)),
+        finalStatus: resolvedStatus || (isContactUnanswered ? CALL_OUTCOME_STATUS.NOT_ANSWERED : (matchedCall?.final_status || matchedCall?.finalStatus)),
+        leadStatus: resolvedStatus || (isContactUnanswered ? CALL_OUTCOME_STATUS.NOT_ANSWERED : (matchedCall?.leadStatus || matchedCall?.finalStatus)),
+        graduation_status: c.graduationStatus || matchedCall?.graduation_status || rf.graduation_status || ev.graduation_status || matchedCall?.educationStatus || c.extraFields?.['Graduation Status'] || c.extraFields?.Graduation || '—',
+        admission_timeline: c.admissionTimeline || matchedCall?.admission_timeline || rf.admission_timeline || ev.admission_timeline || matchedCall?.timeline || c.extraFields?.['Admission Timeline'] || '—',
+        entrance_exam: c.entranceExam || matchedCall?.entrance_exam || rf.entrance_exam || ev.entrance_exam || matchedCall?.entranceExam || c.extraFields?.['Entrance Exam'] || '—',
+        call_transferred_status: (c.transferStatus === 'Yes' || matchedCall?.call_transferred_status === 'Yes' || rf.call_transfered_status === 'Yes' || ev.call_transfered_status === 'Yes' || matchedCall?.transferStatus === 'Yes') ? 'Yes' : 'No',
+        callDuration: (matchedCall?.callDuration && matchedCall.callDuration !== '—') ? matchedCall.callDuration : (c.callDuration || '—'),
+        duration: (matchedCall?.duration && matchedCall.duration !== '—') ? matchedCall.duration : (c.callDuration || '—'),
+        callDate: matchedCall?.callDate || matchedCall?.time_of_call || rf.call_date || c.timestamp || camp.startedAt || '—',
+        summary: resolvedSummary,
+        callSummary: resolvedSummary,
+        sentiment_analysis_details: resolvedSummary,
+        recordingUrl: resolvedRecordingUrl,
+        internal_recording_url: resolvedRecordingUrl,
+        recording_url: resolvedRecordingUrl,
+        callTranscript: resolvedTranscript,
+        call_conversation: resolvedTranscript,
+        interactions: matchedCall?.interactions || c.interactions || []
+      };
+
+      const row = formatCallForExcel(synthesizedCall, i);
+      if (cStatus === 'queued' || resolvedStatus === 'QUEUED') {
+        row['Lead Status'] = '⏳ Queued';
+      }
+      return row;
+    });
+  };
+
+  // Export full campaign contacts and results to formatted Excel workbook (.xlsx) with all rich analytics columns
+  const handleDownloadCampaignExcel = (camp) => {
+    if (!camp) return;
+    try {
+      const workbook = XLSX.utils.book_new();
+      const contacts = camp.contacts || [];
+
+      // 1. Leads Table Sheet (with full comprehensive columns identical to Excel Report)
+      const rows = formatCampaignContactsForExport(camp);
+      const wsContacts = XLSX.utils.json_to_sheet(rows.length > 0 ? rows : [{ 'Status': 'No contacts in campaign' }]);
+      if (rows.length > 0) wsContacts['!cols'] = calculateColWidths(rows);
+      XLSX.utils.book_append_sheet(workbook, wsContacts, "Campaign Leads");
+
+      // 2. Overview Sheet
+      const answeredCount = rows.filter(r => !String(r['Lead Status'] || '').includes('Not Answered') && !String(r['Lead Status'] || '').includes('Queued')).length;
+      const interestedCount = rows.filter(r => String(r['Lead Status'] || '').includes('Interested')).length;
+      const callbackCount = rows.filter(r => String(r['Lead Status'] || '').includes('Callback')).length;
+      const unansweredCount = rows.filter(r => String(r['Lead Status'] || '').includes('Not Answered')).length;
+      const queuedCount = rows.filter(r => String(r['Lead Status'] || '').includes('Queued')).length;
+
+      const summaryRows = [
+        { 'Metric': 'Campaign Name', 'Value': camp.name || 'Untitled Campaign' },
+        { 'Metric': 'Target University', 'Value': camp.universityName || '—' },
+        { 'Metric': 'Target Course', 'Value': camp.course || '—' },
+        { 'Metric': 'Total Contacts', 'Value': contacts.length },
+        { 'Metric': 'Status', 'Value': (camp.status || 'COMPLETED').toUpperCase() },
+        { 'Metric': 'Started At', 'Value': camp.startedAt ? new Date(camp.startedAt).toLocaleString('en-IN') : '—' },
+        { 'Metric': 'Completed At', 'Value': camp.completedAt ? new Date(camp.completedAt).toLocaleString('en-IN') : '—' },
+        { 'Metric': 'Calls Answered', 'Value': answeredCount },
+        { 'Metric': 'Calls Not Answered', 'Value': unansweredCount },
+        { 'Metric': 'Interested Leads', 'Value': interestedCount },
+        { 'Metric': 'Callbacks Requested', 'Value': callbackCount },
+        { 'Metric': 'Queued / Pending', 'Value': queuedCount }
+      ];
+      const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
+      wsSummary['!cols'] = [{ wch: 24 }, { wch: 38 }];
+      XLSX.utils.book_append_sheet(workbook, wsSummary, "Overview");
+
+      // 3. Category sheets for fast counselor follow-up
+      const appendCategorySheet = (sheetTitle, filterFn) => {
+        const catRows = rows.filter(filterFn);
+        if (catRows.length > 0) {
+          const ws = XLSX.utils.json_to_sheet(catRows);
+          ws['!cols'] = calculateColWidths(catRows);
+          XLSX.utils.book_append_sheet(workbook, ws, sheetTitle);
+        }
+      };
+
+      appendCategorySheet("Interested", r => String(r['Lead Status'] || '').includes('Interested'));
+      appendCategorySheet("Callback", r => String(r['Lead Status'] || '').includes('Callback'));
+      appendCategorySheet("Application Sent", r => String(r['Lead Status'] || '').includes('Application Sent'));
+      appendCategorySheet("Calls Not Answered", r => String(r['Lead Status'] || '').includes('Not Answered'));
+
+      const safeName = (camp.name || 'campaign').replace(/[^a-zA-Z0-9_-]/g, '_');
+      XLSX.writeFile(workbook, `${safeName}_Report.xlsx`);
+      addToast(`Downloaded Excel report for "${camp.name}".`, 'success');
+    } catch (err) {
+      console.error('Failed to export campaign Excel:', err);
+      handleDownloadCampaignCsv(camp);
+    }
+  };
+
+  // Export campaign CSV with full columns identical to Excel
+  const handleDownloadCampaignCsv = (campOrId, campaignName) => {
+    let camp = null;
+    if (typeof campOrId === 'object' && campOrId !== null) {
+      camp = campOrId;
+    } else {
+      camp = campaigns.find(c => c.id === campOrId) || { id: campOrId, name: campaignName, contacts: [] };
+    }
+
+    const safeName = (camp.name || campaignName || 'campaign').replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    try {
+      const rows = formatCampaignContactsForExport(camp);
+      if (rows && rows.length > 0) {
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const csvContent = XLSX.utils.sheet_to_csv(ws);
+        const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${safeName}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        addToast(`Downloaded CSV report for "${camp.name || campaignName || 'campaign'}".`, 'success');
+        return;
+      }
+    } catch (err) {
+      console.error('Failed to generate CSV client-side:', err);
+    }
+
+    // Fallback to server route if client generation could not run
+    const link = document.createElement('a');
+    link.href = `/api/campaigns/${camp.id || campOrId}/export`;
+    link.download = `${safeName}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    addToast(`Downloading report for "${camp.name || campaignName || 'campaign'}"...`, 'info');
+  };
+
   // Compute stats dynamically for every university in configured universities array
   const uniStats = React.useMemo(() => {
     const createBreakdown = () => ({
@@ -1940,7 +2704,36 @@ export default function App() {
   // Secondary metric: Counsellor Follow-up (separate action, does not affect primary counts)
   const counselorFollowupCount = dateFilteredCalls.filter(isCounselorFollowupRequired).length;
 
-  // Filter by selected KPI card / Chart Segment
+  // AI Extracted Student Profile Signals (OmniDimension Variables)
+  const finalYearGradCount = dateFilteredCalls.filter(c => {
+    const g = String(c.graduation_status || c.rawFeedback?.graduation_status || '').toLowerCase();
+    return g.includes('final');
+  }).length;
+  const completedGradCount = dateFilteredCalls.filter(c => {
+    const g = String(c.graduation_status || c.rawFeedback?.graduation_status || '').toLowerCase();
+    return g.includes('complete');
+  }).length;
+
+  const immediateTimelineCount = dateFilteredCalls.filter(c => {
+    const t = String(c.admission_timeline || c.rawFeedback?.admission_timeline || c.timeline || '').toLowerCase();
+    return t.includes('immediate') || t.includes('2026') || t.includes('this');
+  }).length;
+  const nextYearTimelineCount = dateFilteredCalls.filter(c => {
+    const t = String(c.admission_timeline || c.rawFeedback?.admission_timeline || c.timeline || '').toLowerCase();
+    return t.includes('next') || t.includes('2027') || t.includes('future');
+  }).length;
+
+  const liveTransferredCount = dateFilteredCalls.filter(c => {
+    const s = String(c.call_transfered_status || c.call_transferred_status || c.transferStatus || c.rawFeedback?.call_transfered_status || '').toLowerCase();
+    return s === 'yes' || s === 'true' || s === 'transferred';
+  }).length;
+
+  const entranceExamCount = dateFilteredCalls.filter(c => {
+    const e = String(c.entrance_exam || c.rawFeedback?.entrance_exam || '').trim().toLowerCase();
+    return e && e !== 'na' && e !== '—' && e !== 'none' && e !== 'not provided';
+  }).length;
+
+  // Filter by selected KPI card / Chart Segment / AI Signal
   const getKpiFilteredCalls = () => {
     switch (dashboardFilter) {
       case CALL_OUTCOME_STATUS.INTERESTED:
@@ -1965,6 +2758,30 @@ export default function App() {
         return dateFilteredCalls.filter(isAnswered);
       case 'COUNSELOR_FOLLOWUP':
         return dateFilteredCalls.filter(isCounselorFollowupRequired);
+      case 'GRAD_FINAL_YEAR':
+        return dateFilteredCalls.filter(c => String(c.graduation_status || c.rawFeedback?.graduation_status || '').toLowerCase().includes('final'));
+      case 'GRAD_COMPLETED':
+        return dateFilteredCalls.filter(c => String(c.graduation_status || c.rawFeedback?.graduation_status || '').toLowerCase().includes('complete'));
+      case 'TIMELINE_IMMEDIATE':
+        return dateFilteredCalls.filter(c => {
+          const t = String(c.admission_timeline || c.rawFeedback?.admission_timeline || c.timeline || '').toLowerCase();
+          return t.includes('immediate') || t.includes('2026') || t.includes('this');
+        });
+      case 'TIMELINE_NEXT_YEAR':
+        return dateFilteredCalls.filter(c => {
+          const t = String(c.admission_timeline || c.rawFeedback?.admission_timeline || c.timeline || '').toLowerCase();
+          return t.includes('next') || t.includes('2027') || t.includes('future');
+        });
+      case 'EXAM_MENTIONED':
+        return dateFilteredCalls.filter(c => {
+          const e = String(c.entrance_exam || c.rawFeedback?.entrance_exam || '').trim().toLowerCase();
+          return e && e !== 'na' && e !== '—' && e !== 'none' && e !== 'not provided';
+        });
+      case 'LIVE_TRANSFERRED':
+        return dateFilteredCalls.filter(c => {
+          const s = String(c.call_transfered_status || c.call_transferred_status || c.transferStatus || c.rawFeedback?.call_transfered_status || '').toLowerCase();
+          return s === 'yes' || s === 'true' || s === 'transferred';
+        });
       case 'ALL':
       default:
         return dateFilteredCalls;
@@ -2052,11 +2869,14 @@ export default function App() {
 
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <button
-                    className={`btn ${showManageColleges ? 'btn-primary' : 'btn-secondary'}`}
-                    style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }}
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.85rem', padding: '0.5rem 1rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
                     onClick={() => setShowManageColleges(prev => !prev)}
+                    title={showManageColleges ? 'Collapse saved colleges' : 'Expand saved colleges'}
                   >
-                    <Trash2 size={15} /> {showManageColleges ? 'Hide Colleges' : 'Manage Colleges'}
+                    {showManageColleges ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                    {showManageColleges ? 'Hide Colleges' : `Show Colleges (${universities.length})`}
                   </button>
 
                   <button className="btn btn-primary" style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }} onClick={() => { resetCollegeForm(); setShowCollegeModal(true); }}>
@@ -2220,7 +3040,7 @@ export default function App() {
                             <div style={{ flex: 1, minWidth: '200px' }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.2rem' }}>
                                 <h4 style={{ fontSize: '0.98rem', fontWeight: '700', color: 'var(--text-primary)' }}>
-                                  {uploadedFileInfo ? uploadedFileInfo.fileName : 'Excel File'}
+                                  {uploadedFileInfo ? uploadedFileInfo.fileName : (tempContacts.some(c => c.source === 'campaign') ? 'Contacts from Campaign & Uploads' : 'Imported Contacts')}
                                 </h4>
                                 <span className="status-pill completed" style={{ fontSize: '0.7rem' }}>
                                   <CheckCircle2 size={12} /> DATA IMPORTED
@@ -2228,17 +3048,28 @@ export default function App() {
                               </div>
 
                               <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                                Extracted: <b style={{ color: '#818cf8' }}>{tempContacts.length || (uploadedFileInfo && uploadedFileInfo.count) || 0} Contacts</b>
+                                Extracted: <b style={{ color: '#818cf8' }}>{tempContacts.length} Total Contacts</b>
                                 {uploadedFileInfo && ` • Size: ${uploadedFileInfo.fileSize} • Uploaded at ${uploadedFileInfo.uploadedAt}`}
                               </p>
                             </div>
 
-                            <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                              <button
+                                type="button"
+                                className="btn btn-primary"
+                                style={{ fontSize: '0.8rem', padding: '0.4rem 0.85rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', backgroundColor: '#059669', borderColor: '#10b981' }}
+                                onClick={() => addMoreFileInputRef.current?.click()}
+                                title="Upload an Excel or CSV file to append more numbers to this batch"
+                              >
+                                <Plus size={14} /> Add Numbers from Excel
+                              </button>
+
                               <button
                                 type="button"
                                 className="btn btn-secondary"
                                 style={{ fontSize: '0.8rem', padding: '0.4rem 0.8rem' }}
                                 onClick={() => fileInputRef.current?.click()}
+                                title="Replace existing list with a fresh file"
                               >
                                 <Upload size={14} /> Replace File
                               </button>
@@ -2248,6 +3079,7 @@ export default function App() {
                                 className="btn btn-danger-outline"
                                 style={{ fontSize: '0.8rem', padding: '0.4rem 0.6rem' }}
                                 onClick={handleRemoveUploadedFile}
+                                title="Clear contacts"
                               >
                                 <Trash2 size={14} />
                               </button>
@@ -2258,6 +3090,13 @@ export default function App() {
                             type="file"
                             ref={fileInputRef}
                             onChange={handleFileUpload}
+                            accept=".xlsx, .xls, .csv"
+                            style={{ display: 'none' }}
+                          />
+                          <input
+                            type="file"
+                            ref={addMoreFileInputRef}
+                            onChange={handleAddMoreFileUpload}
                             accept=".xlsx, .xls, .csv"
                             style={{ display: 'none' }}
                           />
@@ -2286,260 +3125,125 @@ export default function App() {
                         </span>
                       </div>
 
-                      {/* Recently uploaded files — reload any sheet to call with another college */}
-                      {recentFiles.length > 0 && (
-                        <div style={{ borderTop: '1px solid var(--border)', marginTop: '1rem', paddingTop: '0.9rem' }}>
-                          <div style={{ fontSize: '0.8rem', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-secondary)', marginBottom: '0.6rem' }}>
-                            📁 Recent Files ({recentFiles.length}) — reload to call again
-                          </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', maxHeight: '220px', overflowY: 'auto', paddingRight: '0.25rem' }}>
-                            {recentFiles.map(f => (
-                              <div
-                                key={f.id}
-                                style={{
-                                  display: 'flex', alignItems: 'center', gap: '0.65rem',
-                                  padding: '0.55rem 0.75rem', borderRadius: '8px',
-                                  border: '1px solid var(--border)', backgroundColor: 'var(--bg-card)'
-                                }}
-                              >
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontWeight: '700', fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    📄 {f.fileName}
-                                  </div>
-                                  <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                                    <b style={{ color: '#818cf8' }}>{f.count} contacts</b>
-                                    {f.fileSize ? ` • ${f.fileSize}` : ''}
-                                    {f.uploadedAt && !isNaN(new Date(f.uploadedAt).getTime()) ? ` • ${new Date(f.uploadedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${new Date(f.uploadedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}` : ''}
-                                  </div>
-                                </div>
-                                <button
-                                  type="button"
-                                  className="btn btn-primary"
-                                  style={{ fontSize: '0.76rem', padding: '0.35rem 0.8rem', flexShrink: 0 }}
-                                  onClick={() => handleLoadRecentFile(f)}
-                                >
-                                  <Upload size={13} /> Load
-                                </button>
-                                <button
-                                  type="button"
-                                  className="btn btn-danger-outline"
-                                  style={{ fontSize: '0.74rem', padding: '0.3rem 0.55rem', flexShrink: 0 }}
-                                  onClick={() => handleDeleteRecentFile(f.id)}
-                                  title={`Remove ${f.fileName} from history`}
-                                >
-                                  <Trash2 size={13} />
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Mode 2: Manual Single Contact */}
-                  {inputMode === 'manual' && (
-                    <form onSubmit={handleAddSingleContact}>
-                      <div className="form-grid">
-                        <div className="form-group">
-                          <label className="form-label">Phone Number (Required) *</label>
-                          <div style={{ position: 'relative' }}>
-                            <input
-                              type="text"
-                              placeholder="9876543210 (10 digits)"
-                              value={singlePhone}
-                              onChange={(e) => setSinglePhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                              className="form-input"
-                              style={{ paddingLeft: '2.5rem' }}
-                              maxLength={10}
-                            />
-                            <Phone size={16} style={{ position: 'absolute', left: '0.9rem', top: '0.85rem', color: 'var(--text-muted)' }} />
-                          </div>
-                          {phoneError && <span style={{ color: 'var(--error)', fontSize: '0.78rem', marginTop: '0.2rem', display: 'block' }}>{phoneError}</span>}
-                        </div>
-
-                        <div className="form-group">
-                          <label className="form-label">Recipient Name (Optional)</label>
-                          <div style={{ position: 'relative' }}>
-                            <input
-                              type="text"
-                              placeholder="e.g. Ramesh (Optional)"
-                              value={singleName}
-                              onChange={(e) => setSingleName(e.target.value)}
-                              className="form-input"
-                              style={{ paddingLeft: '2.5rem' }}
-                            />
-                            <User size={16} style={{ position: 'absolute', left: '0.9rem', top: '0.85rem', color: 'var(--text-muted)' }} />
-                          </div>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>If provided, bot addresses person by name.</span>
-                        </div>
                       </div>
+                    )}
 
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
-                        <button type="submit" className="btn btn-primary">
-                          <Plus size={16} /> Import Contact
-                        </button>
-                      </div>
-                    </form>
-                  )}
-
-                  {/* Mode 3: Bulk Paste Text */}
-                  {inputMode === 'bulk' && (
-                    <div>
-                      <label className="form-label">Paste Phone Numbers (Optional Name after comma/tab):</label>
-                      <textarea
-                        className="form-input"
-                        rows={4}
-                        placeholder={"9876543210, Ramesh Kumar\n9123456789, Priya\n9988776655"}
-                        value={bulkText}
-                        onChange={(e) => setBulkText(e.target.value)}
-                        style={{ fontFamily: 'var(--mono)', fontSize: '0.85rem' }}
-                      />
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.75rem' }}>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Format: Number, Name OR line by line numbers</span>
-                        <button className="btn btn-primary" onClick={handleProcessBulkText}>
-                          Process & Import Numbers
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  {/* RECENT NUMBERS — re-call past numbers while entering new ones */}
-                  {recentContacts.length > 0 && (
-                  <div style={{ borderTop: '1px solid var(--border)', marginTop: '1.25rem', paddingTop: '1rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
-                      <h4 style={{ fontSize: '0.95rem', fontWeight: '700', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        🕘 Recent Numbers ({recentContacts.length})
-                      </h4>
-                      <button
-                        className="btn btn-danger-outline"
-                        style={{ padding: '0.3rem 0.7rem', fontSize: '0.78rem' }}
-                        onClick={() => {
-                          setRecentContacts([]);
-                          setRecentChecked([]);
-                          setRecentPage(0);
-                          try { localStorage.removeItem('vv_recent_contacts'); } catch (e) {}
-                          addToast('Recent contacts history cleared.', 'info');
-                        }}
-                      >
-                        <Trash2 size={13} /> Clear History
-                      </button>
-                    </div>
-
-                    <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '0 0 0.75rem' }}>
-                      Tick numbers to call again — loaded into Step 2 where you pick the college (same or different) and stage them.
-                    </p>
-
-                    <div style={{ position: 'relative', marginBottom: '0.75rem', maxWidth: '380px' }}>
-                      <Search size={15} style={{ position: 'absolute', left: '0.8rem', top: '0.8rem', color: 'var(--text-muted)' }} />
-                      <input
-                        className="form-input"
-                        value={recentSearch}
-                        onChange={(e) => { setRecentSearch(e.target.value); setRecentPage(0); }}
-                        placeholder="Search name or number..."
-                        style={{ paddingLeft: '2.3rem' }}
-                      />
-                    </div>
-
-                    <div style={{ maxHeight: '260px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.4rem', paddingRight: '0.25rem' }}>
-                      {(() => {
-                        const __filtered = recentContacts.filter(r => {
-                          const q = recentSearch.trim().toLowerCase();
-                          if (!q) return true;
-                          return `${r.name || ''} ${r.phone || ''} ${r.universityName || ''}`.toLowerCase().includes(q);
-                        });
-                        const __totalPages = Math.max(1, Math.ceil(__filtered.length / RECENT_PAGE_SIZE));
-                        const __page = Math.min(recentPage, __totalPages - 1);
-                        return __filtered.slice(__page * RECENT_PAGE_SIZE, __page * RECENT_PAGE_SIZE + RECENT_PAGE_SIZE).map(r => {
-                          const key = String(r.formattedPhone || r.phone || '').replace(/\D/g, '').slice(-10);
-                          const checked = recentChecked.includes(key);
-                          return (
-                            <div
-                              key={key}
-                              style={{
-                                display: 'flex', alignItems: 'center', gap: '0.65rem',
-                                padding: '0.5rem 0.75rem', borderRadius: '8px',
-                                border: checked ? '1px solid var(--accent)' : '1px solid var(--border)',
-                                backgroundColor: checked ? 'rgba(99, 102, 241, 0.07)' : 'var(--bg-card)'
-                              }}
-                            >
+                    {/* Mode 2: Manual Single Contact */}
+                    {inputMode === 'manual' && (
+                      <form onSubmit={handleAddSingleContact}>
+                        <div className="form-grid">
+                          <div className="form-group">
+                            <label className="form-label">Phone Number (Required) *</label>
+                            <div style={{ position: 'relative' }}>
                               <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={() => setRecentChecked(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])}
-                                style={{ width: '16px', height: '16px', accentColor: 'var(--accent)', cursor: 'pointer', flexShrink: 0 }}
+                                type="text"
+                                placeholder="9876543210 (10 digits)"
+                                value={singlePhone}
+                                onChange={(e) => setSinglePhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                                className="form-input"
+                                style={{ paddingLeft: '2.5rem' }}
+                                maxLength={10}
                               />
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontWeight: '700', fontSize: '0.88rem' }}>
-                                  {r.name ? `👤 ${r.name}` : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Generic Recipient</span>}
-                                </div>
-                                <div style={{ fontSize: '0.78rem', color: '#a5b4fc', fontFamily: 'var(--mono)' }}>{r.formattedPhone || r.phone}</div>
-                              </div>
-                              <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                                {r.universityName && (
-                                  <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    🎓 {r.universityName}
-                                  </div>
-                                )}
-                                {r.usedAt && !isNaN(new Date(r.usedAt).getTime()) && (
-                                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                                    {new Date(r.usedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} {new Date(r.usedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-                                  </div>
-                                )}
-                              </div>
-                              <button
-                                type="button"
-                                className="btn btn-secondary"
-                                style={{ fontSize: '0.74rem', padding: '0.3rem 0.6rem', flexShrink: 0 }}
-                                onClick={() => handleLoadRecentToTemp([r])}
-                                title="Load this contact into Step 2"
-                              >
-                                <Plus size={13} /> Re-add
-                              </button>
+                              <Phone size={16} style={{ position: 'absolute', left: '0.9rem', top: '0.85rem', color: 'var(--text-muted)' }} />
                             </div>
-                          );
-                        });
-                      })()}
-                    </div>
+                            {phoneError && <span style={{ color: 'var(--error)', fontSize: '0.78rem', marginTop: '0.2rem', display: 'block' }}>{phoneError}</span>}
+                          </div>
 
-                    {/* Recent-numbers pages */}
-                    {(() => {
-                      const __q = recentSearch.trim().toLowerCase();
-                      const __n = recentContacts.filter(r => !__q || `${r.name || ''} ${r.phone || ''} ${r.universityName || ''}`.toLowerCase().includes(__q)).length;
-                      const __tp = Math.max(1, Math.ceil(__n / RECENT_PAGE_SIZE));
-                      const __p = Math.min(recentPage, __tp - 1);
-                      if (__tp <= 1) return null;
-                      const __selectPage = () => {
-                        const __items = recentContacts
-                          .filter(r => !__q || `${r.name || ''} ${r.phone || ''} ${r.universityName || ''}`.toLowerCase().includes(__q))
-                          .slice(__p * RECENT_PAGE_SIZE, __p * RECENT_PAGE_SIZE + RECENT_PAGE_SIZE);
-                        const __keys = __items.map(r => String(r.formattedPhone || r.phone || '').replace(/\D/g, '').slice(-10));
-                        setRecentChecked(prev => Array.from(new Set([...prev, ...__keys])));
-                      };
-                      return (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.6rem', flexWrap: 'wrap' }}>
-                          <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem' }} disabled={__p === 0} onClick={() => setRecentPage(__p - 1)}>← Prev</button>
-                          <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Page {__p + 1} of {__tp} ({__n} contacts)</span>
-                          <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem' }} disabled={__p >= __tp - 1} onClick={() => setRecentPage(__p + 1)}>Next →</button>
-                          <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem' }} onClick={__selectPage}>Select this page</button>
+                          <div className="form-group">
+                            <label className="form-label">Recipient Name (Optional)</label>
+                            <div style={{ position: 'relative' }}>
+                              <input
+                                type="text"
+                                placeholder="e.g. Ramesh (Optional)"
+                                value={singleName}
+                                onChange={(e) => setSingleName(e.target.value)}
+                                className="form-input"
+                                style={{ paddingLeft: '2.5rem' }}
+                              />
+                              <User size={16} style={{ position: 'absolute', left: '0.9rem', top: '0.85rem', color: 'var(--text-muted)' }} />
+                            </div>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>If provided, bot addresses person by name.</span>
+                          </div>
                         </div>
-                      );
-                    })()}
 
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', borderTop: '1px solid var(--border)', paddingTop: '1rem', marginTop: '1rem' }}>
-                      <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                        {recentChecked.length > 0 ? `${recentChecked.length} selected` : 'Tick one or more contacts'}
-                      </span>
-                      <button
-                        className="btn btn-primary"
-                        disabled={recentChecked.length === 0}
-                        onClick={() => handleLoadRecentToTemp(recentContacts.filter(r => recentChecked.includes(String(r.formattedPhone || r.phone || '').replace(/\D/g, '').slice(-10))))}
-                      >
-                        <CheckCircle size={16} /> Load Selected into Step 2 ({recentChecked.length})
-                      </button>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
+                          <button type="submit" className="btn btn-primary">
+                            <Plus size={16} /> Import Contact
+                          </button>
+                        </div>
+                      </form>
+                    )}
+
+                    {/* Mode 3: Bulk Paste Text */}
+                    {inputMode === 'bulk' && (
+                      <div>
+                        <label className="form-label">Paste Phone Numbers (Optional Name after comma/tab):</label>
+                        <textarea
+                          className="form-input"
+                          rows={4}
+                          placeholder={"9876543210, Ramesh Kumar\n9123456789, Priya\n9988776655"}
+                          value={bulkText}
+                          onChange={(e) => setBulkText(e.target.value)}
+                          style={{ fontFamily: 'var(--mono)', fontSize: '0.85rem' }}
+                        />
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.75rem' }}>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Format: Number, Name OR line by line numbers</span>
+                          <button className="btn btn-primary" onClick={handleProcessBulkText}>
+                            Process & Import Numbers
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* CHOOSE OR ADD FROM EXISTING CAMPAIGNS */}
+                    <div style={{ borderTop: '1px solid var(--border)', marginTop: '1.25rem', paddingTop: '1.25rem' }}>
+                      <div style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: '1rem',
+                        padding: '1.1rem 1.25rem',
+                        borderRadius: '12px',
+                        backgroundColor: 'rgba(99, 102, 241, 0.05)',
+                        border: '1px dashed rgba(99, 102, 241, 0.4)'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                          <div style={{
+                            width: '42px',
+                            height: '42px',
+                            borderRadius: '10px',
+                            backgroundColor: 'rgba(99, 102, 241, 0.15)',
+                            color: '#818cf8',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '1.25rem',
+                            flexShrink: 0
+                          }}>
+                            📁
+                          </div>
+                          <div>
+                            <h4 style={{ margin: 0, fontSize: '0.98rem', fontWeight: '700', color: 'var(--text-primary)' }}>
+                              Choose or Add from Existing Campaigns
+                            </h4>
+                            <p style={{ margin: '0.2rem 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                              Re-target or build a new campaign using student contacts from any previously run campaign.
+                            </p>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.86rem', padding: '0.55rem 1.15rem' }}
+                          onClick={() => setShowPastCampaignsModal(true)}
+                        >
+                          <FolderOpen size={16} /> Choose from Existing Campaigns ({campaigns.length})
+                        </button>
+                      </div>
                     </div>
                   </div>
-                )}
-                </div>
 
                 {/* STEP 2 & 3: SELECT UNIVERSITY & DELAY (SHOWN IF TEMP CONTACTS ARE LOADED) */}
                 {tempContacts.length > 0 && (
@@ -2552,6 +3256,80 @@ export default function App() {
                       <button className="btn btn-danger-outline" style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }} onClick={() => setTempContacts([])}>
                         Cancel
                       </button>
+                    </div>
+
+                    {/* Active Contacts summary banner with Add More Files button */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', padding: '0.75rem 1rem', marginBottom: '1.25rem', backgroundColor: '#f8fafc', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '0.88rem', color: '#1b3b6f', fontWeight: '700' }}>
+                          👥 Current Staging Batch: {tempContacts.length} contacts
+                        </span>
+                        {tempContacts.some(c => c.source === 'campaign') && (
+                          <span style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem', borderRadius: '4px', backgroundColor: 'rgba(99, 102, 241, 0.1)', color: '#4f46e5', fontWeight: '700', border: '1px solid rgba(99, 102, 241, 0.25)' }}>
+                            Includes Past Campaign Contacts
+                          </span>
+                        )}
+                        {tempContacts.some(c => c.source === 'excel') && (
+                          <span style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem', borderRadius: '4px', backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#047857', fontWeight: '700', border: '1px solid rgba(16, 185, 129, 0.25)' }}>
+                            Includes Uploaded Excel Contacts
+                          </span>
+                        )}
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.82rem', padding: '0.4rem 0.85rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', backgroundColor: '#ffffff', borderColor: '#cbd5e1', fontWeight: '600' }}
+                          onClick={() => addMoreFileInputRef.current?.click()}
+                          title="Upload an Excel or CSV file to add numbers to this campaign"
+                        >
+                          <FileSpreadsheet size={15} style={{ color: '#059669' }} />
+                          + Upload Excel/CSV to Add More Numbers
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.82rem', padding: '0.4rem 0.85rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', backgroundColor: '#ffffff', borderColor: '#cbd5e1', fontWeight: '600' }}
+                          onClick={() => setShowPastCampaignsModal(true)}
+                          title="Pick more students from existing campaigns"
+                        >
+                          <FolderOpen size={15} style={{ color: '#818cf8' }} />
+                          + Add More from Existing Campaigns
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Campaign Name Input */}
+                    <div style={{ marginBottom: '1.5rem', padding: '1rem', borderRadius: '10px', backgroundColor: 'rgba(99, 102, 241, 0.04)', border: '1px solid rgba(99, 102, 241, 0.2)' }}>
+                      <label className="form-label" style={{ marginBottom: '0.4rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontWeight: '700', color: 'var(--text-primary)' }}>🏷️ Campaign Name (Optional):</span>
+                        {campaignCustomName && (
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            style={{ fontSize: '0.72rem', padding: '0.15rem 0.5rem' }}
+                            onClick={() => setCampaignCustomName('')}
+                          >
+                            Reset Default Name
+                          </button>
+                        )}
+                      </label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder={
+                          selectedUniversity && universities.find(u => u.id === selectedUniversity)
+                            ? `${universities.find(u => u.id === selectedUniversity).name} - ${selectedCourse || 'Admissions'} Campaign (${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })})`
+                            : 'e.g. MBA Outreach 2026 Phase 1'
+                        }
+                        value={campaignCustomName}
+                        onChange={(e) => setCampaignCustomName(e.target.value)}
+                        style={{ fontSize: '0.92rem', fontWeight: '600' }}
+                      />
+                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.35rem', display: 'block' }}>
+                        Leave blank to auto-generate from college name & date, or enter your own custom campaign name.
+                      </span>
                     </div>
 
                     {/* University Selector (searchable dropdown — scales to many colleges) */}
@@ -2608,7 +3386,7 @@ export default function App() {
                               {sel.place && <p style={{ fontSize: '0.8rem', color: '#818cf8', margin: '0.15rem 0', fontWeight: '600' }}>📍 {sel.place}</p>}
                               {sel.websiteUrl && <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', margin: '0.1rem 0' }}>🔗 {sel.websiteUrl}</p>}
                               {sel.description && <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '0.25rem 0 0', fontStyle: 'italic' }}>"{sel.description}"</p>}
-                              <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', margin: '0.25rem 0 0' }}>🗣️ {sel.languages || 'English, Hindi, Telugu'} • 🤖 Agent #{sel.agentId || 257941}</p>
+                              <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', margin: '0.25rem 0 0' }}>🗣️ {sel.languages || 'English, Hindi, Telugu'} • 🤖 Agent #{sel.agentId || 270604}</p>
                               <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: '0.15rem 0 0' }}>🕒 Created: {sel.createdAt ? new Date(sel.createdAt).toLocaleString() : '—'}</p>
                             </div>
                           </div>
@@ -2649,6 +3427,35 @@ export default function App() {
                                 <option key={course} value={course}>📚 {course}</option>
                               ))}
                             </select>
+
+                            {/* Dynamic Voice Bot Route indicator */}
+                            <div style={{
+                              marginTop: '0.65rem',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.5rem',
+                              padding: '0.45rem 0.85rem',
+                              borderRadius: '8px',
+                              fontSize: '0.82rem',
+                              fontWeight: '600',
+                              backgroundColor: isUgCourse(selectedCourse) ? 'rgba(16, 185, 129, 0.12)' : 'rgba(99, 102, 241, 0.12)',
+                              color: isUgCourse(selectedCourse) ? '#059669' : '#6366f1',
+                              border: isUgCourse(selectedCourse) ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(99, 102, 241, 0.3)'
+                            }}>
+                              <span>🤖 <b>Voice Bot Assigned:</b> {isUgCourse(selectedCourse) ? 'UG Admission Assistant (#270740)' : 'PG Admission Assistant (#270604)'}</span>
+                              <span style={{
+                                fontSize: '0.72rem',
+                                padding: '0.15rem 0.45rem',
+                                borderRadius: '4px',
+                                backgroundColor: isUgCourse(selectedCourse) ? '#10b981' : '#6366f1',
+                                color: '#fff',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.03em'
+                              }}>
+                                {isUgCourse(selectedCourse) ? 'UG Bot' : 'PG Bot'}
+                              </span>
+                            </div>
+
                             {courses.length === 0 && (
                               <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
                                 No courses added for {sel ? sel.name : 'this college'} yet — add them via Edit on its card. The agent will ask the caller instead.
@@ -2768,7 +3575,21 @@ export default function App() {
                                   {c.course ? `📚 ${c.course}` : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>General</span>}
                                 </td>
                                 <td style={{ fontFamily: 'var(--mono)', fontSize: '0.85rem' }}>
-                                  #{c.agentId || 'N/A'}
+                                  <span style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.3rem',
+                                    padding: '0.2rem 0.5rem',
+                                    borderRadius: '6px',
+                                    fontSize: '0.78rem',
+                                    fontWeight: '600',
+                                    backgroundColor: isUgCourse(c.course) ? 'rgba(16, 185, 129, 0.1)' : 'rgba(99, 102, 241, 0.1)',
+                                    color: isUgCourse(c.course) ? '#059669' : '#6366f1',
+                                    border: isUgCourse(c.course) ? '1px solid rgba(16, 185, 129, 0.25)' : '1px solid rgba(99, 102, 241, 0.25)'
+                                  }}>
+                                    🤖 #{isUgCourse(c.course) ? '270740' : (c.agentId || '270604')}
+                                    <span style={{ fontSize: '0.7rem' }}>({isUgCourse(c.course) ? 'UG' : 'PG'})</span>
+                                  </span>
                                 </td>
                                 <td>
                                   <span className="status-pill completed" style={{ fontSize: '0.72rem' }}>
@@ -2798,6 +3619,11 @@ export default function App() {
                           </span>
                           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                             Course: <b>{selectedCourse || stagedContacts[0]?.course || 'General'}</b>
+                          </span>
+                          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                            Assigned Voice Bot: <b style={{ color: isUgCourse(selectedCourse || stagedContacts[0]?.course) ? '#059669' : '#6366f1' }}>
+                              {isUgCourse(selectedCourse || stagedContacts[0]?.course) ? '🤖 UG Admission Bot (#270740)' : '🤖 PG Admission Bot (#270604)'}
+                            </b>
                           </span>
                           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                             Call Buffer Delay: <b>{callDelay !== '' ? `${callDelay} seconds` : '2 seconds (Default)'}</b>
@@ -2833,7 +3659,7 @@ export default function App() {
                         Sequential Outbound Campaign Active
                       </h2>
                       <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                        Dialing sequential list using <b>{campaignState.universityName || 'Selected Bot'}</b> (Agent ID: <b>#{campaignState.agentId || 'N/A'}</b>)
+                        Dialing sequential list using <b>{campaignState.universityName || 'Selected Bot'}</b> (Agent ID: <b>#{campaignState.agentId || 'N/A'}</b> • <span style={{ color: isUgCourse(campaignState.course) ? '#10b981' : '#818cf8', fontWeight: '700' }}>{isUgCourse(campaignState.course) ? 'UG Bot' : 'PG Bot'}</span>)
                       </p>
                     </div>
 
@@ -3036,7 +3862,7 @@ export default function App() {
         {/* ========================================== */}
         {activeTab === 'dashboard' && (
           <div>
-            <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '1rem' }}>
+            <div className="page-header">
               <div>
                 <h1>Call Analytics & Post-Call Interest Dashboard</h1>
                 <p>Establishing Google Sheets as the source of truth for post-call summaries, academic preferences, and follow-up flags.</p>
@@ -3047,20 +3873,9 @@ export default function App() {
                   </span>
                 )}
               </div>
-
-              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                <button onClick={handleExportFilteredCsv} className="btn btn-primary" style={{ backgroundColor: '#059669', borderColor: '#10b981', display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.6rem 1.2rem', fontWeight: '700' }}>
-                  <Download size={16} /> Download Excel Report (.xlsx)
-                </button>
-              </div>
             </div>
 
-            {/* Sync Error Notice */}
-            {sheetsSyncError && (
-              <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)', padding: '0.75rem 1.25rem', borderRadius: '8px', marginBottom: '1.25rem', color: '#f87171', fontSize: '0.85rem' }}>
-                ⚠️ {sheetsSyncError}
-              </div>
-            )}
+
 
             {/* Top-Level University Scope Selector (searchable dropdown — scales to many colleges) */}
             <div style={{ marginBottom: '1.75rem', backgroundColor: 'rgba(27, 59, 111, 0.02)', padding: '1.25rem', borderRadius: '14px', border: '1px solid var(--border)' }}>
@@ -3083,10 +3898,34 @@ export default function App() {
                   <button
                     type="button"
                     className={`btn ${isAllUniScope ? 'btn-primary' : 'btn-secondary'}`}
-                    style={{ padding: '0.55rem 0.9rem', fontSize: '0.82rem' }}
+                    style={{
+                      padding: '0.55rem 1rem',
+                      fontSize: '0.84rem',
+                      fontWeight: '700',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      borderRadius: '8px'
+                    }}
                     onClick={() => setDashboardUniversityFilter(['ALL'])}
                   >
-                    🌐 All ({uniStats.ALL.total})
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: '16px',
+                      height: '16px',
+                      borderRadius: '3px',
+                      border: isAllUniScope ? '2px solid #ffffff' : '1.5px solid var(--border)',
+                      backgroundColor: isAllUniScope ? '#ffffff' : 'transparent',
+                      color: isAllUniScope ? 'var(--accent)' : 'transparent',
+                      fontSize: '11px',
+                      fontWeight: '900',
+                      lineHeight: 1
+                    }}>
+                      {isAllUniScope ? '✓' : ''}
+                    </span>
+                    <span>🌐 All Universities</span>
                   </button>
                   {!isAllUniScope && (
                     <button
@@ -3145,21 +3984,260 @@ export default function App() {
                 )}
               </div>
 
-              {/* Selected scope summary */}
-              <div style={{ marginTop: '0.75rem', fontSize: '0.83rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                <GraduationCap size={15} style={{ color: 'var(--accent)' }} />
-                {isAllUniScope ? (
-                  <span>Showing aggregate metrics across <b>{universities.length}</b> colleges • <b>{uniStats.ALL.total}</b> total calls</span>
-                ) : dashboardUniversityFilter.length === 1 ? (() => {
-                  const sel = universities.find(u => u.id === dashboardUniversityFilter[0]);
-                  const count = (uniStats[dashboardUniversityFilter[0]] || { total: 0 }).total;
-                  if (!sel) return <span>Unknown scope</span>;
-                  return <span>Showing <b>{sel.name}</b>{sel.place ? ` (${sel.place})` : ''} • <b>{count}</b> calls • 🗣️ {sel.languages || 'English, Hindi, Telugu'}</span>;
-                })() : (
-                  <span>Showing combined analytics for <b>{dashboardUniversityFilter.length} colleges</b> • <b>{totalDispatchedCount}</b> calls in scope</span>
-                )}
+              {/* Selected scope summary with Scoped Excel Download Button */}
+              <div style={{
+                marginTop: '0.85rem',
+                fontSize: '0.84rem',
+                color: 'var(--text-secondary)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '0.75rem',
+                flexWrap: 'wrap',
+                padding: '0.65rem 1rem',
+                borderRadius: '10px',
+                backgroundColor: 'rgba(99, 102, 241, 0.06)',
+                border: '1px solid rgba(99, 102, 241, 0.25)'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', flex: '1 1 320px' }}>
+                  <GraduationCap size={18} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+                  {isAllUniScope ? (
+                    <span>Showing call history across <strong style={{ color: 'var(--text-primary)' }}>All Universities</strong> ({universities.length} colleges) • <b>{uniStats.ALL.total}</b> total calls</span>
+                  ) : dashboardUniversityFilter.length === 1 ? (() => {
+                    const sel = universities.find(u => u.id === dashboardUniversityFilter[0]);
+                    const count = (uniStats[dashboardUniversityFilter[0]] || { total: 0 }).total;
+                    if (!sel) return <span>Unknown scope</span>;
+                    return <span>Showing call history of <strong style={{ color: 'var(--text-primary)' }}>{sel.name}</strong>{sel.place ? ` (${sel.place})` : ''} • <strong style={{ color: '#818cf8' }}>{count} calls</strong> • 🗣️ {sel.languages || 'English, Hindi, Telugu'}</span>;
+                  })() : (
+                    <span>Showing call history of <strong style={{ color: 'var(--text-primary)' }}>{universities.filter(u => dashboardUniversityFilter.includes(u.id)).map(u => u.name).join(', ')}</strong> • <strong style={{ color: '#818cf8' }}>{totalDispatchedCount} calls</strong> in scope</span>
+                  )}
+                </div>
+
+                {/* Scoped Download Button */}
+                <button
+                  onClick={handleExportFilteredCsv}
+                  className="btn btn-primary"
+                  style={{
+                    backgroundColor: '#059669',
+                    borderColor: '#10b981',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                    padding: '0.5rem 1rem',
+                    fontSize: '0.82rem',
+                    fontWeight: '700',
+                    boxShadow: '0 2px 6px rgba(5, 150, 105, 0.25)'
+                  }}
+                  title={`Export Excel report for ${uniScopeLabel}`}
+                >
+                  <Download size={15} /> Download {isAllUniScope ? 'All Universities' : uniScopeLabel} Excel Report (.xlsx)
+                </button>
               </div>
             </div>
+
+            {/* PAST CALLING CAMPAIGNS (COLLAPSIBLE — ZERO WASTED SPACE BY DEFAULT) */}
+            {(() => {
+              const filteredCampaigns = campaigns.filter(c => {
+                if (isAllUniScope) return true;
+                return dashboardUniversityFilter.includes(c.universityId);
+              });
+
+              return (
+                <div className="card" style={{ marginBottom: '1.5rem', padding: '1rem 1.25rem', borderLeft: '4px solid #6366f1' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                      <div style={{ width: '36px', height: '36px', borderRadius: '8px', backgroundColor: 'rgba(99, 102, 241, 0.12)', color: '#818cf8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Layers size={20} />
+                      </div>
+                      <div>
+                        <h2 className="card-title" style={{ fontSize: '1rem', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          Past Calling Campaigns
+                          <span style={{ fontSize: '0.75rem', fontWeight: '800', backgroundColor: 'rgba(99, 102, 241, 0.18)', color: '#818cf8', padding: '0.15rem 0.5rem', borderRadius: '12px' }}>
+                            {filteredCampaigns.length}
+                          </span>
+                        </h2>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                          {isAllUniScope
+                            ? 'All universities • Click "Show Campaigns" to expand'
+                            : `Filtered by ${universities.filter(u => dashboardUniversityFilter.includes(u.id)).map(u => u.name).join(', ') || 'Selected College'}`}
+                        </span>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      className={`btn ${showCampaignsInDashboard ? 'btn-primary' : 'btn-secondary'}`}
+                      style={{ fontSize: '0.82rem', padding: '0.45rem 0.9rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                      onClick={() => setShowCampaignsInDashboard(!showCampaignsInDashboard)}
+                    >
+                      {showCampaignsInDashboard ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                      {showCampaignsInDashboard ? 'Hide Campaigns' : `Show Campaigns (${filteredCampaigns.length})`}
+                    </button>
+                  </div>
+
+                  {showCampaignsInDashboard && (
+                    <div style={{ marginTop: '1.25rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
+                      {filteredCampaigns.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '2rem 1rem', color: 'var(--text-muted)' }}>
+                          <FolderOpen size={36} style={{ margin: '0 auto 0.5rem', opacity: 0.5 }} />
+                          <p style={{ margin: 0, fontSize: '0.9rem', fontWeight: '600' }}>No campaigns found for current university filter.</p>
+                          <p style={{ margin: '0.25rem 0 0', fontSize: '0.78rem' }}>Run a campaign in Call Dialer or switch university filter to view campaigns.</p>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '1rem' }}>
+                          {filteredCampaigns.map((camp) => {
+                            const isEditing = editingCampaignId === camp.id;
+                            const campStarted = camp.startedAt ? new Date(camp.startedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+
+                            return (
+                              <div
+                                key={camp.id}
+                                style={{
+                                  border: '1px solid var(--border)',
+                                  borderRadius: '10px',
+                                  padding: '1rem',
+                                  backgroundColor: 'var(--bg-card)',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  justifyContent: 'space-between',
+                                  boxShadow: '0 2px 4px rgba(0,0,0,0.04)',
+                                  position: 'relative'
+                                }}
+                              >
+                                <div>
+                                  {/* Title & Rename */}
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                                    {isEditing ? (
+                                      <div style={{ display: 'flex', gap: '0.35rem', flex: 1 }}>
+                                        <input
+                                          className="form-input"
+                                          style={{ fontSize: '0.85rem', padding: '0.3rem 0.5rem' }}
+                                          value={editingCampaignName}
+                                          onChange={(e) => setEditingCampaignName(e.target.value)}
+                                          autoFocus
+                                        />
+                                        <button
+                                          type="button"
+                                          className="btn btn-primary"
+                                          style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}
+                                          onClick={() => handleSaveCampaignName(camp.id, editingCampaignName)}
+                                        >
+                                          Save
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="btn btn-secondary"
+                                          style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem' }}
+                                          onClick={() => setEditingCampaignId(null)}
+                                        >
+                                          Cancel
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flex: 1, minWidth: 0 }}>
+                                        <h4
+                                          style={{ margin: 0, fontSize: '0.96rem', fontWeight: '700', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'pointer' }}
+                                          onClick={() => { setSelectedCampaignDetail(camp); setCampaignCheckedContacts([]); setCameFromPastCampaignsModal(false); }}
+                                          title="Click to view student recipient table"
+                                        >
+                                          📢 {camp.name}
+                                        </h4>
+                                        <button
+                                          type="button"
+                                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '0 0.2rem', fontSize: '0.75rem' }}
+                                          onClick={() => { setEditingCampaignId(camp.id); setEditingCampaignName(camp.name); }}
+                                          title="Rename campaign"
+                                        >
+                                          ✏️
+                                        </button>
+                                      </div>
+                                    )}
+
+                                    <span
+                                      className={`status-pill ${camp.status === 'in-progress' ? 'active' : 'completed'}`}
+                                      style={{ fontSize: '0.68rem', textTransform: 'uppercase', flexShrink: 0 }}
+                                    >
+                                      {camp.status || 'completed'}
+                                    </span>
+                                  </div>
+
+                                  {/* University & Course Badges */}
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', margin: '0.4rem 0 0.6rem' }}>
+                                    <span style={{ fontSize: '0.74rem', fontWeight: '700', backgroundColor: 'rgba(99, 102, 241, 0.1)', color: '#818cf8', padding: '0.15rem 0.5rem', borderRadius: '4px', border: '1px solid rgba(99, 102, 241, 0.25)' }}>
+                                      🎓 {camp.universityName || 'Vidyavision AI'}
+                                    </span>
+                                    {camp.course && (
+                                      <span style={{ fontSize: '0.74rem', fontWeight: '700', backgroundColor: 'rgba(45, 212, 191, 0.1)', color: '#2dd4bf', padding: '0.15rem 0.5rem', borderRadius: '4px', border: '1px solid rgba(45, 212, 191, 0.25)' }}>
+                                        📚 {camp.course}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {/* Timeline & Stats */}
+                                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.65rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                                      <Calendar size={13} /> Started: <strong style={{ color: 'var(--text-secondary)' }}>{campStarted}</strong>
+                                    </span>
+                                    <span>
+                                      👥 Total Recipients: <b style={{ color: 'var(--text-primary)' }}>{camp.totalCount || (camp.contacts && camp.contacts.length) || 0}</b>
+                                      {camp.completedCount !== undefined && ` • Processed: ${camp.completedCount}`}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Action Buttons */}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.4rem', borderTop: '1px solid var(--border)', paddingTop: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                                  <button
+                                    type="button"
+                                    className="btn btn-primary"
+                                    style={{ fontSize: '0.78rem', padding: '0.35rem 0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                                    onClick={() => { setSelectedCampaignDetail(camp); setCampaignCheckedContacts([]); setCameFromPastCampaignsModal(false); }}
+                                  >
+                                    <span>👁️</span> View Student Table ({camp.contacts?.length || camp.totalCount || 0})
+                                  </button>
+
+                                  <div style={{ display: 'flex', gap: '0.35rem' }}>
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary"
+                                      style={{ fontSize: '0.78rem', padding: '0.35rem 0.65rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem', color: '#10b981', borderColor: 'rgba(16, 185, 129, 0.4)', fontWeight: '600' }}
+                                      onClick={() => handleDownloadCampaignExcel(camp)}
+                                      title="Download formatted Excel report (.xlsx)"
+                                    >
+                                      <Download size={13} /> Excel
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      className="btn btn-secondary"
+                                      style={{ fontSize: '0.78rem', padding: '0.35rem 0.55rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
+                                      onClick={() => handleDownloadCampaignCsv(camp.id, camp.name)}
+                                      title="Download CSV"
+                                    >
+                                      <Download size={13} /> CSV
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      className="btn btn-danger-outline"
+                                      style={{ fontSize: '0.76rem', padding: '0.35rem 0.55rem', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.4)' }}
+                                      onClick={() => handleDeleteCampaign(camp.id, camp.name)}
+                                      title="Delete campaign"
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Interactive Cards Grid across Product-Level Outcomes */}
             <div className="metrics-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
@@ -3358,21 +4436,22 @@ export default function App() {
             {/* Admission Conversion Funnel & Call Outcome Distribution Row */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.25rem', marginTop: '1.25rem' }}>
 
-              {/* 1. Admission Conversion Funnel & Pipeline Card (Dynamic Title & 9 Mutually Exclusive Steps) */}
+              {/* 1. Admission Qualification Pipeline (4 Progressive Funnel Stages + Quick Disposition Chips) */}
               <div className="card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
                   <h2 className="card-title" style={{ fontSize: '1rem', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <Activity size={18} style={{ color: 'var(--accent)' }} />
                     {isAllUniScope
-                      ? 'Admission Conversion Funnel & Pipeline'
-                      : `${uniScopeLabel} Admission Conversion Funnel & Pipeline`}
+                      ? 'Admissions Qualification Pipeline'
+                      : `${uniScopeLabel} Admissions Pipeline`}
                   </h2>
-                  <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>Click any step to filter</span>
+                  <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>Click stage or disposition to filter</span>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', width: '100%' }}>
+                {/* 4 True Progressive Funnel Stages */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', width: '100%' }}>
 
-                  {/* Step 1: Total Dispatched */}
+                  {/* Stage 1: Total Dispatched */}
                   <div
                     onClick={() => setDashboardFilter('ALL')}
                     style={{
@@ -3380,23 +4459,24 @@ export default function App() {
                       alignItems: 'center',
                       gap: '0.75rem',
                       cursor: 'pointer',
-                      padding: '0.2rem 0.4rem',
+                      padding: '0.25rem 0.45rem',
                       borderRadius: '6px',
-                      backgroundColor: dashboardFilter === 'ALL' ? 'rgba(129, 140, 248, 0.08)' : 'transparent'
+                      backgroundColor: dashboardFilter === 'ALL' ? 'rgba(129, 140, 248, 0.12)' : 'transparent',
+                      borderLeft: dashboardFilter === 'ALL' ? '3px solid #818cf8' : '3px solid transparent'
                     }}
                   >
-                    <div style={{ width: '150px', fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '700' }}>
+                    <div style={{ width: '155px', fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '700' }}>
                       1. Total Dispatched
                     </div>
                     <div style={{ flex: 1, backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', height: '26px', position: 'relative', overflow: 'hidden' }}>
-                      <div style={{ width: '100%', backgroundColor: 'rgba(129, 140, 248, 0.35)', height: '100%' }}></div>
+                      <div style={{ width: '100%', backgroundColor: 'rgba(129, 140, 248, 0.4)', height: '100%' }}></div>
                       <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff' }}>
                         {totalDispatchedCount} leads (100%)
                       </span>
                     </div>
                   </div>
 
-                  {/* Step 2: Calls Answered */}
+                  {/* Stage 2: Connected / Answered */}
                   <div
                     onClick={() => setDashboardFilter('ANSWERED')}
                     style={{
@@ -3404,55 +4484,28 @@ export default function App() {
                       alignItems: 'center',
                       gap: '0.75rem',
                       cursor: 'pointer',
-                      padding: '0.2rem 0.4rem',
+                      padding: '0.25rem 0.45rem',
                       borderRadius: '6px',
-                      backgroundColor: dashboardFilter === 'ANSWERED' ? 'rgba(45, 212, 191, 0.08)' : 'transparent'
+                      backgroundColor: dashboardFilter === 'ANSWERED' ? 'rgba(45, 212, 191, 0.12)' : 'transparent',
+                      borderLeft: dashboardFilter === 'ANSWERED' ? '3px solid #2dd4bf' : '3px solid transparent'
                     }}
                   >
-                    <div style={{ width: '150px', fontSize: '0.8rem', color: '#2dd4bf', fontWeight: '700' }}>
-                      2. Calls Answered
+                    <div style={{ width: '155px', fontSize: '0.8rem', color: '#2dd4bf', fontWeight: '700' }}>
+                      2. Calls Connected
                     </div>
                     <div style={{ flex: 1, backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', height: '26px', position: 'relative', overflow: 'hidden' }}>
                       <div style={{
                         width: `${totalDispatchedCount > 0 ? (answeredCount / totalDispatchedCount) * 100 : 0}%`,
-                        backgroundColor: 'rgba(45, 212, 191, 0.35)',
+                        backgroundColor: 'rgba(45, 212, 191, 0.4)',
                         height: '100%'
                       }}></div>
                       <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff' }}>
-                        {answeredCount} leads {totalDispatchedCount > 0 && `(${Math.round((answeredCount / totalDispatchedCount) * 100)}% of Dispatched)`}
+                        {answeredCount} leads {totalDispatchedCount > 0 && `(${Math.round((answeredCount / totalDispatchedCount) * 100)}% reach)`}
                       </span>
                     </div>
                   </div>
 
-                  {/* Step 3: Calls Not Answered */}
-                  <div
-                    onClick={() => setDashboardFilter(CALL_OUTCOME_STATUS.NOT_ANSWERED)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.75rem',
-                      cursor: 'pointer',
-                      padding: '0.2rem 0.4rem',
-                      borderRadius: '6px',
-                      backgroundColor: dashboardFilter === CALL_OUTCOME_STATUS.NOT_ANSWERED ? 'rgba(244, 63, 94, 0.08)' : 'transparent'
-                    }}
-                  >
-                    <div style={{ width: '150px', fontSize: '0.8rem', color: '#fb7185', fontWeight: '700' }}>
-                      3. Calls Not Answered
-                    </div>
-                    <div style={{ flex: 1, backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', height: '26px', position: 'relative', overflow: 'hidden' }}>
-                      <div style={{
-                        width: `${totalDispatchedCount > 0 ? (unansweredCount / totalDispatchedCount) * 100 : 0}%`,
-                        backgroundColor: 'rgba(244, 63, 94, 0.35)',
-                        height: '100%'
-                      }}></div>
-                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff' }}>
-                        {unansweredCount} leads {totalDispatchedCount > 0 && `(${Math.round((unansweredCount / totalDispatchedCount) * 100)}% of Dispatched)`}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Step 4: Interested */}
+                  {/* Stage 3: Qualified / Interested */}
                   <div
                     onClick={() => setDashboardFilter(CALL_OUTCOME_STATUS.INTERESTED)}
                     style={{
@@ -3460,204 +4513,178 @@ export default function App() {
                       alignItems: 'center',
                       gap: '0.75rem',
                       cursor: 'pointer',
-                      padding: '0.2rem 0.4rem',
+                      padding: '0.25rem 0.45rem',
                       borderRadius: '6px',
-                      backgroundColor: dashboardFilter === CALL_OUTCOME_STATUS.INTERESTED ? 'rgba(74, 222, 128, 0.08)' : 'transparent'
+                      backgroundColor: dashboardFilter === CALL_OUTCOME_STATUS.INTERESTED ? 'rgba(74, 222, 128, 0.12)' : 'transparent',
+                      borderLeft: dashboardFilter === CALL_OUTCOME_STATUS.INTERESTED ? '3px solid #4ade80' : '3px solid transparent'
                     }}
                   >
-                    <div style={{ width: '150px', fontSize: '0.8rem', color: '#4ade80', fontWeight: '700' }}>
-                      4. Interested
+                    <div style={{ width: '155px', fontSize: '0.8rem', color: '#4ade80', fontWeight: '700' }}>
+                      3. Qualified / Interested
                     </div>
                     <div style={{ flex: 1, backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', height: '26px', position: 'relative', overflow: 'hidden' }}>
                       <div style={{
                         width: `${answeredCount > 0 ? (interestedCount / answeredCount) * 100 : 0}%`,
-                        backgroundColor: 'rgba(74, 222, 128, 0.35)',
+                        backgroundColor: 'rgba(74, 222, 128, 0.4)',
                         height: '100%'
                       }}></div>
                       <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff' }}>
-                        {interestedCount} leads {answeredCount > 0 && `(${Math.round((interestedCount / answeredCount) * 100)}% of Answered)`}
+                        {interestedCount} leads {answeredCount > 0 && `(${Math.round((interestedCount / answeredCount) * 100)}% of connected)`}
                       </span>
                     </div>
                   </div>
 
-                  {/* Step 5: Callback */}
+                  {/* Stage 4: Application Sent */}
                   <div
-                    onClick={() => setDashboardFilter(CALL_OUTCOME_STATUS.CALLBACK)}
+                    onClick={() => setDashboardFilter(CALL_OUTCOME_STATUS.APPLICATION_SENT)}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: '0.75rem',
                       cursor: 'pointer',
-                      padding: '0.2rem 0.4rem',
+                      padding: '0.25rem 0.45rem',
                       borderRadius: '6px',
-                      backgroundColor: dashboardFilter === CALL_OUTCOME_STATUS.CALLBACK ? 'rgba(245, 158, 11, 0.08)' : 'transparent'
+                      backgroundColor: dashboardFilter === CALL_OUTCOME_STATUS.APPLICATION_SENT ? 'rgba(6, 182, 212, 0.12)' : 'transparent',
+                      borderLeft: dashboardFilter === CALL_OUTCOME_STATUS.APPLICATION_SENT ? '3px solid #06b6d4' : '3px solid transparent'
                     }}
                   >
-                    <div style={{ width: '150px', fontSize: '0.8rem', color: '#fbbf24', fontWeight: '700' }}>
-                      5. Callback
+                    <div style={{ width: '155px', fontSize: '0.8rem', color: '#06b6d4', fontWeight: '700' }}>
+                      4. Application Sent
                     </div>
                     <div style={{ flex: 1, backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', height: '26px', position: 'relative', overflow: 'hidden' }}>
                       <div style={{
-                        width: `${answeredCount > 0 ? (callbackCount / answeredCount) * 100 : 0}%`,
-                        backgroundColor: 'rgba(245, 158, 11, 0.35)',
+                        width: `${interestedCount > 0 ? Math.min(100, (applicationSentCount / interestedCount) * 100) : (answeredCount > 0 ? (applicationSentCount / answeredCount) * 100 : 0)}%`,
+                        backgroundColor: 'rgba(6, 182, 212, 0.4)',
                         height: '100%'
                       }}></div>
                       <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff' }}>
-                        {callbackCount} leads {answeredCount > 0 && `(${Math.round((callbackCount / answeredCount) * 100)}% of Answered)`}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Step 6: Already Applied */}
-                  <div
-                    onClick={() => setDashboardFilter(CALL_OUTCOME_STATUS.ALREADY_APPLIED)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.75rem',
-                      cursor: 'pointer',
-                      padding: '0.2rem 0.4rem',
-                      borderRadius: '6px',
-                      backgroundColor: dashboardFilter === CALL_OUTCOME_STATUS.ALREADY_APPLIED ? 'rgba(56, 189, 248, 0.08)' : 'transparent'
-                    }}
-                  >
-                    <div style={{ width: '150px', fontSize: '0.8rem', color: '#38bdf8', fontWeight: '700' }}>
-                      6. Already Applied
-                    </div>
-                    <div style={{ flex: 1, backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', height: '26px', position: 'relative', overflow: 'hidden' }}>
-                      <div style={{
-                        width: `${answeredCount > 0 ? (alreadyAppliedCount / answeredCount) * 100 : 0}%`,
-                        backgroundColor: 'rgba(56, 189, 248, 0.35)',
-                        height: '100%'
-                      }}></div>
-                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff' }}>
-                        {alreadyAppliedCount} leads {answeredCount > 0 && `(${Math.round((alreadyAppliedCount / answeredCount) * 100)}% of Answered)`}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Step 7: Already Joined */}
-                  <div
-                    onClick={() => setDashboardFilter(CALL_OUTCOME_STATUS.ALREADY_JOINED)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.75rem',
-                      cursor: 'pointer',
-                      padding: '0.2rem 0.4rem',
-                      borderRadius: '6px',
-                      backgroundColor: dashboardFilter === CALL_OUTCOME_STATUS.ALREADY_JOINED ? 'rgba(168, 85, 247, 0.08)' : 'transparent'
-                    }}
-                  >
-                    <div style={{ width: '150px', fontSize: '0.8rem', color: '#a855f7', fontWeight: '700' }}>
-                      7. Already Joined
-                    </div>
-                    <div style={{ flex: 1, backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', height: '26px', position: 'relative', overflow: 'hidden' }}>
-                      <div style={{
-                        width: `${answeredCount > 0 ? (alreadyJoinedCount / answeredCount) * 100 : 0}%`,
-                        backgroundColor: 'rgba(168, 85, 247, 0.35)',
-                        height: '100%'
-                      }}></div>
-                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff' }}>
-                        {alreadyJoinedCount} leads {answeredCount > 0 && `(${Math.round((alreadyJoinedCount / answeredCount) * 100)}% of Answered)`}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Step 8: Not Interested */}
-                  <div
-                    onClick={() => setDashboardFilter(CALL_OUTCOME_STATUS.NOT_INTERESTED)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.75rem',
-                      cursor: 'pointer',
-                      padding: '0.2rem 0.4rem',
-                      borderRadius: '6px',
-                      backgroundColor: dashboardFilter === CALL_OUTCOME_STATUS.NOT_INTERESTED ? 'rgba(239, 68, 68, 0.08)' : 'transparent'
-                    }}
-                  >
-                    <div style={{ width: '150px', fontSize: '0.8rem', color: '#f87171', fontWeight: '700' }}>
-                      8. Not Interested
-                    </div>
-                    <div style={{ flex: 1, backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', height: '26px', position: 'relative', overflow: 'hidden' }}>
-                      <div style={{
-                        width: `${answeredCount > 0 ? (notInterestedCount / answeredCount) * 100 : 0}%`,
-                        backgroundColor: 'rgba(239, 68, 68, 0.35)',
-                        height: '100%'
-                      }}></div>
-                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff' }}>
-                        {notInterestedCount} leads {answeredCount > 0 && `(${Math.round((notInterestedCount / answeredCount) * 100)}% of Answered)`}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Step 9: Wrong Number / Invalid */}
-                  <div
-                    onClick={() => setDashboardFilter(CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.75rem',
-                      cursor: 'pointer',
-                      padding: '0.2rem 0.4rem',
-                      borderRadius: '6px',
-                      backgroundColor: dashboardFilter === CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID ? 'rgba(251, 146, 60, 0.08)' : 'transparent'
-                    }}
-                  >
-                    <div style={{ width: '150px', fontSize: '0.8rem', color: '#fb923c', fontWeight: '700' }}>
-                      9. Wrong / Invalid
-                    </div>
-                    <div style={{ flex: 1, backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '4px', height: '26px', position: 'relative', overflow: 'hidden' }}>
-                      <div style={{
-                        width: `${answeredCount > 0 ? (wrongNumberCount / answeredCount) * 100 : 0}%`,
-                        backgroundColor: 'rgba(251, 146, 60, 0.35)',
-                        height: '100%'
-                      }}></div>
-                      <span style={{ position: 'absolute', left: '10px', top: '4px', fontSize: '0.8rem', fontWeight: '700', color: '#ffffff' }}>
-                        {wrongNumberCount} leads {answeredCount > 0 && `(${Math.round((wrongNumberCount / answeredCount) * 100)}% of Answered)`}
+                        {applicationSentCount} leads {interestedCount > 0 && `(${Math.round((applicationSentCount / interestedCount) * 100)}% of interested)`}
                       </span>
                     </div>
                   </div>
 
                 </div>
 
-                {/* Secondary Action: Counsellor Follow-up (Decoupled from primary status) */}
-                <div
-                  onClick={() => setDashboardFilter(dashboardFilter === 'COUNSELOR_FOLLOWUP' ? 'ALL' : 'COUNSELOR_FOLLOWUP')}
-                  style={{
-                    marginTop: '1rem',
-                    padding: '0.75rem 1rem',
-                    borderRadius: '8px',
-                    backgroundColor: dashboardFilter === 'COUNSELOR_FOLLOWUP' ? 'rgba(45, 212, 191, 0.15)' : 'rgba(255, 255, 255, 0.03)',
-                    border: dashboardFilter === 'COUNSELOR_FOLLOWUP' ? '1px solid #2dd4bf' : '1px solid var(--border)',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                    <span style={{ fontSize: '1.1rem' }}>☎️</span>
-                    <div>
-                      <div style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-primary)' }}>
-                        Secondary Metric: Counsellor Follow-up
-                      </div>
-                      <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                        {interestedCount > 0
-                          ? `${counselorFollowupCount} of ${interestedCount} interested leads require counsellor follow-up (${Math.round((counselorFollowupCount / interestedCount) * 100)}%)`
-                          : `${counselorFollowupCount} leads flagged for counsellor follow-up`}
-                      </div>
-                    </div>
+                {/* Secondary Call Dispositions & Counsellor Pipeline Chips */}
+                <div style={{ marginTop: '1rem', borderTop: '1px solid rgba(255, 255, 255, 0.07)', paddingTop: '0.85rem' }}>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase', marginBottom: '0.5rem', letterSpacing: '0.04em' }}>
+                    Secondary Dispositions & Pipeline Actions
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span style={{ fontSize: '0.95rem', fontWeight: '800', color: '#2dd4bf', fontFamily: 'var(--mono)' }}>
-                      {counselorFollowupCount}
-                    </span>
-                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                      {dashboardFilter === 'COUNSELOR_FOLLOWUP' ? 'Showing' : 'Filter'}
-                    </span>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(135px, 1fr))', gap: '0.5rem' }}>
+                    {/* Callback */}
+                    <button
+                      onClick={() => setDashboardFilter(dashboardFilter === CALL_OUTCOME_STATUS.CALLBACK ? 'ALL' : CALL_OUTCOME_STATUS.CALLBACK)}
+                      style={{
+                        padding: '0.45rem 0.6rem',
+                        borderRadius: '6px',
+                        border: dashboardFilter === CALL_OUTCOME_STATUS.CALLBACK ? '1px solid #fbbf24' : '1px solid var(--border)',
+                        backgroundColor: dashboardFilter === CALL_OUTCOME_STATUS.CALLBACK ? 'rgba(245, 158, 11, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <span style={{ fontSize: '0.76rem', color: '#fbbf24', fontWeight: '600' }}>📞 Callback</span>
+                      <span style={{ fontSize: '0.78rem', fontWeight: '700', color: '#fbbf24', fontFamily: 'var(--mono)' }}>{callbackCount}</span>
+                    </button>
+
+                    {/* Already Applied */}
+                    <button
+                      onClick={() => setDashboardFilter(dashboardFilter === CALL_OUTCOME_STATUS.ALREADY_APPLIED ? 'ALL' : CALL_OUTCOME_STATUS.ALREADY_APPLIED)}
+                      style={{
+                        padding: '0.45rem 0.6rem',
+                        borderRadius: '6px',
+                        border: dashboardFilter === CALL_OUTCOME_STATUS.ALREADY_APPLIED ? '1px solid #38bdf8' : '1px solid var(--border)',
+                        backgroundColor: dashboardFilter === CALL_OUTCOME_STATUS.ALREADY_APPLIED ? 'rgba(56, 189, 248, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <span style={{ fontSize: '0.76rem', color: '#38bdf8', fontWeight: '600' }}>📝 Applied</span>
+                      <span style={{ fontSize: '0.78rem', fontWeight: '700', color: '#38bdf8', fontFamily: 'var(--mono)' }}>{alreadyAppliedCount}</span>
+                    </button>
+
+                    {/* Already Joined */}
+                    <button
+                      onClick={() => setDashboardFilter(dashboardFilter === CALL_OUTCOME_STATUS.ALREADY_JOINED ? 'ALL' : CALL_OUTCOME_STATUS.ALREADY_JOINED)}
+                      style={{
+                        padding: '0.45rem 0.6rem',
+                        borderRadius: '6px',
+                        border: dashboardFilter === CALL_OUTCOME_STATUS.ALREADY_JOINED ? '1px solid #a855f7' : '1px solid var(--border)',
+                        backgroundColor: dashboardFilter === CALL_OUTCOME_STATUS.ALREADY_JOINED ? 'rgba(168, 85, 247, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <span style={{ fontSize: '0.76rem', color: '#a855f7', fontWeight: '600' }}>🎓 Joined</span>
+                      <span style={{ fontSize: '0.78rem', fontWeight: '700', color: '#a855f7', fontFamily: 'var(--mono)' }}>{alreadyJoinedCount}</span>
+                    </button>
+
+                    {/* Counsellor Follow-up */}
+                    <button
+                      onClick={() => setDashboardFilter(dashboardFilter === 'COUNSELOR_FOLLOWUP' ? 'ALL' : 'COUNSELOR_FOLLOWUP')}
+                      style={{
+                        padding: '0.45rem 0.6rem',
+                        borderRadius: '6px',
+                        border: dashboardFilter === 'COUNSELOR_FOLLOWUP' ? '1px solid #2dd4bf' : '1px solid var(--border)',
+                        backgroundColor: dashboardFilter === 'COUNSELOR_FOLLOWUP' ? 'rgba(45, 212, 191, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <span style={{ fontSize: '0.76rem', color: '#2dd4bf', fontWeight: '600' }}>☎️ Counsellor</span>
+                      <span style={{ fontSize: '0.78rem', fontWeight: '700', color: '#2dd4bf', fontFamily: 'var(--mono)' }}>{counselorFollowupCount}</span>
+                    </button>
+
+                    {/* Not Interested */}
+                    <button
+                      onClick={() => setDashboardFilter(dashboardFilter === CALL_OUTCOME_STATUS.NOT_INTERESTED ? 'ALL' : CALL_OUTCOME_STATUS.NOT_INTERESTED)}
+                      style={{
+                        padding: '0.45rem 0.6rem',
+                        borderRadius: '6px',
+                        border: dashboardFilter === CALL_OUTCOME_STATUS.NOT_INTERESTED ? '1px solid #f87171' : '1px solid var(--border)',
+                        backgroundColor: dashboardFilter === CALL_OUTCOME_STATUS.NOT_INTERESTED ? 'rgba(239, 68, 68, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <span style={{ fontSize: '0.76rem', color: '#f87171', fontWeight: '600' }}>🔴 Declined</span>
+                      <span style={{ fontSize: '0.78rem', fontWeight: '700', color: '#f87171', fontFamily: 'var(--mono)' }}>{notInterestedCount}</span>
+                    </button>
+
+                    {/* Wrong / Invalid */}
+                    <button
+                      onClick={() => setDashboardFilter(dashboardFilter === CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID ? 'ALL' : CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID)}
+                      style={{
+                        padding: '0.45rem 0.6rem',
+                        borderRadius: '6px',
+                        border: dashboardFilter === CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID ? '1px solid #fb923c' : '1px solid var(--border)',
+                        backgroundColor: dashboardFilter === CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID ? 'rgba(251, 146, 60, 0.15)' : 'rgba(255, 255, 255, 0.02)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <span style={{ fontSize: '0.76rem', color: '#fb923c', fontWeight: '600' }}>⚠️ Invalid</span>
+                      <span style={{ fontSize: '0.78rem', fontWeight: '700', color: '#fb923c', fontFamily: 'var(--mono)' }}>{wrongNumberCount}</span>
+                    </button>
                   </div>
                 </div>
 
@@ -3681,83 +4708,188 @@ export default function App() {
 
             </div>
 
-            {/* University-Wise Performance & Outcome Breakdown Matrix (Dynamically Configured) */}
+            {/* AI Student Profile & Readiness Signals (OmniDimension Extracted Intelligence) */}
             <div className="card" style={{ marginTop: '1.25rem', padding: '1.25rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                <h2 className="card-title" style={{ fontSize: '1rem', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <GraduationCap size={18} style={{ color: 'var(--accent)' }} /> University-Wise Call Outcome Breakdown
-                </h2>
-                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                  Click any university row to toggle scope filter
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <div style={{ padding: '0.35rem', borderRadius: '8px', backgroundColor: 'rgba(99, 102, 241, 0.15)', color: 'var(--accent)', display: 'flex' }}>
+                    <BookOpen size={18} />
+                  </div>
+                  <div>
+                    <h2 className="card-title" style={{ fontSize: '1rem', margin: 0 }}>
+                      AI Student Profile & Readiness Signals
+                    </h2>
+                    <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                      Variables automatically extracted by OmniDimension AI • Click any signal to filter student table
+                    </span>
+                  </div>
+                </div>
+
+                {['GRAD_FINAL_YEAR', 'GRAD_COMPLETED', 'TIMELINE_IMMEDIATE', 'TIMELINE_NEXT_YEAR', 'EXAM_MENTIONED', 'LIVE_TRANSFERRED'].includes(dashboardFilter) && (
+                  <button
+                    className="btn btn-secondary"
+                    style={{ padding: '0.3rem 0.75rem', fontSize: '0.76rem' }}
+                    onClick={() => setDashboardFilter('ALL')}
+                  >
+                    Reset Signal Filter
+                  </button>
+                )}
               </div>
 
-              <div className="calls-table-container">
-                <table className="calls-table" style={{ fontSize: '0.85rem' }}>
-                  <thead>
-                    <tr>
-                      <th>University</th>
-                      <th style={{ textAlign: 'center' }}>Total</th>
-                      <th style={{ textAlign: 'center', color: '#2dd4bf' }}>Answered</th>
-                      <th style={{ textAlign: 'center', color: '#4ade80' }}>Interested</th>
-                      <th style={{ textAlign: 'center', color: '#06b6d4' }}>App Sent</th>
-                      <th style={{ textAlign: 'center', color: '#fbbf24' }}>Callback</th>
-                      <th style={{ textAlign: 'center', color: '#38bdf8' }}>Already Applied</th>
-                      <th style={{ textAlign: 'center', color: '#a855f7' }}>Already Joined</th>
-                      <th style={{ textAlign: 'center', color: '#f87171' }}>Not Interested</th>
-                      <th style={{ textAlign: 'center', color: '#fb923c' }}>Wrong / Invalid</th>
-                      <th style={{ textAlign: 'center', color: '#fb7185' }}>Not Answered</th>
-                      <th style={{ textAlign: 'center' }}>Conversion</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {universities.map(u => {
-                      const isSelected = !isAllUniScope && dashboardUniversityFilter.includes(u.id);
-                      const data = uniStats[u.id] || {
-                        total: 0,
-                        answered: 0,
-                        interested: 0,
-                        applicationSent: 0,
-                        callback: 0,
-                        alreadyApplied: 0,
-                        alreadyJoined: 0,
-                        notInterested: 0,
-                        wrongNumber: 0,
-                        unanswered: 0
-                      };
-                      const convRate = data.total > 0 ? Math.round((data.interested / data.total) * 100) : 0;
-                      return (
-                        <tr
-                          key={u.id}
-                          onClick={() => toggleUniScope(u.id)}
-                          title="Click to add/remove this college from the analytics scope"
-                          style={{
-                            cursor: 'pointer',
-                            backgroundColor: isSelected ? 'rgba(99, 102, 241, 0.08)' : undefined,
-                            borderLeft: isSelected ? '4px solid var(--accent)' : '4px solid transparent'
-                          }}
-                        >
-                          <td style={{ fontWeight: '700' }}>
-                            🏫 {u.name} {isSelected && <span style={{ fontSize: '0.72rem', color: 'var(--accent)', marginLeft: '0.4rem' }}>(Active Scope)</span>}
-                          </td>
-                          <td style={{ textAlign: 'center', fontWeight: '700' }}>{data.total}</td>
-                          <td style={{ textAlign: 'center', color: '#2dd4bf', fontWeight: '600' }}>{data.answered}</td>
-                          <td style={{ textAlign: 'center', color: '#4ade80', fontWeight: '700' }}>{data.interested}</td>
-                          <td style={{ textAlign: 'center', color: '#06b6d4', fontWeight: '700' }}>{data.applicationSent || 0}</td>
-                          <td style={{ textAlign: 'center', color: '#fbbf24', fontWeight: '700' }}>{data.callback}</td>
-                          <td style={{ textAlign: 'center', color: '#38bdf8', fontWeight: '600' }}>{data.alreadyApplied}</td>
-                          <td style={{ textAlign: 'center', color: '#a855f7', fontWeight: '600' }}>{data.alreadyJoined}</td>
-                          <td style={{ textAlign: 'center', color: '#f87171', fontWeight: '600' }}>{data.notInterested}</td>
-                          <td style={{ textAlign: 'center', color: '#fb923c', fontWeight: '600' }}>{data.wrongNumber}</td>
-                          <td style={{ textAlign: 'center', color: '#fb7185', fontWeight: '600' }}>{data.unanswered}</td>
-                          <td style={{ textAlign: 'center', fontWeight: '700' }}>
-                            <span className="status-pill completed" style={{ fontSize: '0.75rem' }}>{convRate}%</span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.85rem' }}>
+                {/* 1. Graduation Status */}
+                <div style={{ padding: '0.9rem', borderRadius: '8px', backgroundColor: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.65rem' }}>
+                    <GraduationCap size={16} style={{ color: '#818cf8' }} />
+                    <span style={{ fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-primary)' }}>Graduation Status</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                    <button
+                      onClick={() => setDashboardFilter(dashboardFilter === 'GRAD_FINAL_YEAR' ? 'ALL' : 'GRAD_FINAL_YEAR')}
+                      style={{
+                        padding: '0.4rem 0.65rem',
+                        borderRadius: '6px',
+                        border: dashboardFilter === 'GRAD_FINAL_YEAR' ? '1px solid #818cf8' : '1px solid rgba(255, 255, 255, 0.06)',
+                        backgroundColor: dashboardFilter === 'GRAD_FINAL_YEAR' ? 'rgba(129, 140, 248, 0.2)' : 'rgba(255, 255, 255, 0.02)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <span style={{ fontSize: '0.78rem', color: dashboardFilter === 'GRAD_FINAL_YEAR' ? '#818cf8' : 'var(--text-secondary)' }}>🎓 Final Year</span>
+                      <span style={{ fontSize: '0.82rem', fontWeight: '700', color: '#818cf8', fontFamily: 'var(--mono)' }}>{finalYearGradCount}</span>
+                    </button>
+                    <button
+                      onClick={() => setDashboardFilter(dashboardFilter === 'GRAD_COMPLETED' ? 'ALL' : 'GRAD_COMPLETED')}
+                      style={{
+                        padding: '0.4rem 0.65rem',
+                        borderRadius: '6px',
+                        border: dashboardFilter === 'GRAD_COMPLETED' ? '1px solid #818cf8' : '1px solid rgba(255, 255, 255, 0.06)',
+                        backgroundColor: dashboardFilter === 'GRAD_COMPLETED' ? 'rgba(129, 140, 248, 0.2)' : 'rgba(255, 255, 255, 0.02)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <span style={{ fontSize: '0.78rem', color: dashboardFilter === 'GRAD_COMPLETED' ? '#818cf8' : 'var(--text-secondary)' }}>📜 Completed Degree</span>
+                      <span style={{ fontSize: '0.82rem', fontWeight: '700', color: '#818cf8', fontFamily: 'var(--mono)' }}>{completedGradCount}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 2. Admission Timeline */}
+                <div style={{ padding: '0.9rem', borderRadius: '8px', backgroundColor: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.65rem' }}>
+                    <Calendar size={16} style={{ color: '#2dd4bf' }} />
+                    <span style={{ fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-primary)' }}>Admission Timeline</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                    <button
+                      onClick={() => setDashboardFilter(dashboardFilter === 'TIMELINE_IMMEDIATE' ? 'ALL' : 'TIMELINE_IMMEDIATE')}
+                      style={{
+                        padding: '0.4rem 0.65rem',
+                        borderRadius: '6px',
+                        border: dashboardFilter === 'TIMELINE_IMMEDIATE' ? '1px solid #2dd4bf' : '1px solid rgba(255, 255, 255, 0.06)',
+                        backgroundColor: dashboardFilter === 'TIMELINE_IMMEDIATE' ? 'rgba(45, 212, 191, 0.2)' : 'rgba(255, 255, 255, 0.02)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <span style={{ fontSize: '0.78rem', color: dashboardFilter === 'TIMELINE_IMMEDIATE' ? '#2dd4bf' : 'var(--text-secondary)' }}>⚡ Immediate (2026)</span>
+                      <span style={{ fontSize: '0.82rem', fontWeight: '700', color: '#2dd4bf', fontFamily: 'var(--mono)' }}>{immediateTimelineCount}</span>
+                    </button>
+                    <button
+                      onClick={() => setDashboardFilter(dashboardFilter === 'TIMELINE_NEXT_YEAR' ? 'ALL' : 'TIMELINE_NEXT_YEAR')}
+                      style={{
+                        padding: '0.4rem 0.65rem',
+                        borderRadius: '6px',
+                        border: dashboardFilter === 'TIMELINE_NEXT_YEAR' ? '1px solid #2dd4bf' : '1px solid rgba(255, 255, 255, 0.06)',
+                        backgroundColor: dashboardFilter === 'TIMELINE_NEXT_YEAR' ? 'rgba(45, 212, 191, 0.2)' : 'rgba(255, 255, 255, 0.02)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <span style={{ fontSize: '0.78rem', color: dashboardFilter === 'TIMELINE_NEXT_YEAR' ? '#2dd4bf' : 'var(--text-secondary)' }}>📅 Next Year (2027)</span>
+                      <span style={{ fontSize: '0.82rem', fontWeight: '700', color: '#2dd4bf', fontFamily: 'var(--mono)' }}>{nextYearTimelineCount}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3. Entrance Exam Mentioned */}
+                <div style={{ padding: '0.9rem', borderRadius: '8px', backgroundColor: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.65rem' }}>
+                    <FileCheck size={16} style={{ color: '#fbbf24' }} />
+                    <span style={{ fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-primary)' }}>Entrance Exam Discussed</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                    <button
+                      onClick={() => setDashboardFilter(dashboardFilter === 'EXAM_MENTIONED' ? 'ALL' : 'EXAM_MENTIONED')}
+                      style={{
+                        padding: '0.4rem 0.65rem',
+                        borderRadius: '6px',
+                        border: dashboardFilter === 'EXAM_MENTIONED' ? '1px solid #fbbf24' : '1px solid rgba(255, 255, 255, 0.06)',
+                        backgroundColor: dashboardFilter === 'EXAM_MENTIONED' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(255, 255, 255, 0.02)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontSize: '0.78rem', color: dashboardFilter === 'EXAM_MENTIONED' ? '#fbbf24' : 'var(--text-secondary)' }}>📝 Exam Disclosed</div>
+                        <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>CAT, MAT, ICET, etc.</div>
+                      </div>
+                      <span style={{ fontSize: '0.82rem', fontWeight: '700', color: '#fbbf24', fontFamily: 'var(--mono)' }}>{entranceExamCount}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* 4. Live Counsellor Transfer */}
+                <div style={{ padding: '0.9rem', borderRadius: '8px', backgroundColor: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.65rem' }}>
+                    <PhoneForwarded size={16} style={{ color: '#06b6d4' }} />
+                    <span style={{ fontSize: '0.8rem', fontWeight: '700', color: 'var(--text-primary)' }}>Live Counsellor Transfer</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                    <button
+                      onClick={() => setDashboardFilter(dashboardFilter === 'LIVE_TRANSFERRED' ? 'ALL' : 'LIVE_TRANSFERRED')}
+                      style={{
+                        padding: '0.4rem 0.65rem',
+                        borderRadius: '6px',
+                        border: dashboardFilter === 'LIVE_TRANSFERRED' ? '1px solid #06b6d4' : '1px solid rgba(255, 255, 255, 0.06)',
+                        backgroundColor: dashboardFilter === 'LIVE_TRANSFERRED' ? 'rgba(6, 182, 212, 0.2)' : 'rgba(255, 255, 255, 0.02)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontSize: '0.78rem', color: dashboardFilter === 'LIVE_TRANSFERRED' ? '#06b6d4' : 'var(--text-secondary)' }}>🔀 Transferred Live</div>
+                        <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Hot caller transferred</div>
+                      </div>
+                      <span style={{ fontSize: '0.82rem', fontWeight: '700', color: '#06b6d4', fontFamily: 'var(--mono)' }}>{liveTransferredCount}</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -3898,6 +5030,12 @@ export default function App() {
                     {(dashboardFilter === CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID || dashboardFilter === 'WRONG_NUMBER') && '⚠️ Wrong Number / Invalid Contacts'}
                     {(dashboardFilter === CALL_OUTCOME_STATUS.NOT_ANSWERED || dashboardFilter === 'UNANSWERED') && '❌ Recipient List: Missed / Unanswered'}
                     {dashboardFilter === 'COUNSELOR_FOLLOWUP' && '☎️ Leads Requiring Counsellor Follow-up'}
+                    {dashboardFilter === 'GRAD_FINAL_YEAR' && '🎓 Final Year Graduating Students'}
+                    {dashboardFilter === 'GRAD_COMPLETED' && '📜 Completed Degree Graduates'}
+                    {dashboardFilter === 'TIMELINE_IMMEDIATE' && '⚡ Immediate (2026 Intake) Candidates'}
+                    {dashboardFilter === 'TIMELINE_NEXT_YEAR' && '📅 Future / Next Year (2027) Prospects'}
+                    {dashboardFilter === 'EXAM_MENTIONED' && '📝 Candidates With Entrance Exam Discussed'}
+                    {dashboardFilter === 'LIVE_TRANSFERRED' && '🔀 Leads Live Transferred to Counsellor'}
                   </h2>
                   <span className="status-pill completed" style={{ fontSize: '0.8rem' }}>
                     {finalDashboardList.length} / {mergedCalls.length} Leads
@@ -3939,10 +5077,8 @@ export default function App() {
                         <th>Student Profile</th>
                         <th>University</th>
                         <th>Call Date & Duration</th>
-                        <th>Application Status</th>
-                        <th>Interest Level</th>
-                        <th>Counsellor Follow-up</th>
-                        <th>Academic Preferences</th>
+                        <th>Lead Outcome</th>
+                        <th>AI Feedback & Signals</th>
                         <th>Actions</th>
                       </tr>
                     </thead>
@@ -3962,12 +5098,28 @@ export default function App() {
                             <td>
                               <div style={{ fontWeight: '700', fontSize: '0.92rem', color: 'var(--text-primary)' }}>{call.studentName}</div>
                               <div style={{ fontSize: '0.8rem', color: '#a5b4fc', fontFamily: 'var(--mono)' }}>{call.contactNumber}</div>
+                              {(call.course || call.program) && (call.course !== '—' || call.program !== '—') && (
+                                <div style={{ marginTop: '0.25rem' }}>
+                                  <span style={{
+                                    fontSize: '0.7rem',
+                                    fontWeight: '600',
+                                    padding: '0.12rem 0.45rem',
+                                    borderRadius: '4px',
+                                    backgroundColor: 'rgba(99, 102, 241, 0.12)',
+                                    color: '#a5b4fc',
+                                    border: '1px solid rgba(99, 102, 241, 0.25)',
+                                    display: 'inline-block'
+                                  }}>
+                                    📚 {call.course && call.course !== '—' ? call.course : call.program}
+                                  </span>
+                                </div>
+                              )}
                               {call.email && call.email !== '—' && (
-                                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{call.email}</div>
+                                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>{call.email}</div>
                               )}
                             </td>
 
-                            {/* 2. University (Product-level Dynamic Mapping) */}
+                            {/* 2. University */}
                             <td>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                                 <span className="college-badge" style={{ fontSize: '0.78rem', whiteSpace: 'nowrap' }}>
@@ -3979,7 +5131,7 @@ export default function App() {
                               </div>
                             </td>
 
-                            {/* 3. Call Date/Time & Duration */}
+                            {/* 3. Call Date & Duration */}
                             <td>
                               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', fontSize: '0.82rem' }}>
                                 <span style={{ fontWeight: '600', color: 'var(--text-primary)' }}>
@@ -3993,91 +5145,189 @@ export default function App() {
                               </div>
                             </td>
 
-                            {/* 4. Application Status (WhatsApp admission link state) */}
+                            {/* 4. Lead Outcome */}
                             <td>
-                              {primaryStatus === CALL_OUTCOME_STATUS.APPLICATION_SENT ? (
-                                <span
-                                  style={{
-                                    fontSize: '0.74rem',
-                                    fontWeight: '800',
-                                    width: 'fit-content',
-                                    backgroundColor: 'rgba(6, 182, 212, 0.15)',
-                                    color: '#06b6d4',
-                                    border: '1px solid rgba(6, 182, 212, 0.25)',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '0.35rem',
-                                    padding: '0.25rem 0.65rem',
-                                    borderRadius: '6px'
-                                  }}
-                                >
-                                  <span>📩</span>
-                                  <span>Submitted</span>
-                                </span>
-                              ) : (
-                                <span
-                                  style={{
-                                    fontSize: '0.74rem',
-                                    fontWeight: '800',
-                                    width: 'fit-content',
-                                    backgroundColor: 'rgba(148, 163, 184, 0.15)',
-                                    color: '#94a3b8',
-                                    border: '1px solid rgba(148, 163, 184, 0.25)',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '0.35rem',
-                                    padding: '0.25rem 0.65rem',
-                                    borderRadius: '6px'
-                                  }}
-                                >
-                                  <span>⏳</span>
-                                  <span>Pending</span>
-                                </span>
-                              )}
-                            </td>
-
-                            {/* 5. Interest Level (pure transcript verdict) */}
-                            <td>
-                              <span style={{
-                                fontSize: '0.82rem',
-                                fontWeight: '700',
-                                color: isInterestedLead(call) ? '#4ade80' : '#f87171'
-                              }}>
-                                {isInterestedLead(call) ? 'Interested' : 'Not Interested'}
+                              <span
+                                style={{
+                                  fontSize: '0.78rem',
+                                  fontWeight: '700',
+                                  backgroundColor: statusInfo.bg,
+                                  color: statusInfo.color,
+                                  border: `1px solid ${statusInfo.border}`,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.35rem',
+                                  padding: '0.25rem 0.65rem',
+                                  borderRadius: '6px',
+                                  whiteSpace: 'nowrap'
+                                }}
+                              >
+                                <span>{statusInfo.icon}</span>
+                                <span>{statusInfo.label}</span>
                               </span>
                             </td>
 
-                            {/* 6. Counsellor Follow-up (Secondary Metric) */}
+                            {/* 5. AI Feedback & Signals */}
                             <td>
-                              {isCounselorReq ? (
-                                <span style={{
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '0.25rem',
-                                  fontSize: '0.74rem',
-                                  fontWeight: '700',
-                                  padding: '0.2rem 0.55rem',
-                                  borderRadius: '4px',
-                                  backgroundColor: 'rgba(45, 212, 191, 0.15)',
-                                  color: '#2dd4bf',
-                                  border: '1px solid rgba(45, 212, 191, 0.3)'
-                                }}>
-                                  ✓ Required
-                                </span>
-                              ) : (
-                                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>No</span>
-                              )}
+                              {(() => {
+                                const rf = call.rawFields || {};
+                                const isFlagYes = (v) => {
+                                  if (v === true) return true;
+                                  if (!v) return false;
+                                  const s = String(v).trim().toLowerCase();
+                                  return s === 'yes' || s === 'true' || s === '1' || s === 'required';
+                                };
+                                const signals = [];
+
+                                // Application Sent
+                                if (isFlagYes(rf.application_sent || rf['Application Sent']) || primaryStatus === CALL_OUTCOME_STATUS.APPLICATION_SENT || isApplicationSent(call)) {
+                                  signals.push({
+                                    id: 'app_sent',
+                                    icon: '📩',
+                                    label: 'App Sent',
+                                    bg: 'rgba(6, 182, 212, 0.15)',
+                                    color: '#06b6d4',
+                                    border: 'rgba(6, 182, 212, 0.35)'
+                                  });
+                                }
+
+                                // Counsellor Follow-up
+                                if (isFlagYes(rf.counsellor_follow_up || rf.counselor_follow_up || rf.counselor_followup) || isCounselorReq) {
+                                  signals.push({
+                                    id: 'counsellor',
+                                    icon: '☎️',
+                                    label: 'Counsellor Req',
+                                    bg: 'rgba(45, 212, 191, 0.15)',
+                                    color: '#2dd4bf',
+                                    border: 'rgba(45, 212, 191, 0.35)'
+                                  });
+                                }
+
+                                // Call Transferred Live
+                                if (isFlagYes(rf.call_transfered_status || rf.call_transferred_status || call.transferStatus)) {
+                                  signals.push({
+                                    id: 'transferred',
+                                    icon: '🔀',
+                                    label: 'Transferred',
+                                    bg: 'rgba(168, 85, 247, 0.15)',
+                                    color: '#c084fc',
+                                    border: 'rgba(168, 85, 247, 0.35)'
+                                  });
+                                }
+
+                                // Admission Timeline (Future vs Immediate)
+                                const timeline = String(rf.admission_timeline || rf.timeline || '').toLowerCase();
+                                if (timeline.includes('next') || timeline.includes('future') || timeline.includes('2027')) {
+                                  signals.push({
+                                    id: 'timeline_next',
+                                    icon: '⏳',
+                                    label: 'Next Year (2027)',
+                                    bg: 'rgba(245, 158, 11, 0.15)',
+                                    color: '#fbbf24',
+                                    border: 'rgba(245, 158, 11, 0.35)'
+                                  });
+                                } else if (timeline.includes('immediate') || timeline.includes('this') || timeline.includes('2026')) {
+                                  signals.push({
+                                    id: 'timeline_now',
+                                    icon: '🚀',
+                                    label: 'Immediate (2026)',
+                                    bg: 'rgba(16, 185, 129, 0.15)',
+                                    color: '#34d399',
+                                    border: 'rgba(16, 185, 129, 0.35)'
+                                  });
+                                }
+
+                                // Already Applied / Joined
+                                if (isFlagYes(rf.already_applied || rf['Already Applied']) && primaryStatus !== CALL_OUTCOME_STATUS.ALREADY_APPLIED) {
+                                  signals.push({
+                                    id: 'already_applied',
+                                    icon: '📝',
+                                    label: 'Already Applied',
+                                    bg: 'rgba(56, 189, 248, 0.15)',
+                                    color: '#38bdf8',
+                                    border: 'rgba(56, 189, 248, 0.35)'
+                                  });
+                                }
+                                if (isFlagYes(rf.already_joined || rf['Already Joined']) && primaryStatus !== CALL_OUTCOME_STATUS.ALREADY_JOINED) {
+                                  signals.push({
+                                    id: 'already_joined',
+                                    icon: '🎓',
+                                    label: 'Already Enrolled',
+                                    bg: 'rgba(168, 85, 247, 0.15)',
+                                    color: '#a855f7',
+                                    border: 'rgba(168, 85, 247, 0.35)'
+                                  });
+                                }
+
+                                // Entrance Exam (e.g. CAT, GATE, ICET)
+                                const exam = String(rf.entrance_exam || rf.entrance || rf.exam || '').trim();
+                                if (exam && exam !== '—' && exam !== 'NA' && exam.toLowerCase() !== 'none' && exam.toLowerCase() !== 'not provided') {
+                                  signals.push({
+                                    id: 'exam',
+                                    icon: '🎯',
+                                    label: exam.length > 14 ? exam.slice(0, 12) + '...' : exam,
+                                    bg: 'rgba(99, 102, 241, 0.15)',
+                                    color: '#818cf8',
+                                    border: 'rgba(99, 102, 241, 0.35)'
+                                  });
+                                }
+
+                                // Graduation Status
+                                const grad = String(rf.graduation_status || rf.graduation || '').trim();
+                                if (grad && grad !== '—' && grad !== 'NA' && grad.toLowerCase() !== 'not provided') {
+                                  const shortGrad = grad.toLowerCase().includes('final') ? 'Final Year' : (grad.toLowerCase().includes('completed') ? 'Grad Completed' : grad);
+                                  signals.push({
+                                    id: 'grad',
+                                    icon: '🎓',
+                                    label: shortGrad,
+                                    bg: 'rgba(148, 163, 184, 0.15)',
+                                    color: '#cbd5e1',
+                                    border: 'rgba(148, 163, 184, 0.3)'
+                                  });
+                                }
+
+                                if (signals.length === 0) {
+                                  if (primaryStatus === CALL_OUTCOME_STATUS.NOT_INTERESTED) {
+                                    return <span style={{ fontSize: '0.76rem', color: '#f87171', fontStyle: 'italic' }}>Declined admission</span>;
+                                  }
+                                  if (primaryStatus === CALL_OUTCOME_STATUS.CALLBACK) {
+                                    return <span style={{ fontSize: '0.76rem', color: '#fbbf24', fontStyle: 'italic' }}>Callback requested</span>;
+                                  }
+                                  if (primaryStatus === CALL_OUTCOME_STATUS.NOT_ANSWERED) {
+                                    return <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Unanswered / Voicemail</span>;
+                                  }
+                                  return <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>—</span>;
+                                }
+
+                                return (
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', maxWidth: '320px' }}>
+                                    {signals.map((sig) => (
+                                      <span
+                                        key={sig.id}
+                                        style={{
+                                          fontSize: '0.72rem',
+                                          fontWeight: '700',
+                                          padding: '0.2rem 0.5rem',
+                                          borderRadius: '4px',
+                                          backgroundColor: sig.bg,
+                                          color: sig.color,
+                                          border: `1px solid ${sig.border}`,
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '0.25rem',
+                                          whiteSpace: 'nowrap'
+                                        }}
+                                      >
+                                        <span>{sig.icon}</span>
+                                        <span>{sig.label}</span>
+                                      </span>
+                                    ))}
+                                  </div>
+                                );
+                              })()}
                             </td>
 
-                            {/* 7. Academic Preferences */}
-                            <td>
-                              <div style={{ fontSize: '0.85rem', fontWeight: '600' }}>{call.program || '—'}</div>
-                              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                                {[call.course, call.preferredState || call.preferredCity].filter(Boolean).join(' • ') || '—'}
-                              </div>
-                            </td>
-
-                            {/* 8. Actions */}
+                            {/* 6. Actions */}
                             <td>
                               <button
                                 className={`btn-detail ${isHot ? 'hot' : statusInfo.class}`}
@@ -4628,6 +5878,714 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 1: CAMPAIGN RECIPIENT STUDENT TABLE MODAL */}
+      {selectedCampaignDetail && (
+        <div
+          className="modal-overlay"
+          style={{
+            zIndex: 3500,
+            backgroundColor: 'rgba(15, 23, 42, 0.55)',
+            backdropFilter: 'blur(6px)'
+          }}
+          onClick={() => {
+            setSelectedCampaignDetail(null);
+            if (!cameFromPastCampaignsModal) setShowPastCampaignsModal(false);
+          }}
+        >
+          <div
+            className="modal-content"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: '1050px',
+              width: '95%',
+              maxHeight: '92vh',
+              display: 'flex',
+              flexDirection: 'column',
+              padding: '1.5rem',
+              backgroundColor: '#ffffff',
+              color: '#0f172a',
+              borderRadius: '16px',
+              border: '1px solid #e2e8f0',
+              boxShadow: '0 25px 60px -15px rgba(15, 23, 42, 0.3)'
+            }}
+          >
+            {/* Modal Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #e2e8f0', paddingBottom: '1rem', marginBottom: '1rem' }}>
+              <div>
+                {cameFromPastCampaignsModal && (
+                  <button
+                    type="button"
+                    style={{
+                      background: '#f1f5f9',
+                      border: '1px solid #cbd5e1',
+                      borderRadius: '8px',
+                      padding: '0.35rem 0.75rem',
+                      fontSize: '0.82rem',
+                      fontWeight: '700',
+                      color: '#1e293b',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      marginBottom: '0.65rem'
+                    }}
+                    onClick={() => setSelectedCampaignDetail(null)}
+                  >
+                    ← Back to Campaigns
+                  </button>
+                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: '800', color: '#1b3b6f' }}>
+                    📢 {selectedCampaignDetail.name}
+                  </h3>
+                  <span
+                    style={{
+                      fontSize: '0.72rem',
+                      fontWeight: '700',
+                      padding: '0.2rem 0.55rem',
+                      borderRadius: '6px',
+                      textTransform: 'uppercase',
+                      backgroundColor: selectedCampaignDetail.status === 'in-progress' ? '#eff6ff' : '#ecfdf5',
+                      color: selectedCampaignDetail.status === 'in-progress' ? '#1d4ed8' : '#047857',
+                      border: selectedCampaignDetail.status === 'in-progress' ? '1px solid #bfdbfe' : '1px solid #a7f3d0'
+                    }}
+                  >
+                    {(selectedCampaignDetail.status || 'completed').toUpperCase()}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', marginTop: '0.4rem', fontSize: '0.82rem', color: '#64748b' }}>
+                  <span style={{ backgroundColor: '#f1f5f9', color: '#1b3b6f', padding: '0.15rem 0.5rem', borderRadius: '4px', fontWeight: '600', border: '1px solid #e2e8f0' }}>
+                    🎓 {selectedCampaignDetail.universityName}
+                  </span>
+                  {selectedCampaignDetail.course && (
+                    <span style={{ backgroundColor: '#f0fdf4', color: '#15803d', padding: '0.15rem 0.5rem', borderRadius: '4px', fontWeight: '600', border: '1px solid #bbf7d0' }}>
+                      📚 {selectedCampaignDetail.course}
+                    </span>
+                  )}
+                  <span>🕒 Started: <strong style={{ color: '#334155' }}>{selectedCampaignDetail.startedAt ? new Date(selectedCampaignDetail.startedAt).toLocaleString() : '—'}</strong></span>
+                  <span>👥 Total: <strong style={{ color: '#0f172a' }}>{selectedCampaignDetail.contacts?.length || 0} Contacts</strong></span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                style={{
+                  padding: '0.4rem 0.8rem',
+                  fontSize: '0.85rem',
+                  fontWeight: '600',
+                  borderRadius: '8px',
+                  background: '#f8fafc',
+                  border: '1px solid #cbd5e1',
+                  color: '#475569',
+                  cursor: 'pointer'
+                }}
+                onClick={() => {
+                  setSelectedCampaignDetail(null);
+                  setShowPastCampaignsModal(false);
+                  setCameFromPastCampaignsModal(false);
+                }}
+              >
+                ✕ Close
+              </button>
+            </div>
+
+            {/* Filter & Multi-Select Toolbar */}
+            {(() => {
+              const allContacts = selectedCampaignDetail.contacts || [];
+              const filteredContacts = allContacts.filter(c => {
+                const q = pastCampaignSearch.trim().toLowerCase();
+                const matchesSearch = !q || `${c.name} ${c.phone} ${c.formattedPhone}`.toLowerCase().includes(q);
+                const matchesStatus = campaignContactStatusFilter === 'ALL' || c.status === campaignContactStatusFilter;
+                return matchesSearch && matchesStatus;
+              });
+
+              const allFilteredChecked = filteredContacts.length > 0 && filteredContacts.every(c => campaignCheckedContacts.some(chk => (chk.phone || chk.formattedPhone) === (c.phone || c.formattedPhone)));
+
+              const toggleSelectAll = () => {
+                if (allFilteredChecked) {
+                  // Deselect all filtered
+                  setCampaignCheckedContacts(prev => prev.filter(chk => !filteredContacts.some(c => (c.phone || c.formattedPhone) === (chk.phone || chk.formattedPhone))));
+                } else {
+                  // Select all filtered
+                  const map = new Map();
+                  [...campaignCheckedContacts, ...filteredContacts].forEach(c => {
+                    const key = c.phone || c.formattedPhone;
+                    if (key) map.set(key, c);
+                  });
+                  setCampaignCheckedContacts(Array.from(map.values()));
+                }
+              };
+
+              const toggleContactCheck = (contact) => {
+                const key = contact.phone || contact.formattedPhone;
+                setCampaignCheckedContacts(prev => {
+                  const exists = prev.some(c => (c.phone || c.formattedPhone) === key);
+                  if (exists) {
+                    return prev.filter(c => (c.phone || c.formattedPhone) !== key);
+                  } else {
+                    return [...prev, contact];
+                  }
+                });
+              };
+
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem', backgroundColor: '#f8fafc', padding: '0.85rem 1rem', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                    {/* Search & Status Filter */}
+                    <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap', flex: 1 }}>
+                      <div style={{ position: 'relative', minWidth: '180px', flex: '1 1 200px' }}>
+                        <Search size={14} style={{ position: 'absolute', left: '0.75rem', top: '0.75rem', color: '#94a3b8' }} />
+                        <input
+                          className="form-input"
+                          style={{ fontSize: '0.84rem', padding: '0.45rem 0.6rem 0.45rem 2.2rem', backgroundColor: '#ffffff', border: '1px solid #cbd5e1', color: '#0f172a' }}
+                          placeholder="Search student or phone..."
+                          value={pastCampaignSearch}
+                          onChange={(e) => setPastCampaignSearch(e.target.value)}
+                        />
+                      </div>
+
+                      <select
+                        className="form-input"
+                        style={{ fontSize: '0.84rem', padding: '0.45rem 0.75rem', minWidth: '140px', backgroundColor: '#ffffff', border: '1px solid #cbd5e1', color: '#0f172a' }}
+                        value={campaignContactStatusFilter}
+                        onChange={(e) => setCampaignContactStatusFilter(e.target.value)}
+                      >
+                        <option value="ALL">All Statuses</option>
+                        <option value="completed">Completed / Answered</option>
+                        <option value="no-answer">No Answer</option>
+                        <option value="queued">Queued</option>
+                      </select>
+
+                      <button
+                        type="button"
+                        style={{
+                          fontSize: '0.82rem',
+                          padding: '0.45rem 0.85rem',
+                          backgroundColor: allFilteredChecked ? '#f1f5f9' : '#ffffff',
+                          border: '1px solid #cbd5e1',
+                          borderRadius: '8px',
+                          color: '#1e293b',
+                          fontWeight: '600',
+                          cursor: 'pointer'
+                        }}
+                        onClick={toggleSelectAll}
+                      >
+                        {allFilteredChecked ? 'Deselect All' : `Select All (${filteredContacts.length})`}
+                      </button>
+                    </div>
+
+                    {/* Action: Add to New Campaign & Download */}
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        style={{
+                          fontSize: '0.82rem',
+                          padding: '0.45rem 0.85rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.35rem',
+                          backgroundColor: '#ecfdf5',
+                          border: '1px solid #a7f3d0',
+                          borderRadius: '8px',
+                          color: '#047857',
+                          fontWeight: '600',
+                          cursor: 'pointer'
+                        }}
+                        onClick={() => handleDownloadCampaignExcel(selectedCampaignDetail)}
+                        title="Download formatted Excel report (.xlsx)"
+                      >
+                        <Download size={14} /> Download Excel (.xlsx)
+                      </button>
+
+                      <button
+                        type="button"
+                        style={{
+                          fontSize: '0.82rem',
+                          padding: '0.45rem 0.75rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.35rem',
+                          backgroundColor: '#ffffff',
+                          border: '1px solid #cbd5e1',
+                          borderRadius: '8px',
+                          color: '#475569',
+                          fontWeight: '600',
+                          cursor: 'pointer'
+                        }}
+                        onClick={() => handleDownloadCampaignCsv(selectedCampaignDetail.id, selectedCampaignDetail.name)}
+                        title="Download CSV"
+                      >
+                        <Download size={14} /> CSV
+                      </button>
+
+                      <button
+                        type="button"
+                        style={{
+                          fontSize: '0.85rem',
+                          padding: '0.5rem 1.15rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.45rem',
+                          backgroundColor: campaignCheckedContacts.length > 0 ? '#F16522' : '#cbd5e1',
+                          border: 'none',
+                          borderRadius: '8px',
+                          color: '#ffffff',
+                          fontWeight: '700',
+                          cursor: campaignCheckedContacts.length > 0 ? 'pointer' : 'not-allowed',
+                          boxShadow: campaignCheckedContacts.length > 0 ? '0 4px 12px rgba(241, 101, 34, 0.25)' : 'none'
+                        }}
+                        disabled={campaignCheckedContacts.length === 0}
+                        onClick={() => handleLoadContactsToNewCampaign(campaignCheckedContacts)}
+                      >
+                        <Plus size={15} /> Add Selected ({campaignCheckedContacts.length}) to New Campaign
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Student Table */}
+                  <div style={{ flex: 1, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '10px', backgroundColor: '#ffffff' }}>
+                    <table style={{ fontSize: '0.84rem', margin: 0, width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ position: 'sticky', top: 0, zIndex: 2, backgroundColor: '#f1f5f9', borderBottom: '2px solid #e2e8f0' }}>
+                          <th style={{ width: '40px', textAlign: 'center', padding: '0.65rem 0.5rem' }}>
+                            <input
+                              type="checkbox"
+                              checked={allFilteredChecked}
+                              onChange={toggleSelectAll}
+                              style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                            />
+                          </th>
+                          <th style={{ width: '50px', padding: '0.65rem 0.75rem', textAlign: 'left', color: '#475569', fontWeight: '700' }}>#</th>
+                          <th style={{ padding: '0.65rem 0.75rem', textAlign: 'left', color: '#475569', fontWeight: '700' }}>Student Name</th>
+                          <th style={{ padding: '0.65rem 0.75rem', textAlign: 'left', color: '#475569', fontWeight: '700' }}>Phone Number</th>
+                          <th style={{ padding: '0.65rem 0.75rem', textAlign: 'left', color: '#475569', fontWeight: '700' }}>Course</th>
+                          <th style={{ padding: '0.65rem 0.75rem', textAlign: 'left', color: '#475569', fontWeight: '700' }}>Call Outcome</th>
+                          <th style={{ padding: '0.65rem 0.75rem', textAlign: 'left', color: '#475569', fontWeight: '700' }}>Duration</th>
+                          <th style={{ textAlign: 'right', padding: '0.65rem 0.75rem', color: '#475569', fontWeight: '700' }}>Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredContacts.length === 0 ? (
+                          <tr>
+                            <td colSpan={8} style={{ textAlign: 'center', padding: '3rem 1rem', color: '#64748b' }}>
+                              No contacts matched search or filter.
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredContacts.map((contact, idx) => {
+                            const isChecked = campaignCheckedContacts.some(chk => (chk.phone || chk.formattedPhone) === (contact.phone || contact.formattedPhone));
+
+                            return (
+                              <tr
+                                key={contact.id || `${contact.phone}-${idx}`}
+                                style={{
+                                  backgroundColor: isChecked ? '#eff6ff' : (idx % 2 === 0 ? '#ffffff' : '#fcfcfd'),
+                                  borderBottom: '1px solid #f1f5f9',
+                                  transition: 'background-color 0.15s ease'
+                                }}
+                              >
+                                <td style={{ textAlign: 'center', padding: '0.6rem 0.5rem' }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={() => toggleContactCheck(contact)}
+                                    style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                                  />
+                                </td>
+                                <td style={{ padding: '0.6rem 0.75rem', color: '#64748b', fontWeight: '600' }}>{idx + 1}</td>
+                                <td style={{ padding: '0.6rem 0.75rem' }}>
+                                  <strong style={{ color: '#0f172a' }}>{contact.name || 'Student'}</strong>
+                                </td>
+                                <td style={{ padding: '0.6rem 0.75rem', fontFamily: 'var(--mono)', color: '#2563eb', fontWeight: '700' }}>
+                                  {contact.formattedPhone || contact.phone}
+                                </td>
+                                <td style={{ padding: '0.6rem 0.75rem' }}>
+                                  <span style={{ fontSize: '0.78rem', color: '#475569', fontWeight: '500' }}>
+                                    {contact.course || selectedCampaignDetail.course || '—'}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '0.6rem 0.75rem' }}>
+                                  <span
+                                    style={{
+                                      fontSize: '0.72rem',
+                                      fontWeight: '700',
+                                      padding: '0.2rem 0.55rem',
+                                      borderRadius: '6px',
+                                      display: 'inline-block',
+                                      backgroundColor: contact.status === 'completed' ? '#ecfdf5' : (contact.status === 'no-answer' ? '#fff1f2' : '#f8fafc'),
+                                      color: contact.status === 'completed' ? '#047857' : (contact.status === 'no-answer' ? '#e11d48' : '#64748b'),
+                                      border: contact.status === 'completed' ? '1px solid #a7f3d0' : (contact.status === 'no-answer' ? '1px solid #fecdd3' : '1px solid #e2e8f0')
+                                    }}
+                                  >
+                                    {contact.callOutcome || (contact.status === 'completed' ? 'Completed' : (contact.status === 'no-answer' ? 'No Answer' : 'Queued'))}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '0.6rem 0.75rem', fontFamily: 'var(--mono)', fontSize: '0.78rem', color: '#64748b' }}>
+                                  {contact.callDuration || '—'}
+                                </td>
+                                <td style={{ textAlign: 'right', padding: '0.6rem 0.75rem' }}>
+                                  <button
+                                    type="button"
+                                    style={{
+                                      fontSize: '0.76rem',
+                                      padding: '0.3rem 0.75rem',
+                                      borderRadius: '6px',
+                                      fontWeight: '700',
+                                      cursor: 'pointer',
+                                      border: isChecked ? '1px solid #10b981' : '1px solid #cbd5e1',
+                                      backgroundColor: isChecked ? '#ecfdf5' : '#ffffff',
+                                      color: isChecked ? '#047857' : '#1e293b',
+                                      transition: 'all 0.15s ease'
+                                    }}
+                                    onClick={() => toggleContactCheck(contact)}
+                                    title={isChecked ? 'Click to deselect' : 'Click to select contact'}
+                                  >
+                                    {isChecked ? '✓ Selected' : '+ Select'}
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Modal Footer Bottom */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem', paddingTop: '0.85rem', borderTop: '1px solid #e2e8f0', flexWrap: 'wrap', gap: '0.75rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <span style={{ fontSize: '0.85rem', color: '#475569' }}>
+                        Selected <strong style={{ color: '#F16522', fontSize: '1rem' }}>{campaignCheckedContacts.length}</strong> of {allContacts.length} recipients
+                      </span>
+                      {campaignCheckedContacts.length > 0 && (
+                        <button
+                          type="button"
+                          style={{ fontSize: '0.78rem', color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+                          onClick={() => setCampaignCheckedContacts([])}
+                        >
+                          Clear Selection
+                        </button>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '0.6rem' }}>
+                      <button
+                        type="button"
+                        style={{
+                          padding: '0.55rem 1rem',
+                          borderRadius: '8px',
+                          border: '1px solid #cbd5e1',
+                          backgroundColor: '#f8fafc',
+                          color: '#475569',
+                          fontWeight: '600',
+                          fontSize: '0.85rem',
+                          cursor: 'pointer'
+                        }}
+                        onClick={() => {
+                          setSelectedCampaignDetail(null);
+                          if (!cameFromPastCampaignsModal) setShowPastCampaignsModal(false);
+                        }}
+                      >
+                        {cameFromPastCampaignsModal ? 'Back to Campaigns' : 'Close'}
+                      </button>
+
+                      <button
+                        type="button"
+                        style={{
+                          padding: '0.55rem 1.4rem',
+                          borderRadius: '8px',
+                          border: 'none',
+                          backgroundColor: campaignCheckedContacts.length > 0 ? '#F16522' : '#cbd5e1',
+                          color: '#ffffff',
+                          fontWeight: '700',
+                          fontSize: '0.9rem',
+                          cursor: campaignCheckedContacts.length > 0 ? 'pointer' : 'not-allowed',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.45rem',
+                          boxShadow: campaignCheckedContacts.length > 0 ? '0 4px 12px rgba(241, 101, 34, 0.25)' : 'none'
+                        }}
+                        disabled={campaignCheckedContacts.length === 0}
+                        onClick={() => handleLoadContactsToNewCampaign(campaignCheckedContacts)}
+                      >
+                        <ArrowRight size={16} /> Stage Selected ({campaignCheckedContacts.length}) to Step 2
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: BROWSE EXISTING CAMPAIGNS TO ADD TO NEW CAMPAIGN */}
+      {showPastCampaignsModal && (
+        <div
+          className="modal-overlay"
+          style={{ zIndex: 2500, backgroundColor: 'rgba(15, 23, 42, 0.45)', backdropFilter: 'blur(5px)' }}
+          onClick={() => setShowPastCampaignsModal(false)}
+        >
+          <div
+            className="modal-content"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: '960px',
+              width: '95%',
+              maxHeight: '90vh',
+              display: 'flex',
+              flexDirection: 'column',
+              padding: '1.75rem',
+              backgroundColor: '#ffffff',
+              color: '#0f172a',
+              borderRadius: '16px',
+              border: '1px solid #e2e8f0',
+              boxShadow: '0 25px 60px -15px rgba(15, 23, 42, 0.25)'
+            }}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid #e2e8f0', paddingBottom: '1rem', marginBottom: '1rem' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.25rem', fontWeight: '800', color: '#1b3b6f', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <FolderOpen size={22} style={{ color: '#F16522' }} /> Choose from Existing Campaigns
+                </h3>
+                <p style={{ margin: '0.25rem 0 0', fontSize: '0.84rem', color: '#64748b' }}>
+                  Select past campaigns to inspect contacts or load recipients directly into Step 2 for sequential calling.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                style={{
+                  padding: '0.4rem 0.8rem',
+                  fontSize: '0.85rem',
+                  fontWeight: '600',
+                  borderRadius: '8px',
+                  background: '#f8fafc',
+                  border: '1px solid #cbd5e1',
+                  color: '#475569',
+                  cursor: 'pointer'
+                }}
+                onClick={() => setShowPastCampaignsModal(false)}
+              >
+                ✕ Close
+              </button>
+            </div>
+
+            {/* Filter toolbar */}
+            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+              <div style={{ position: 'relative', flex: '1 1 240px', minWidth: '200px' }}>
+                <Search size={15} style={{ position: 'absolute', left: '0.8rem', top: '0.75rem', color: '#94a3b8' }} />
+                <input
+                  className="form-input"
+                  style={{ paddingLeft: '2.3rem', fontSize: '0.86rem', backgroundColor: '#ffffff', border: '1px solid #cbd5e1', color: '#0f172a' }}
+                  placeholder="Search campaigns..."
+                  value={pastCampaignSearch}
+                  onChange={(e) => setPastCampaignSearch(e.target.value)}
+                />
+              </div>
+
+              <select
+                className="form-input"
+                style={{ minWidth: '220px', fontSize: '0.86rem', backgroundColor: '#ffffff', border: '1px solid #cbd5e1', color: '#0f172a' }}
+                value={pastCampaignUniFilter}
+                onChange={(e) => setPastCampaignUniFilter(e.target.value)}
+              >
+                <option value="ALL">All Universities ({universities.length})</option>
+                {universities.map(u => (
+                  <option key={u.id} value={u.id}>🎓 {u.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Campaign Cards List */}
+            {(() => {
+              const filtered = campaigns.filter(c => {
+                const q = pastCampaignSearch.trim().toLowerCase();
+                const matchesSearch = !q || `${c.name} ${c.universityName} ${c.course}`.toLowerCase().includes(q);
+                const matchesUni = pastCampaignUniFilter === 'ALL' || c.universityId === pastCampaignUniFilter;
+                return matchesSearch && matchesUni;
+              });
+
+              if (filtered.length === 0) {
+                return (
+                  <div style={{ textAlign: 'center', padding: '3.5rem 1rem', color: '#64748b' }}>
+                    <FolderOpen size={44} style={{ margin: '0 auto 0.75rem', opacity: 0.4, color: '#94a3b8' }} />
+                    <p style={{ margin: 0, fontSize: '1rem', fontWeight: '700', color: '#1e293b' }}>No matching campaigns found.</p>
+                    <p style={{ margin: '0.35rem 0 0', fontSize: '0.84rem' }}>Try clearing your search query or university filter.</p>
+                  </div>
+                );
+              }
+
+              return (
+                <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.85rem', paddingRight: '0.3rem' }}>
+                  {filtered.map(camp => {
+                    const contactsCount = camp.contacts?.length || camp.totalCount || 0;
+                    const campStarted = camp.startedAt ? new Date(camp.startedAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+
+                    return (
+                      <div
+                        key={camp.id}
+                        style={{
+                          border: '1px solid #e2e8f0',
+                          borderRadius: '12px',
+                          padding: '1.15rem 1.25rem',
+                          backgroundColor: '#ffffff',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          flexWrap: 'wrap',
+                          gap: '1rem',
+                          boxShadow: '0 2px 6px rgba(0,0,0,0.03)'
+                        }}
+                      >
+                        <div style={{ flex: '1 1 300px', minWidth: '240px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.35rem' }}>
+                            <h4 style={{ margin: 0, fontSize: '1.02rem', fontWeight: '800', color: '#1b3b6f' }}>
+                              📢 {camp.name}
+                            </h4>
+                            <span
+                              style={{
+                                fontSize: '0.68rem',
+                                fontWeight: '700',
+                                padding: '0.15rem 0.5rem',
+                                borderRadius: '4px',
+                                textTransform: 'uppercase',
+                                backgroundColor: camp.status === 'in-progress' ? '#eff6ff' : '#ecfdf5',
+                                color: camp.status === 'in-progress' ? '#1d4ed8' : '#047857',
+                                border: camp.status === 'in-progress' ? '1px solid #bfdbfe' : '1px solid #a7f3d0'
+                              }}
+                            >
+                              {(camp.status || 'completed').toUpperCase()}
+                            </span>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '0.35rem' }}>
+                            <span style={{ fontSize: '0.75rem', fontWeight: '700', color: '#1b3b6f', backgroundColor: '#f1f5f9', padding: '0.15rem 0.5rem', borderRadius: '4px', border: '1px solid #e2e8f0' }}>
+                              🎓 {camp.universityName}
+                            </span>
+                            {camp.course && (
+                              <span style={{ fontSize: '0.75rem', fontWeight: '700', color: '#15803d', backgroundColor: '#f0fdf4', padding: '0.15rem 0.5rem', borderRadius: '4px', border: '1px solid #bbf7d0' }}>
+                                📚 {camp.course}
+                              </span>
+                            )}
+                          </div>
+
+                          <div style={{ fontSize: '0.76rem', color: '#64748b' }}>
+                            🕒 Started: <strong style={{ color: '#334155' }}>{campStarted}</strong> • Total Students: <b style={{ color: '#0f172a' }}>{contactsCount}</b>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            style={{
+                              fontSize: '0.82rem',
+                              padding: '0.5rem 0.95rem',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.4rem',
+                              backgroundColor: '#f8fafc',
+                              border: '1px solid #cbd5e1',
+                              color: '#1e293b',
+                              borderRadius: '8px',
+                              fontWeight: '600',
+                              cursor: 'pointer'
+                            }}
+                            onClick={() => {
+                              setSelectedCampaignDetail(camp);
+                              setCampaignCheckedContacts([]);
+                              setCameFromPastCampaignsModal(true);
+                            }}
+                          >
+                            <span>👁️</span> View & Select Students ({contactsCount})
+                          </button>
+
+                          <button
+                            type="button"
+                            style={{
+                              fontSize: '0.82rem',
+                              padding: '0.5rem 1.1rem',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '0.4rem',
+                              backgroundColor: '#F16522',
+                              border: 'none',
+                              color: '#ffffff',
+                              borderRadius: '8px',
+                              fontWeight: '700',
+                              cursor: 'pointer',
+                              boxShadow: '0 4px 10px rgba(241, 101, 34, 0.2)'
+                            }}
+                            onClick={() => handleLoadContactsToNewCampaign(camp.contacts || [])}
+                          >
+                            <Plus size={14} /> Load All ({contactsCount}) into Step 2
+                          </button>
+
+                          <button
+                            type="button"
+                            style={{
+                              fontSize: '0.82rem',
+                              padding: '0.5rem 0.75rem',
+                              backgroundColor: '#ecfdf5',
+                              border: '1px solid #a7f3d0',
+                              color: '#047857',
+                              borderRadius: '8px',
+                              cursor: 'pointer'
+                            }}
+                            onClick={() => handleDownloadCampaignExcel(camp)}
+                            title="Download Excel (.xlsx)"
+                          >
+                            <Download size={14} />
+                          </button>
+
+                          <button
+                            type="button"
+                            style={{
+                              fontSize: '0.82rem',
+                              padding: '0.5rem 0.75rem',
+                              backgroundColor: '#ffffff',
+                              border: '1px solid #cbd5e1',
+                              color: '#475569',
+                              borderRadius: '8px',
+                              cursor: 'pointer'
+                            }}
+                            onClick={() => handleDownloadCampaignCsv(camp.id, camp.name)}
+                            title="Download CSV"
+                          >
+                            <Download size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+
+            {/* Footer */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem', paddingTop: '0.85rem', borderTop: '1px solid #e2e8f0' }}>
+              <button
+                type="button"
+                style={{
+                  padding: '0.5rem 1.1rem',
+                  fontSize: '0.85rem',
+                  fontWeight: '600',
+                  borderRadius: '8px',
+                  background: '#f8fafc',
+                  border: '1px solid #cbd5e1',
+                  color: '#475569',
+                  cursor: 'pointer'
+                }}
+                onClick={() => setShowPastCampaignsModal(false)}
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

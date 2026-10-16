@@ -555,7 +555,8 @@ body {
 }
 
 /* Modals */
-.modal-overlay {
+.modal-overlay,
+.modal-backdrop {
   position: fixed;
   top: 0;
   left: 0;
@@ -566,7 +567,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 2500;
   padding: 1.5rem;
   animation: fadeIn 0.15s ease-out;
 }
