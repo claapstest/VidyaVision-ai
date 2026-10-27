@@ -88,13 +88,42 @@ export default function App() {
   // Temporary contacts staged before university/delay selection
   const [tempContacts, setTempContacts] = useState([]);
   const [tempInputMode, setTempInputMode] = useState(''); // 'manual' | 'bulk' | 'excel' | 'recent'
+  const [stageRangeStart, setStageRangeStart] = useState(1);
+  const [stageRangeEnd, setStageRangeEnd] = useState('');
+
+  // Dynamically calculate effective range of contacts to stage (1-based user indices)
+  const getStageRangeData = () => {
+    const total = tempContacts.length;
+    if (total === 0) return { start: 1, end: 0, count: 0, list: [], startRow: 2, endRow: 2 };
+
+    let s = parseInt(stageRangeStart, 10);
+    if (isNaN(s) || s < 1) s = 1;
+    if (s > total) s = total;
+
+    let e = parseInt(stageRangeEnd, 10);
+    if (isNaN(e) || e < s) e = total;
+    if (e > total) e = total;
+
+    const list = tempContacts.slice(s - 1, e);
+    const firstItem = tempContacts[s - 1];
+    const lastItem = tempContacts[e - 1];
+
+    return {
+      start: s,
+      end: e,
+      count: list.length,
+      list,
+      startRow: firstItem?.excelRow || (firstItem?.originalIndex ? firstItem.originalIndex + 1 : s + 1),
+      endRow: lastItem?.excelRow || (lastItem?.originalIndex ? lastItem.originalIndex + 1 : e + 1)
+    };
+  };
   // Recently used contacts (persisted): re-add past numbers to call again, e.g. with another college
   const getInitialRecent = () => {
     try {
       const raw = localStorage.getItem('vv_recent_contacts');
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) return parsed.slice(0, 50);
-    } catch (e) {}
+    } catch (e) { }
     return [];
   };
   const [recentContacts, setRecentContacts] = useState(getInitialRecent);
@@ -139,7 +168,7 @@ export default function App() {
         }
       });
       const next = Array.from(seen.values()).slice(0, 50);
-      try { localStorage.setItem('vv_recent_contacts', JSON.stringify(next)); } catch (e) {}
+      try { localStorage.setItem('vv_recent_contacts', JSON.stringify(next)); } catch (e) { }
       return next;
     });
   };
@@ -177,14 +206,14 @@ export default function App() {
 
   // Recently uploaded Excel/CSV files (parsed contacts kept, so any file can be
   // re-loaded later to call with another college without re-uploading)
-  const RECENT_FILES_MAX = 5;
-  const RECENT_FILE_CONTACTS_MAX = 300;
+  const RECENT_FILES_MAX = 8;
+  const RECENT_FILE_CONTACTS_MAX = 5000;
   const getInitialRecentFiles = () => {
     try {
       const raw = localStorage.getItem('vv_recent_files');
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) return parsed.slice(0, RECENT_FILES_MAX);
-    } catch (e) {}
+    } catch (e) { }
     return [];
   };
   const [recentFiles, setRecentFiles] = useState(getInitialRecentFiles);
@@ -193,12 +222,33 @@ export default function App() {
     if (!entry || !entry.fileName) return;
     setRecentFiles(prev => {
       const next = [{ ...entry, id: `file-${Date.now()}` }, ...prev.filter(f => f.fileName !== entry.fileName)].slice(0, RECENT_FILES_MAX);
-      try { localStorage.setItem('vv_recent_files', JSON.stringify(next)); } catch (e) {}
+      try { localStorage.setItem('vv_recent_files', JSON.stringify(next)); } catch (e) { }
       return next;
     });
   };
 
-  const handleLoadRecentFile = (file) => {
+  const updateRecentFileProgress = (fileName, completedCount) => {
+    if (!fileName || !completedCount) return;
+    setRecentFiles(prev => {
+      let changed = false;
+      const updated = prev.map(f => {
+        if (f.fileName === fileName) {
+          if ((f.lastCompletedIndex || 0) < completedCount) {
+            changed = true;
+            return { ...f, lastCompletedIndex: completedCount };
+          }
+        }
+        return f;
+      });
+      if (changed) {
+        try { localStorage.setItem('vv_recent_files', JSON.stringify(updated)); } catch (e) { }
+        return updated;
+      }
+      return prev;
+    });
+  };
+
+  const handleLoadRecentFile = (file, customStart = 1, customEnd = null) => {
     if (!file || !Array.isArray(file.contacts) || file.contacts.length === 0) {
       addToast('This saved file has no contacts left.', 'error');
       return;
@@ -207,6 +257,8 @@ export default function App() {
       const formatted = validatePhone(r.phone || r.formattedPhone);
       return formatted ? {
         id: `recentfile-${Date.now()}-${i}`,
+        originalIndex: r.originalIndex !== undefined ? r.originalIndex : (i + 1),
+        excelRow: r.excelRow !== undefined ? r.excelRow : (i + 2),
         phone: String(r.phone || '').replace(/\D/g, ''),
         formattedPhone: formatted,
         name: (r.name || '').trim(),
@@ -225,19 +277,28 @@ export default function App() {
     }
     setTempContacts(valid);
     setTempInputMode('excel');
+    const s = Math.max(1, Math.min(valid.length, parseInt(customStart, 10) || 1));
+    const e = customEnd ? Math.max(s, Math.min(valid.length, parseInt(customEnd, 10) || valid.length)) : valid.length;
+    setStageRangeStart(s);
+    setStageRangeEnd(e);
     setUploadedFileInfo({
       fileName: file.fileName,
       fileSize: file.fileSize || '',
       count: valid.length,
-      uploadedAt: file.uploadedAt ? new Date(file.uploadedAt).toLocaleTimeString() : new Date().toLocaleTimeString()
+      uploadedAt: file.uploadedAt ? new Date(file.uploadedAt).toLocaleTimeString() : new Date().toLocaleTimeString(),
+      lastCompletedIndex: file.lastCompletedIndex || 0
     });
-    addToast(`Loaded ${valid.length} contacts from ${file.fileName}! Select college and delay in Step 2.`, 'success');
+    if (s > 1) {
+      addToast(`Loaded ${valid.length} contacts from ${file.fileName} — Range pre-selected from #${s} to #${e} (Excel Row ${valid[s - 1]?.excelRow || (s + 1)})!`, 'success');
+    } else {
+      addToast(`Loaded ${valid.length} contacts from ${file.fileName}! Select college and range in Step 2.`, 'success');
+    }
   };
 
   const handleDeleteRecentFile = (id) => {
     setRecentFiles(prev => {
       const next = prev.filter(f => f.id !== id);
-      try { localStorage.setItem('vv_recent_files', JSON.stringify(next)); } catch (e) {}
+      try { localStorage.setItem('vv_recent_files', JSON.stringify(next)); } catch (e) { }
       return next;
     });
   };
@@ -394,7 +455,7 @@ export default function App() {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
-    } catch (e) {}
+    } catch (e) { }
     return DEFAULT_COLLEGES;
   };
 
@@ -421,7 +482,7 @@ export default function App() {
       setUniversities(items);
       try {
         localStorage.setItem('vv_colleges_cache', JSON.stringify(items));
-      } catch (e) {}
+      } catch (e) { }
     }
   };
 
@@ -885,6 +946,8 @@ export default function App() {
           if (formatted) {
             parsedContacts.push({
               id: `excel-${Date.now()}-${i}`,
+              originalIndex: parsedContacts.length + 1,
+              excelRow: i + 1,
               phone: rawPhone.replace(/\D/g, ''),
               formattedPhone: formatted,
               name: rawName.trim(),
@@ -904,18 +967,24 @@ export default function App() {
         } else {
           setTempContacts(parsedContacts);
           setTempInputMode('excel');
+          setStageRangeStart(1);
+          setStageRangeEnd(parsedContacts.length);
           setUploadedFileInfo({
             fileName: file.name,
             fileSize: (file.size / 1024).toFixed(1) + ' KB',
             count: parsedContacts.length,
-            uploadedAt: new Date().toLocaleTimeString()
+            uploadedAt: new Date().toLocaleTimeString(),
+            lastCompletedIndex: 0
           });
           pushRecentFile({
             fileName: file.name,
             fileSize: (file.size / 1024).toFixed(1) + ' KB',
             count: parsedContacts.length,
             uploadedAt: new Date().toISOString(),
+            lastCompletedIndex: 0,
             contacts: parsedContacts.slice(0, RECENT_FILE_CONTACTS_MAX).map(c => ({
+              originalIndex: c.originalIndex,
+              excelRow: c.excelRow,
               phone: c.phone,
               formattedPhone: c.formattedPhone,
               name: c.name,
@@ -1108,8 +1177,15 @@ export default function App() {
       return;
     }
 
+    const rangeData = getStageRangeData();
+    const contactsToStage = rangeData.list;
+    if (contactsToStage.length === 0) {
+      addToast('No contacts found in selected range.', 'error');
+      return;
+    }
+
     const targetCourse = selectedCourse || '';
-    const enrichedContacts = tempContacts.map(c => {
+    const enrichedContacts = contactsToStage.map(c => {
       const contactCourse = c.course || targetCourse;
       const contactAgentId = isUgCourse(contactCourse) ? 270740 : (uni.agentId || 270604);
       return {
@@ -1126,7 +1202,64 @@ export default function App() {
     setTempContacts([]);
     setTempInputMode('');
     pushRecentContacts(enrichedContacts.map(c => ({ ...c, usedAt: new Date().toISOString() })));
-    addToast(`Successfully staged ${tempContacts.length} contacts for ${uni.name}!`, 'success');
+    const rangeMsg = (rangeData.start > 1 || rangeData.end < tempContacts.length)
+      ? `Staged ${contactsToStage.length} contacts (#${rangeData.start} to #${rangeData.end}, Excel Rows #${rangeData.startRow} to #${rangeData.endRow}) for ${uni.name}!`
+      : `Successfully staged all ${contactsToStage.length} contacts for ${uni.name}!`;
+    addToast(rangeMsg, 'success');
+  };
+
+  // Stage remaining uncalled contacts from active queue
+  const handleStageRemainingContacts = () => {
+    if (!activeQueue || activeQueue.length === 0) {
+      addToast('No campaign contacts available to stage.', 'warning');
+      return;
+    }
+
+    let uncalled = activeQueue.filter(q => q.status === 'queued' || q.status === 'canceled');
+    if (uncalled.length === 0 && campaignState.completedCount < activeQueue.length) {
+      uncalled = activeQueue.slice(campaignState.completedCount);
+    }
+
+    if (uncalled.length === 0) {
+      addToast('All contacts in this campaign have already been dialed!', 'info');
+      return;
+    }
+
+    const firstOriginalIdx = uncalled[0]?.originalIndex !== undefined ? uncalled[0].originalIndex : (campaignState.completedCount + 1);
+    const lastOriginalIdx = uncalled[uncalled.length - 1]?.originalIndex !== undefined ? uncalled[uncalled.length - 1].originalIndex : (campaignState.completedCount + uncalled.length);
+
+    const targetUni = universities.find(u => u.id === (campaignState.universityId || selectedUniversity)) || universities[0];
+    const targetCourse = campaignState.course || selectedCourse || '';
+
+    const newStaged = uncalled.map((c, i) => ({
+      id: `resumed-${Date.now()}-${i}`,
+      phone: String(c.phone || c.formattedPhone || '').replace(/\D/g, ''),
+      formattedPhone: c.formattedPhone || validatePhone(c.phone),
+      name: c.name || '',
+      hasName: Boolean(c.name && c.name !== 'Student'),
+      originalIndex: c.originalIndex !== undefined ? c.originalIndex : (campaignState.completedCount + i + 1),
+      excelRow: c.excelRow !== undefined ? c.excelRow : (campaignState.completedCount + i + 2),
+      universityId: targetUni?.id || 'vidyavision',
+      universityName: targetUni?.name || 'Vidyavision AI',
+      collegePlace: targetUni?.place || '',
+      agentId: isUgCourse(c.course || targetCourse) ? 270740 : (targetUni?.agentId || 270604),
+      course: c.course || targetCourse,
+      fileName: campaignState.fileName || uploadedFileInfo?.fileName || '',
+      email: c.email || '',
+      state: c.state || '',
+      district: c.district || '',
+      program: c.program || c.course || targetCourse || '',
+      extraFields: c.extraFields || {}
+    }));
+
+    setStagedContacts(prev => [...prev, ...newStaged]);
+    if (campaignState.isRunning) {
+      setCampaignState(prev => ({ ...prev, isPaused: true }));
+      fetch('/api/queue/pause', { method: 'POST' }).catch(() => {});
+    }
+
+    setActiveTab('dispatch');
+    addToast(`Staged ${newStaged.length} remaining contacts (Contacts #${firstOriginalIdx} to #${lastOriginalIdx}, Excel Rows #${uncalled[0]?.excelRow || (firstOriginalIdx + 1)} to #${uncalled[uncalled.length - 1]?.excelRow || (lastOriginalIdx + 1)})!`, 'success');
   };
 
   // Start Sequential Calling Campaign
@@ -1164,6 +1297,9 @@ export default function App() {
               state: c.state || '',
               district: c.district || '',
               program: c.program || cCourse,
+              originalIndex: c.originalIndex,
+              excelRow: c.excelRow,
+              fileName: c.fileName || uploadedFileInfo?.fileName || '',
               extraFields: c.extraFields || {}
             };
           }),
@@ -1174,6 +1310,7 @@ export default function App() {
           collegePlace: uni.place || uni.location || '',
           applicationUrl: uni.websiteUrl || uni.applicationUrl || uni.admissionLink || '',
           course: campaignCourse,
+          fileName: uploadedFileInfo?.fileName || '',
           campaignName: campaignCustomName && campaignCustomName.trim() ? campaignCustomName.trim() : undefined
         })
       });
@@ -1955,8 +2092,8 @@ export default function App() {
       || rf.call_conversation
       || call.call_conversation
       || (Array.isArray(call.interactions) && call.interactions.length > 0
-          ? call.interactions.map(it => `${it.user_query ? `User: ${it.user_query}` : ''}${it.user_query && it.bot_response ? ' | ' : ''}${it.bot_response ? `Bot: ${it.bot_response}` : ''}`).filter(Boolean).join('\n')
-          : '');
+        ? call.interactions.map(it => `${it.user_query ? `User: ${it.user_query}` : ''}${it.user_query && it.bot_response ? ' | ' : ''}${it.bot_response ? `Bot: ${it.bot_response}` : ''}`).filter(Boolean).join('\n')
+        : '');
     const callTranscript = rawTranscript ? String(rawTranscript).replace(/<br\s*\/?>/gi, '\n').trim() : '—';
 
     // Base ordered row object
@@ -2020,7 +2157,7 @@ export default function App() {
       const isLargeTextCol = /summary|transcript|conversation/i.test(key);
       const minWidth = Math.max(String(key || '').length + 4, 12);
       const calculatedWidth = maxLen + 3;
-      
+
       if (isLargeTextCol) {
         // Generous readable width for summary and transcript, up to 120 chars
         return { wch: Math.max(minWidth, Math.min(calculatedWidth, 120)) };
@@ -2960,23 +3097,23 @@ export default function App() {
                                 ✏️ Edit
                               </button>
 
-                            <button
-                              type="button"
-                              className="btn btn-danger-outline"
-                              style={{
-                                fontSize: '0.75rem',
-                                padding: '0.3rem 0.65rem',
-                                color: '#ef4444',
-                                borderColor: 'rgba(239, 68, 68, 0.5)',
-                                backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                                fontWeight: '700'
-                              }}
-                              disabled={deletingCollegeId === uni.id}
-                              onClick={() => handleDeleteCollege(uni)}
-                              title={`Delete ${uni.name}`}
-                            >
-                              <Trash2 size={13} /> {deletingCollegeId === uni.id ? 'Deleting...' : 'Delete'}
-                            </button>
+                              <button
+                                type="button"
+                                className="btn btn-danger-outline"
+                                style={{
+                                  fontSize: '0.75rem',
+                                  padding: '0.3rem 0.65rem',
+                                  color: '#ef4444',
+                                  borderColor: 'rgba(239, 68, 68, 0.5)',
+                                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                                  fontWeight: '700'
+                                }}
+                                disabled={deletingCollegeId === uni.id}
+                                onClick={() => handleDeleteCollege(uni)}
+                                title={`Delete ${uni.name}`}
+                              >
+                                <Trash2 size={13} /> {deletingCollegeId === uni.id ? 'Deleting...' : 'Delete'}
+                              </button>
                             </div>
                           </div>
                         </div>
@@ -3125,125 +3262,174 @@ export default function App() {
                         </span>
                       </div>
 
+                      {recentFiles.length > 0 && (
+                        <div style={{ marginTop: '1.25rem', padding: '0.85rem 1rem', borderRadius: '10px', backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                            <span style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                              <RotateCcw size={14} style={{ color: '#818cf8' }} /> Recent Excel Uploads & Resume Calling
+                            </span>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{recentFiles.length} file{recentFiles.length > 1 ? 's' : ''} saved</span>
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                            {recentFiles.map(rf => (
+                              <div key={rf.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0.75rem', borderRadius: '8px', backgroundColor: 'rgba(99, 102, 241, 0.04)', border: '1px solid rgba(99, 102, 241, 0.15)', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                <div>
+                                  <div style={{ fontWeight: '600', fontSize: '0.85rem' }}>📄 {rf.fileName}</div>
+                                  <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                                    {rf.totalContacts} contacts • Last called: Contact #{rf.lastCompletedIndex || 0}
+                                    {rf.lastCompletedIndex > 0 && rf.lastCompletedIndex < rf.totalContacts && (
+                                      <span style={{ color: '#059669', fontWeight: '700', marginLeft: '0.4rem' }}>
+                                        ({rf.totalContacts - rf.lastCompletedIndex} remaining)
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div style={{ display: 'flex', gap: '0.4rem' }}>
+                                  {rf.lastCompletedIndex > 0 && rf.lastCompletedIndex < rf.totalContacts ? (
+                                    <button
+                                      type="button"
+                                      className="btn btn-primary"
+                                      style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem', backgroundColor: '#059669', borderColor: '#10b981' }}
+                                      onClick={() => handleLoadRecentFile(rf, rf.lastCompletedIndex + 1)}
+                                      title={`Resume calling remaining contacts from #${rf.lastCompletedIndex + 1} to #${rf.totalContacts}`}
+                                    >
+                                      Resume from #{rf.lastCompletedIndex + 1}
+                                    </button>
+                                  ) : null}
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary"
+                                    style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem' }}
+                                    onClick={() => handleLoadRecentFile(rf, 1)}
+                                  >
+                                    Load All ({rf.totalContacts})
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                    </div>
+                  )}
+
+                  {/* Mode 2: Manual Single Contact */}
+                  {inputMode === 'manual' && (
+                    <form onSubmit={handleAddSingleContact}>
+                      <div className="form-grid">
+                        <div className="form-group">
+                          <label className="form-label">Phone Number (Required) *</label>
+                          <div style={{ position: 'relative' }}>
+                            <input
+                              type="text"
+                              placeholder="9876543210 (10 digits)"
+                              value={singlePhone}
+                              onChange={(e) => setSinglePhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                              className="form-input"
+                              style={{ paddingLeft: '2.5rem' }}
+                              maxLength={10}
+                            />
+                            <Phone size={16} style={{ position: 'absolute', left: '0.9rem', top: '0.85rem', color: 'var(--text-muted)' }} />
+                          </div>
+                          {phoneError && <span style={{ color: 'var(--error)', fontSize: '0.78rem', marginTop: '0.2rem', display: 'block' }}>{phoneError}</span>}
+                        </div>
+
+                        <div className="form-group">
+                          <label className="form-label">Recipient Name (Optional)</label>
+                          <div style={{ position: 'relative' }}>
+                            <input
+                              type="text"
+                              placeholder="e.g. Ramesh (Optional)"
+                              value={singleName}
+                              onChange={(e) => setSingleName(e.target.value)}
+                              className="form-input"
+                              style={{ paddingLeft: '2.5rem' }}
+                            />
+                            <User size={16} style={{ position: 'absolute', left: '0.9rem', top: '0.85rem', color: 'var(--text-muted)' }} />
+                          </div>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>If provided, bot addresses person by name.</span>
+                        </div>
                       </div>
-                    )}
 
-                    {/* Mode 2: Manual Single Contact */}
-                    {inputMode === 'manual' && (
-                      <form onSubmit={handleAddSingleContact}>
-                        <div className="form-grid">
-                          <div className="form-group">
-                            <label className="form-label">Phone Number (Required) *</label>
-                            <div style={{ position: 'relative' }}>
-                              <input
-                                type="text"
-                                placeholder="9876543210 (10 digits)"
-                                value={singlePhone}
-                                onChange={(e) => setSinglePhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                                className="form-input"
-                                style={{ paddingLeft: '2.5rem' }}
-                                maxLength={10}
-                              />
-                              <Phone size={16} style={{ position: 'absolute', left: '0.9rem', top: '0.85rem', color: 'var(--text-muted)' }} />
-                            </div>
-                            {phoneError && <span style={{ color: 'var(--error)', fontSize: '0.78rem', marginTop: '0.2rem', display: 'block' }}>{phoneError}</span>}
-                          </div>
-
-                          <div className="form-group">
-                            <label className="form-label">Recipient Name (Optional)</label>
-                            <div style={{ position: 'relative' }}>
-                              <input
-                                type="text"
-                                placeholder="e.g. Ramesh (Optional)"
-                                value={singleName}
-                                onChange={(e) => setSingleName(e.target.value)}
-                                className="form-input"
-                                style={{ paddingLeft: '2.5rem' }}
-                              />
-                              <User size={16} style={{ position: 'absolute', left: '0.9rem', top: '0.85rem', color: 'var(--text-muted)' }} />
-                            </div>
-                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>If provided, bot addresses person by name.</span>
-                          </div>
-                        </div>
-
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
-                          <button type="submit" className="btn btn-primary">
-                            <Plus size={16} /> Import Contact
-                          </button>
-                        </div>
-                      </form>
-                    )}
-
-                    {/* Mode 3: Bulk Paste Text */}
-                    {inputMode === 'bulk' && (
-                      <div>
-                        <label className="form-label">Paste Phone Numbers (Optional Name after comma/tab):</label>
-                        <textarea
-                          className="form-input"
-                          rows={4}
-                          placeholder={"9876543210, Ramesh Kumar\n9123456789, Priya\n9988776655"}
-                          value={bulkText}
-                          onChange={(e) => setBulkText(e.target.value)}
-                          style={{ fontFamily: 'var(--mono)', fontSize: '0.85rem' }}
-                        />
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.75rem' }}>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Format: Number, Name OR line by line numbers</span>
-                          <button className="btn btn-primary" onClick={handleProcessBulkText}>
-                            Process & Import Numbers
-                          </button>
-                        </div>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
+                        <button type="submit" className="btn btn-primary">
+                          <Plus size={16} /> Import Contact
+                        </button>
                       </div>
-                    )}
+                    </form>
+                  )}
 
-                    {/* CHOOSE OR ADD FROM EXISTING CAMPAIGNS */}
-                    <div style={{ borderTop: '1px solid var(--border)', marginTop: '1.25rem', paddingTop: '1.25rem' }}>
-                      <div style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        flexWrap: 'wrap',
-                        gap: '1rem',
-                        padding: '1.1rem 1.25rem',
-                        borderRadius: '12px',
-                        backgroundColor: 'rgba(99, 102, 241, 0.05)',
-                        border: '1px dashed rgba(99, 102, 241, 0.4)'
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-                          <div style={{
-                            width: '42px',
-                            height: '42px',
-                            borderRadius: '10px',
-                            backgroundColor: 'rgba(99, 102, 241, 0.15)',
-                            color: '#818cf8',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: '1.25rem',
-                            flexShrink: 0
-                          }}>
-                            📁
-                          </div>
-                          <div>
-                            <h4 style={{ margin: 0, fontSize: '0.98rem', fontWeight: '700', color: 'var(--text-primary)' }}>
-                              Choose or Add from Existing Campaigns
-                            </h4>
-                            <p style={{ margin: '0.2rem 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                              Re-target or build a new campaign using student contacts from any previously run campaign.
-                            </p>
-                          </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          className="btn btn-primary"
-                          style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.86rem', padding: '0.55rem 1.15rem' }}
-                          onClick={() => setShowPastCampaignsModal(true)}
-                        >
-                          <FolderOpen size={16} /> Choose from Existing Campaigns ({campaigns.length})
+                  {/* Mode 3: Bulk Paste Text */}
+                  {inputMode === 'bulk' && (
+                    <div>
+                      <label className="form-label">Paste Phone Numbers (Optional Name after comma/tab):</label>
+                      <textarea
+                        className="form-input"
+                        rows={4}
+                        placeholder={"9876543210, Ramesh Kumar\n9123456789, Priya\n9988776655"}
+                        value={bulkText}
+                        onChange={(e) => setBulkText(e.target.value)}
+                        style={{ fontFamily: 'var(--mono)', fontSize: '0.85rem' }}
+                      />
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.75rem' }}>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Format: Number, Name OR line by line numbers</span>
+                        <button className="btn btn-primary" onClick={handleProcessBulkText}>
+                          Process & Import Numbers
                         </button>
                       </div>
                     </div>
+                  )}
+
+                  {/* CHOOSE OR ADD FROM EXISTING CAMPAIGNS */}
+                  <div style={{ borderTop: '1px solid var(--border)', marginTop: '1.25rem', paddingTop: '1.25rem' }}>
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: '1rem',
+                      padding: '1.1rem 1.25rem',
+                      borderRadius: '12px',
+                      backgroundColor: 'rgba(99, 102, 241, 0.05)',
+                      border: '1px dashed rgba(99, 102, 241, 0.4)'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                        <div style={{
+                          width: '42px',
+                          height: '42px',
+                          borderRadius: '10px',
+                          backgroundColor: 'rgba(99, 102, 241, 0.15)',
+                          color: '#818cf8',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '1.25rem',
+                          flexShrink: 0
+                        }}>
+                          📁
+                        </div>
+                        <div>
+                          <h4 style={{ margin: 0, fontSize: '0.98rem', fontWeight: '700', color: 'var(--text-primary)' }}>
+                            Choose or Add from Existing Campaigns
+                          </h4>
+                          <p style={{ margin: '0.2rem 0 0', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                            Re-target or build a new campaign using student contacts from any previously run campaign.
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.86rem', padding: '0.55rem 1.15rem' }}
+                        onClick={() => setShowPastCampaignsModal(true)}
+                      >
+                        <FolderOpen size={16} /> Choose from Existing Campaigns ({campaigns.length})
+                      </button>
+                    </div>
                   </div>
+                </div>
 
                 {/* STEP 2 & 3: SELECT UNIVERSITY & DELAY (SHOWN IF TEMP CONTACTS ARE LOADED) */}
                 {tempContacts.length > 0 && (
@@ -3499,6 +3685,103 @@ export default function App() {
                       </div>
                     )}
 
+                    {/* Range Selector / Resume Calling (e.g. 201 to remaining) */}
+                    {tempContacts.length > 1 && (
+                      <div style={{ marginBottom: '1.5rem', borderTop: '1px solid var(--border)', paddingTop: '1.25rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.6rem' }}>
+                          <label className="form-label" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: '700' }}>
+                            <Sliders size={16} style={{ color: '#818cf8' }} /> Select Contact Range to Call (Resume Calling):
+                          </label>
+                          <span style={{ fontSize: '0.82rem', color: '#6366f1', fontWeight: '700' }}>
+                            Staging {getStageRangeData().selectedCount} of {tempContacts.length} contacts
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap', backgroundColor: '#f8fafc', padding: '0.85rem 1rem', borderRadius: '10px', border: '1px solid #e2e8f0' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: '600' }}>From Contact #</span>
+                            <input
+                              type="number"
+                              min={1}
+                              max={tempContacts.length}
+                              value={stageRangeStart}
+                              onChange={(e) => setStageRangeStart(e.target.value)}
+                              className="form-input"
+                              style={{ width: '90px', padding: '0.4rem 0.6rem', fontWeight: '700', textAlign: 'center' }}
+                            />
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: '600' }}>To Contact #</span>
+                            <input
+                              type="number"
+                              min={1}
+                              max={tempContacts.length}
+                              placeholder={`End (${tempContacts.length})`}
+                              value={stageRangeEnd}
+                              onChange={(e) => setStageRangeEnd(e.target.value)}
+                              className="form-input"
+                              style={{ width: '100px', padding: '0.4rem 0.6rem', fontWeight: '700', textAlign: 'center' }}
+                            />
+                            <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>(blank = to end)</span>
+                          </div>
+
+                          {/* Quick Presets */}
+                          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginLeft: 'auto' }}>
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ fontSize: '0.76rem', padding: '0.3rem 0.65rem' }}
+                              onClick={() => { setStageRangeStart('1'); setStageRangeEnd(''); }}
+                            >
+                              All (1–{tempContacts.length})
+                            </button>
+                            {tempContacts.length > 100 && (
+                              <button
+                                type="button"
+                                className="btn btn-secondary"
+                                style={{ fontSize: '0.76rem', padding: '0.3rem 0.65rem' }}
+                                onClick={() => { setStageRangeStart('1'); setStageRangeEnd('100'); }}
+                              >
+                                First 100
+                              </button>
+                            )}
+                            {tempContacts.length > 200 && (
+                              <button
+                                type="button"
+                                className="btn btn-secondary"
+                                style={{ fontSize: '0.76rem', padding: '0.3rem 0.65rem' }}
+                                onClick={() => { setStageRangeStart('201'); setStageRangeEnd(''); }}
+                                title="Resume calling from contact 201 to end"
+                              >
+                                201 to End
+                              </button>
+                            )}
+                            {(() => {
+                              const matched = uploadedFileInfo?.fileName ? recentFiles.find(f => f.fileName === uploadedFileInfo.fileName) : null;
+                              if (matched && matched.lastCompletedIndex > 0 && matched.lastCompletedIndex < tempContacts.length) {
+                                const nextIdx = matched.lastCompletedIndex + 1;
+                                return (
+                                  <button
+                                    type="button"
+                                    className="btn btn-primary"
+                                    style={{ fontSize: '0.76rem', padding: '0.3rem 0.65rem', backgroundColor: '#059669', borderColor: '#10b981' }}
+                                    onClick={() => { setStageRangeStart(String(nextIdx)); setStageRangeEnd(''); }}
+                                  >
+                                    Resume from #{nextIdx}
+                                  </button>
+                                );
+                              }
+                              return null;
+                            })()}
+                          </div>
+                        </div>
+                        <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0.4rem 0 0 0.5rem' }}>
+                          💡 Pro-tip: To resume dialing an Excel sheet (e.g. 500 contacts where 200 were completed), enter <b>201</b> in "From Contact #" to dial remaining contacts. Excel row numbers will align automatically!
+                        </p>
+                      </div>
+                    )}
+
                     {/* Stage Buttons */}
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', borderTop: '1px solid var(--border)', paddingTop: '1.25rem', marginTop: '1.25rem' }}>
                       <button
@@ -3506,7 +3789,7 @@ export default function App() {
                         onClick={handleStageTempContacts}
                         disabled={(universities.find(u => u.id === selectedUniversity)?.status === 'inactive') || (tempInputMode !== 'manual' && callDelay === '')}
                       >
-                        <CheckCircle size={16} /> Stage Contacts for Calling
+                        <CheckCircle size={16} /> Stage {tempContacts.length > 1 ? `${getStageRangeData().selectedCount} ` : ''}Contacts for Calling
                       </button>
                     </div>
 
@@ -3555,7 +3838,14 @@ export default function App() {
                           <tbody>
                             {stagedContacts.map((c, idx) => (
                               <tr key={c.id}>
-                                <td>{idx + 1}</td>
+                                <td>
+                                  <span style={{ fontWeight: '700' }}>{idx + 1}</span>
+                                  {c.originalIndex && (
+                                    <span style={{ display: 'block', fontSize: '0.7rem', color: '#6366f1', fontWeight: '600' }} title="Contact number in original uploaded file">
+                                      #{c.originalIndex} (Row {c.excelRow || (c.originalIndex + 1)})
+                                    </span>
+                                  )}
+                                </td>
                                 <td style={{ fontFamily: 'var(--mono)', fontWeight: '700', fontSize: '0.92rem' }}>{c.formattedPhone}</td>
                                 <td style={{ fontWeight: '500' }}>
                                   {c.hasName || c.name ? (
@@ -3646,6 +3936,33 @@ export default function App() {
               </div>
             )}
 
+            {/* Banner to resume remaining contacts if campaign stopped/incomplete */}
+            {!campaignState.isRunning && activeQueue.length > 0 && campaignState.completedCount < activeQueue.length && (
+              <div className="card" style={{ borderLeft: '4px solid #f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.04)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', padding: '1rem 1.25rem', marginBottom: '1.25rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <RotateCcw size={22} style={{ color: '#d97706' }} />
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: '0.96rem', fontWeight: '700', color: 'var(--text-primary)' }}>
+                      Incomplete Campaign: {activeQueue.length - campaignState.completedCount} Uncalled Contacts Remaining
+                    </h4>
+                    <p style={{ margin: '0.2rem 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                      Completed {campaignState.completedCount} of {activeQueue.length} contacts. You can resume calling uncalled contacts (#{campaignState.completedCount + 1} to #{activeQueue.length}).
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', backgroundColor: '#059669', borderColor: '#10b981' }}
+                  onClick={handleStageRemainingContacts}
+                  title="Stage remaining uncalled contacts into dialer"
+                >
+                  <RotateCcw size={15} /> Stage Remaining (#{campaignState.completedCount + 1} to #{activeQueue.length})
+                </button>
+              </div>
+            )}
+
             {/* ACTIVE CAMPAIGN DASHBOARD - Displays when calling campaign is active */}
             {campaignState.isRunning && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -3663,7 +3980,28 @@ export default function App() {
                       </p>
                     </div>
 
-                    <div style={{ display: 'flex', gap: '0.75rem' }}>
+                    <div style={{ display: 'flex', gap: '0.65rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                      {campaignState.totalCount > campaignState.completedCount && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            fontSize: '0.82rem',
+                            fontWeight: '700',
+                            borderColor: '#818cf8',
+                            color: '#4f46e5',
+                            backgroundColor: 'rgba(99, 102, 241, 0.08)'
+                          }}
+                          onClick={handleStageRemainingContacts}
+                          title="Stage remaining uncalled contacts into staging queue to re-dial or adjust settings"
+                        >
+                          <RotateCcw size={15} /> Stage Remaining (#{campaignState.completedCount + 1}–#{campaignState.totalCount})
+                        </button>
+                      )}
+
                       {campaignState.isPaused ? (
                         <button className="btn btn-primary" onClick={handleResumeCampaign}>
                           <Play size={16} /> Resume Campaign
@@ -3768,7 +4106,14 @@ export default function App() {
                           const isCurrent = currentCall && currentCall.formattedPhone === item.formattedPhone;
                           return (
                             <tr key={item.id} className={isCurrent ? 'row-interested' : ''} style={{ borderLeft: isCurrent ? '4px solid #2dd4bf' : 'none' }}>
-                              <td>{idx + 1}</td>
+                              <td>
+                                <span style={{ fontWeight: '700' }}>{idx + 1}</span>
+                                {item.originalIndex && (
+                                  <span style={{ display: 'block', fontSize: '0.7rem', color: '#6366f1', fontWeight: '600' }} title="Contact number in original uploaded file">
+                                    #{item.originalIndex} (Row {item.excelRow || (item.originalIndex + 1)})
+                                  </span>
+                                )}
+                              </td>
                               <td style={{ fontFamily: 'var(--mono)', fontWeight: '700' }}>{item.formattedPhone}</td>
                               <td style={{ fontWeight: '500' }}>
                                 {item.name ? `👤 ${item.name}` : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Generic Recipient</span>}
@@ -3980,8 +4325,8 @@ export default function App() {
                   if (!q) return true;
                   return `${u.name} ${u.place || ''} ${u.languages || ''}`.toLowerCase().includes(q);
                 }).length === 0 && (
-                  <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>No colleges match your search.</p>
-                )}
+                    <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>No colleges match your search.</p>
+                  )}
               </div>
 
               {/* Selected scope summary with Scoped Excel Download Button */}

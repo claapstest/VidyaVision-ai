@@ -298,7 +298,7 @@ async function loadColleges() {
     const raw = await fs.readFile(COLLEGES_FILE, 'utf8');
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-  } catch {}
+  } catch { }
   return DEFAULT_COLLEGES;
 }
 
@@ -331,7 +331,7 @@ function rememberCallTarget(formattedPhone, info) {
   const key = digits.length === 10 ? digits : digits.slice(-10);
   if (!key) return;
   CALL_TARGETS[key] = { ...(CALL_TARGETS[key] || {}), ...info, updatedAt: new Date().toISOString() };
-  fs.writeFile(CALL_TARGETS_FILE, JSON.stringify(CALL_TARGETS, null, 2), 'utf8').catch(() => {});
+  fs.writeFile(CALL_TARGETS_FILE, JSON.stringify(CALL_TARGETS, null, 2), 'utf8').catch(() => { });
 }
 
 function getCallTarget(cleanPhone) {
@@ -514,11 +514,11 @@ async function fetchPublicGoogleSheet(spreadsheetId) {
   if (data.status === 'error') {
     throw new Error(`Google Sheets returned error: ${JSON.stringify(data.errors)}`);
   }
-  
+
   const rows = data.table.rows.map(r => {
     return r.c.map(cell => (cell ? (cell.v !== null ? cell.v : cell.f || '') : ''));
   });
-  
+
   return rows;
 }
 
@@ -758,12 +758,12 @@ function normalizeRow(row, headers) {
   const flagYes = (keywords) => String(findValue(keywords)).trim().toLowerCase() === 'yes';
   const flagStatus =
     flagYes(['wrong invalid', 'wrong_invalid', 'wrong number']) ? CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID :
-    flagYes(['already joined', 'already_joined']) ? CALL_OUTCOME_STATUS.ALREADY_JOINED :
-    flagYes(['already applied', 'already_applied']) ? CALL_OUTCOME_STATUS.ALREADY_APPLIED :
-    flagYes(['application sent', 'application_sent']) ? CALL_OUTCOME_STATUS.APPLICATION_SENT :
-    flagYes(['callback']) ? CALL_OUTCOME_STATUS.CALLBACK :
-    flagYes(['not interested', 'not_interested']) ? CALL_OUTCOME_STATUS.NOT_INTERESTED :
-    flagYes(['interested']) ? CALL_OUTCOME_STATUS.INTERESTED : '';
+      flagYes(['already joined', 'already_joined']) ? CALL_OUTCOME_STATUS.ALREADY_JOINED :
+        flagYes(['already applied', 'already_applied']) ? CALL_OUTCOME_STATUS.ALREADY_APPLIED :
+          flagYes(['application sent', 'application_sent']) ? CALL_OUTCOME_STATUS.APPLICATION_SENT :
+            flagYes(['callback']) ? CALL_OUTCOME_STATUS.CALLBACK :
+              flagYes(['not interested', 'not_interested']) ? CALL_OUTCOME_STATUS.NOT_INTERESTED :
+                flagYes(['interested']) ? CALL_OUTCOME_STATUS.INTERESTED : '';
   if (flagStatus) {
     final_status = flagStatus;
     effectiveLeadStatus = flagStatus;
@@ -869,7 +869,7 @@ async function saveCache(data) {
       const raw = await fs.readFile(GOOGLE_SHEETS_CACHE_FILE, 'utf8');
       const prev = JSON.parse(raw);
       prevLen = Array.isArray(prev) ? prev.length : 0;
-    } catch {}
+    } catch { }
     if (prevLen > 5 && Array.isArray(data) && data.length < prevLen * 0.5) {
       console.warn(`Sheets cache guard: fresh fetch has ${data.length} rows vs cached ${prevLen} — keeping cache.`);
       return false;
@@ -891,9 +891,9 @@ loadCache().then(cached => {
   if (cached && cached.length > 0) {
     lastSheetsDataJson = JSON.stringify(cached);
   }
-}).catch(() => {});
-loadInterests().catch(() => {});
-loadTargets().catch(() => {});
+}).catch(() => { });
+loadInterests().catch(() => { });
+loadTargets().catch(() => { });
 
 async function pollGoogleSheets() {
   const spreadsheetId = process.env.GOOGLE_SPREADSHEET_ID;
@@ -907,7 +907,7 @@ async function pollGoogleSheets() {
       const headers = rawData[0];
       const rows = rawData.slice(1);
       const seenIds = new Set();
-      
+
       rows.forEach((row, index) => {
         if (!row || row.length === 0) return;
         const item = normalizeRow(row, headers);
@@ -1014,7 +1014,7 @@ function analyzeCallInterest(callRecord) {
   const phone = callRecord.to_number || callRecord.phone_number || callRecord.to || callRecord.formattedPhone || callRecord.phone || '';
   const name = callRecord.name || callRecord.fullName || callRecord.student_name || (phone ? `Recipient (${phone})` : 'Recipient');
   const status = (callRecord.call_status || callRecord.status || '').toLowerCase();
-  
+
   const transcriptText = extractTranscriptText(callRecord);
   const summaryText = String(callRecord.summary || callRecord.call_summary || '').toLowerCase();
   const fullText = (transcriptText + ' ' + summaryText).toLowerCase().trim();
@@ -1056,33 +1056,33 @@ function analyzeCallInterest(callRecord) {
   // 2. Specific outcome keywords for mutually exclusive classification
   // (negative outcomes read the whole conversation; INTEREST reads user speech only)
   const wrongNumberKeywords = [
-    'wrong number', 'wrong person', 'invalid number', 'not the right person', 
+    'wrong number', 'wrong person', 'invalid number', 'not the right person',
     'wrong contact', 'not my number', 'mistaken number', 'incorrect number', 'does not belong'
   ];
 
   const alreadyJoinedKeywords = [
-    'already joined', 'already enrolled', 'already taken admission', 'already admitted', 
-    'already taken', 'joined another college', 'joined college', 'joined university', 
+    'already joined', 'already enrolled', 'already taken admission', 'already admitted',
+    'already taken', 'joined another college', 'joined college', 'joined university',
     'currently studying in another college', 'enrolled in another'
   ];
 
   const alreadyAppliedKeywords = [
-    'already applied', 'applied already', 'application submitted', 'submitted application', 
-    'already submitted form', 'form already submitted', 'already filled application', 
+    'already applied', 'applied already', 'application submitted', 'submitted application',
+    'already submitted form', 'form already submitted', 'already filled application',
     'filled application', 'applied online', 'application pending'
   ];
 
   const callbackKeywords = [
-    'callback', 'call back', 'call later', 'call me later', 'call tomorrow', 
-    'reach out later', 'talk later', 'busy right now call later', 'contact later', 
+    'callback', 'call back', 'call later', 'call me later', 'call tomorrow',
+    'reach out later', 'talk later', 'busy right now call later', 'contact later',
     'call again', 'schedule a call', 'call after'
   ];
 
   const notInterestedKeywords = [
-    'not interested', 'no interest', 'dont call', "don't call", 'do not call', 
-    'no thanks', 'not looking', 'reject', 'cancel', 'not planning', 'no need', 
-    'doing a job', 'doing job', 'working', 'already working', 'doing work', 
-    'im working', "i'm working", 'im doing a job', "i'm doing a job", 'employed', 
+    'not interested', 'no interest', 'dont call', "don't call", 'do not call',
+    'no thanks', 'not looking', 'reject', 'cancel', 'not planning', 'no need',
+    'doing a job', 'doing job', 'working', 'already working', 'doing work',
+    'im working', "i'm working", 'im doing a job', "i'm doing a job", 'employed',
     'not required', 'bad timing', 'stop calling'
   ];
 
@@ -1105,7 +1105,7 @@ function analyzeCallInterest(callRecord) {
   const isAlreadyApplied = alreadyAppliedKeywords.some(kw => fullText.includes(kw));
   const isCallback = callbackKeywords.some(kw => fullText.includes(kw)) || String(callRecord.callback_required || callRecord.callbackRequired || '').toLowerCase().includes('yes');
   const isNotInterested = notInterestedKeywords.some(kw => fullText.includes(kw));
-  
+
   let finalStatus = CALL_OUTCOME_STATUS.NOT_INTERESTED;
   let college = 'Not Mentioned in Call';
   let course = 'Not Mentioned in Call';
@@ -1288,12 +1288,12 @@ function enrichCallWithInterest(callRecord) {
   const evYes = (k) => String(ev[k] ?? '').trim().toLowerCase() === 'yes';
   const evStatus =
     evYes('wrong_invalid') ? CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID :
-    evYes('already_joined') ? CALL_OUTCOME_STATUS.ALREADY_JOINED :
-    evYes('already_applied') ? CALL_OUTCOME_STATUS.ALREADY_APPLIED :
-    evYes('application_sent') ? CALL_OUTCOME_STATUS.APPLICATION_SENT :
-    evYes('callback') ? CALL_OUTCOME_STATUS.CALLBACK :
-    evYes('not_interested') ? CALL_OUTCOME_STATUS.NOT_INTERESTED :
-    (evYes('Interested') || evYes('interested')) ? CALL_OUTCOME_STATUS.INTERESTED : '';
+      evYes('already_joined') ? CALL_OUTCOME_STATUS.ALREADY_JOINED :
+        evYes('already_applied') ? CALL_OUTCOME_STATUS.ALREADY_APPLIED :
+          evYes('application_sent') ? CALL_OUTCOME_STATUS.APPLICATION_SENT :
+            evYes('callback') ? CALL_OUTCOME_STATUS.CALLBACK :
+              evYes('not_interested') ? CALL_OUTCOME_STATUS.NOT_INTERESTED :
+                (evYes('Interested') || evYes('interested')) ? CALL_OUTCOME_STATUS.INTERESTED : '';
   if (evStatus) interestData.interestStatus = evStatus;
 
   // Recover the student's name (user_name is the account holder, not the student).
@@ -1346,7 +1346,7 @@ async function maybeAutoSendWhatsApp(matchedCall, pending) {
       try {
         const callTime = new Date(matchedCall.time_of_call || matchedCall.call_date || 0).getTime();
         if (!isNaN(callTime) && new Date(existing.updatedAt).getTime() >= callTime) return null;
-      } catch {}
+      } catch { }
     }
 
     const studentName = matchedCall.name || matchedCall.student_name || matchedCall.fullName || pending?.fullName || 'Student';
@@ -1365,7 +1365,7 @@ async function maybeAutoSendWhatsApp(matchedCall, pending) {
         } else {
           collegeName = transcriptCollege;
         }
-      } catch {}
+      } catch { }
     }
 
     const message = buildAdmissionMessage({ studentName, collegeName, applicationUrl });
@@ -1513,7 +1513,7 @@ async function fetchCallsFromOmni(pages = 1) {
   if (newlyFetched.length > 0) {
     const merged = mergeOmniCallLists(existingCache, newlyFetched);
     await saveOmniCache(merged);
-    enrichAllCampaigns().catch(() => {});
+    enrichAllCampaigns().catch(() => { });
     return merged.map(c => enrichCallWithInterest(c));
   }
 
@@ -1563,15 +1563,15 @@ function handleQueueContactFinished(contact, isAnswered, statusText, durationStr
         await saveCampaigns(all);
         broadcast({ type: 'campaigns', data: all });
       }
-    }).catch(() => {});
+    }).catch(() => { });
   }
 
   if (isAnswered) {
     // Push fresh data immediately so the dashboard shows this call at once:
     // re-check Omni (late transcript/analysis) and re-poll Sheets.
-    pollGoogleSheets().catch(() => {});
-    setTimeout(() => { pollCallsOnce().catch(() => {}); }, 10000);
-    setTimeout(() => { pollCallsOnce().catch(() => {}); }, 30000);
+    pollGoogleSheets().catch(() => { });
+    setTimeout(() => { pollCallsOnce().catch(() => { }); }, 10000);
+    setTimeout(() => { pollCallsOnce().catch(() => { }); }, 30000);
   }
 
   // Schedule next contact after delay (enforcing minimum 5s buffer for OmniDimension channel cooldown)
@@ -1643,12 +1643,12 @@ async function pollCallsOnce() {
             handleQueueContactFinished(queueContact, true, 'completed', formattedDuration);
           } else {
             addLog('success', `Call to "${pending.fullName}" (${phone}) COMPLETED. Duration: ${formattedDuration}.`);
-            pollGoogleSheets().catch(() => {});
-            setTimeout(() => { pollCallsOnce().catch(() => {}); }, 10000);
-            setTimeout(() => { pollCallsOnce().catch(() => {}); }, 30000);
+            pollGoogleSheets().catch(() => { });
+            setTimeout(() => { pollCallsOnce().catch(() => { }); }, 10000);
+            setTimeout(() => { pollCallsOnce().catch(() => { }); }, 30000);
           }
           // Auto-send WhatsApp admission link when transcript shows INTERESTED
-          maybeAutoSendWhatsApp(matchedCall, pending).catch(() => {});
+          maybeAutoSendWhatsApp(matchedCall, pending).catch(() => { });
         } else if (['failed', 'canceled', 'busy', 'no-answer', 'no_answer'].includes(currentStatus)) {
           const displayStatus = currentStatus.replace('_', ' ');
           PENDING_CALLS.delete(phone);
@@ -1785,7 +1785,7 @@ async function processNextInQueue() {
         if (found && (found.place || found.location)) {
           collegePlace = found.place || found.location;
         }
-      } catch (_) {}
+      } catch (_) { }
     }
     const applicationUrl = CAMPAIGN_STATE.applicationUrl || '';
     const targetCourse = contact.course || CAMPAIGN_STATE.course || '';
@@ -1891,11 +1891,11 @@ async function processNextInQueue() {
 
 wss.on('connection', (ws) => {
   updateWsPolling();
-  
+
   // Immediately send cached Google Sheets data so dashboard loads instantly
   loadCache().then(cached => {
     ws.send(JSON.stringify({ type: 'sheets_update', data: cached }));
-  }).catch(() => {});
+  }).catch(() => { });
 
   // Send current logs, calls, and queue state
   ws.send(JSON.stringify({ type: 'logs', data: LOGS }));
@@ -1911,7 +1911,7 @@ wss.on('connection', (ws) => {
   if (lastCallsJson) {
     try {
       ws.send(JSON.stringify({ type: 'calls', data: JSON.parse(lastCallsJson) }));
-    } catch {}
+    } catch { }
   } else {
     pollCallsOnce();
   }
@@ -2176,7 +2176,7 @@ app.post('/api/queue/start', (req, res) => {
     const updated = [campaignRecord, ...all];
     await saveCampaigns(updated);
     broadcast({ type: 'campaigns', data: updated });
-  }).catch(() => {});
+  }).catch(() => { });
 
   const universityDisplay = CAMPAIGN_STATE.universityName;
   const activeAgentId = CAMPAIGN_STATE.agentId || getAgentId();
@@ -2492,7 +2492,7 @@ app.post('/api/queue/cancel', (req, res) => {
 
   CAMPAIGN_STATE.isRunning = false;
   CAMPAIGN_STATE.isPaused = false;
-  
+
   CALL_QUEUE.forEach(c => {
     if (c.status === 'queued' || c.status === 'in-progress') {
       c.status = 'canceled';
