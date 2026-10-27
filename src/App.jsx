@@ -39,7 +39,9 @@ import {
   ChevronDown,
   ChevronUp,
   Calendar,
-  ArrowRight
+  ArrowRight,
+  RotateCcw,
+  Sliders
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import {
@@ -51,6 +53,9 @@ import {
   getCallbackTime
 } from './constants/callStatus';
 import CallOutcomePieChart from './components/CallOutcomePieChart';
+import TablePagination from './components/TablePagination';
+import CampaignDateTimePicker, { CampaignTimePicker } from './components/CampaignDateTimePicker';
+
 
 export const isUgCourse = (courseName) => {
   if (!courseName) return false;
@@ -81,6 +86,28 @@ export default function App() {
   // Delay settings (seconds)
   const [callDelay, setCallDelay] = useState('');
 
+  // Campaign Schedule & Timing Limit States
+  const [campaignStartMode, setCampaignStartMode] = useState('immediate'); // 'immediate' | 'scheduled'
+  const [campaignScheduledTime, setCampaignScheduledTime] = useState('');
+  const [campaignEndMode, setCampaignEndMode] = useState('none'); // 'none' | 'duration' | 'cutoff' | 'business_window'
+  const [campaignDurationMinutes, setCampaignDurationMinutes] = useState('60');
+  const [campaignCutoffTime, setCampaignCutoffTime] = useState('18:30');
+  const [showTimingPanel, setShowTimingPanel] = useState(false);
+  const [showLiveDownloadMenu, setShowLiveDownloadMenu] = useState(false);
+  const liveDownloadMenuRef = useRef(null);
+
+  useEffect(() => {
+    const handleOutsideClick = (e) => {
+      if (liveDownloadMenuRef.current && !liveDownloadMenuRef.current.contains(e.target)) {
+        setShowLiveDownloadMenu(false);
+      }
+    };
+    if (showLiveDownloadMenu) {
+      document.addEventListener('mousedown', handleOutsideClick);
+    }
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [showLiveDownloadMenu]);
+
   // Staged Contacts List & Uploaded Excel File Info
   const [stagedContacts, setStagedContacts] = useState([]);
   const [uploadedFileInfo, setUploadedFileInfo] = useState(null);
@@ -94,7 +121,7 @@ export default function App() {
   // Dynamically calculate effective range of contacts to stage (1-based user indices)
   const getStageRangeData = () => {
     const total = tempContacts.length;
-    if (total === 0) return { start: 1, end: 0, count: 0, list: [], startRow: 2, endRow: 2 };
+    if (total === 0) return { start: 1, end: 0, count: 0, selectedCount: 0, list: [], startRow: 2, endRow: 2 };
 
     let s = parseInt(stageRangeStart, 10);
     if (isNaN(s) || s < 1) s = 1;
@@ -112,6 +139,7 @@ export default function App() {
       start: s,
       end: e,
       count: list.length,
+      selectedCount: list.length,
       list,
       startRow: firstItem?.excelRow || (firstItem?.originalIndex ? firstItem.originalIndex + 1 : s + 1),
       endRow: lastItem?.excelRow || (lastItem?.originalIndex ? lastItem.originalIndex + 1 : e + 1)
@@ -392,6 +420,80 @@ export default function App() {
   const [activeQueue, setActiveQueue] = useState([]);
   const [currentCall, setCurrentCall] = useState(null);
 
+  // Live ticker & helpers for scheduled countdown & duration time limit countdown
+  const [countdownTick, setCountdownTick] = useState(Date.now());
+
+  const safeIsoDateTime = (val) => {
+    if (!val) return null;
+    try {
+      if (typeof val === 'string' && val.includes('T')) {
+        const [dPart, tPart] = val.split('T');
+        const [year, month, day] = dPart.split('-').map(Number);
+        const [hour = 0, minute = 0, second = 0] = tPart.split(':').map(Number);
+        const d = new Date(year, (month || 1) - 1, day || 1, hour, minute, second);
+        if (!isNaN(d.getTime())) return d.toISOString();
+      }
+      if (typeof val === 'string' && /^\d{2}-\d{2}-\d{4}/.test(val)) {
+        const [dPart, tPart = '00:00:00'] = val.split(' ');
+        const [day, month, year] = dPart.split('-').map(Number);
+        const [hour = 0, minute = 0, second = 0] = tPart.split(':').map(Number);
+        const d = new Date(year, month - 1, day, hour, minute, second);
+        if (!isNaN(d.getTime())) return d.toISOString();
+      }
+      const d = new Date(val);
+      if (!isNaN(d.getTime())) return d.toISOString();
+    } catch (e) {
+      console.warn('safeIsoDateTime error:', e);
+    }
+    return null;
+  };
+
+  const setScheduledOffsetMinutes = (mins) => {
+    const d = new Date(Date.now() + mins * 60 * 1000);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    setCampaignScheduledTime(`${year}-${month}-${day}T${hours}:${minutes}`);
+    setCampaignStartMode('scheduled');
+  };
+
+  const setScheduledTomorrowMorning = (hour = 10, minute = 0) => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hours = String(hour).padStart(2, '0');
+    const minutes = String(minute).padStart(2, '0');
+    setCampaignScheduledTime(`${year}-${month}-${day}T${hours}:${minutes}`);
+    setCampaignStartMode('scheduled');
+  };
+
+  const formatCountdown = (targetIso) => {
+    if (!targetIso) return '';
+    const diff = new Date(targetIso).getTime() - countdownTick;
+    if (diff <= 0) return 'Due now';
+    const hrs = Math.floor(diff / (1000 * 60 * 60));
+    const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    const secs = Math.floor((diff % (1000 * 60)) / 1000);
+    if (hrs > 0) return `${hrs}h ${mins}m ${secs}s`;
+    if (mins > 0) return `${mins}m ${secs}s`;
+    return `${secs}s`;
+  };
+
+  useEffect(() => {
+    const hasScheduled = campaignState?.isScheduled && campaignState?.scheduledStartTime;
+    const hasTimeLimit = campaignState?.isRunning && (campaignState?.timeLimitExpiresAt || campaignState?.cutoffTimestamp);
+    if (!hasScheduled && !hasTimeLimit) return;
+
+    const interval = setInterval(() => {
+      setCountdownTick(Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [campaignState?.isScheduled, campaignState?.scheduledStartTime, campaignState?.isRunning, campaignState?.timeLimitExpiresAt, campaignState?.cutoffTimestamp]);
+
   // App Data States
   const [logs, setLogs] = useState([]);
   const [calls, setCalls] = useState([]);
@@ -425,6 +527,23 @@ export default function App() {
   const [customEndDate, setCustomEndDate] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [sortBy, setSortBy] = useState('DATE_DESC');
+
+  // Table Pagination States
+  const [dashboardPage, setDashboardPage] = useState(1);
+  const [dashboardPageSize, setDashboardPageSize] = useState(10);
+  const [recentCallsPage, setRecentCallsPage] = useState(1);
+  const [recentCallsPageSize, setRecentCallsPageSize] = useState(10);
+  const [recentCallsSearch, setRecentCallsSearch] = useState('');
+
+  // Auto-reset Dashboard page to 1 when filters or search change
+  useEffect(() => {
+    setDashboardPage(1);
+  }, [dashboardFilter, dashboardSearch, dashboardUniversityFilter, dateFilter, statusFilter, sortBy, customStartDate, customEndDate]);
+
+  // Auto-reset Recent Calls page to 1 when search or page size changes
+  useEffect(() => {
+    setRecentCallsPage(1);
+  }, [recentCallsSearch, recentCallsPageSize]);
 
   // Transcript Modal State
   const [selectedCall, setSelectedCall] = useState(null);
@@ -1279,6 +1398,21 @@ export default function App() {
     const campaignAgentId = isUgCourse(campaignCourse) ? 270740 : (uni.agentId || 270604);
     const botLabel = isUgCourse(campaignCourse) ? 'UG Bot (#270740)' : 'PG Bot (#270604)';
 
+    // Safely resolve and validate scheduled time
+    let resolvedScheduledStartTime = null;
+    if (campaignStartMode === 'scheduled') {
+      resolvedScheduledStartTime = safeIsoDateTime(campaignScheduledTime);
+      if (!resolvedScheduledStartTime) {
+        addToast('Please select a valid scheduled date & time before scheduling.', 'error');
+        return;
+      }
+      const msUntil = new Date(resolvedScheduledStartTime).getTime() - Date.now();
+      if (msUntil <= 0) {
+        addToast('Selected scheduled time is in the past! Please pick an upcoming time or click "Start Immediately".', 'warning');
+        return;
+      }
+    }
+
     try {
       const res = await fetch('/api/queue/start', {
         method: 'POST',
@@ -1311,13 +1445,29 @@ export default function App() {
           applicationUrl: uni.websiteUrl || uni.applicationUrl || uni.admissionLink || '',
           course: campaignCourse,
           fileName: uploadedFileInfo?.fileName || '',
-          campaignName: campaignCustomName && campaignCustomName.trim() ? campaignCustomName.trim() : undefined
+          campaignName: campaignCustomName && campaignCustomName.trim() ? campaignCustomName.trim() : undefined,
+          startMode: campaignStartMode,
+          scheduledStartTime: resolvedScheduledStartTime,
+          endMode: campaignEndMode,
+          maxDurationMinutes: campaignEndMode === 'duration' && campaignDurationMinutes ? Number(campaignDurationMinutes) : null,
+          cutoffTime: campaignEndMode === 'cutoff' ? campaignCutoffTime : null
         })
       });
 
-      const data = await res.json();
-      if (res.ok) {
-        addToast(`Campaign Started! Dialing ${data.totalCount} contacts sequentially using ${uni.name} [${botLabel}]...`, 'success');
+      let data = {};
+      try {
+        data = await res.json();
+      } catch (jsonErr) {
+        data = { error: `Server error (HTTP ${res.status}): Could not parse response.` };
+      }
+
+      if (res.ok && data.success) {
+        if (data.isScheduled) {
+          const sDate = new Date(data.scheduledStartTime);
+          addToast(`📅 Campaign Scheduled! Will start automatically on ${sDate.toLocaleDateString([], { month: 'short', day: 'numeric' })} at ${sDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}.`, 'success');
+        } else {
+          addToast(`Campaign Started! Dialing ${data.totalCount} contacts sequentially using ${uni.name} [${botLabel}]...`, 'success');
+        }
         pushRecentContacts(stagedContacts.map(c => ({ ...c, usedAt: new Date().toISOString() })));
         setStagedContacts([]);
         setCampaignCustomName('');
@@ -1327,7 +1477,37 @@ export default function App() {
         addToast(data.error || 'Failed to start campaign', 'error');
       }
     } catch (err) {
-      addToast('Network error starting campaign', 'error');
+      console.error('Error starting campaign:', err);
+      addToast(err.message ? `Could not start campaign: ${err.message}` : 'Network error starting campaign', 'error');
+    }
+  };
+
+  // Schedule Management Controls
+  const handleCancelScheduled = async () => {
+    try {
+      const res = await fetch('/api/queue/schedule/cancel', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        addToast('Scheduled campaign has been cancelled.', 'info');
+      } else {
+        addToast(data.error || 'Failed to cancel schedule.', 'error');
+      }
+    } catch {
+      addToast('Network error cancelling schedule.', 'error');
+    }
+  };
+
+  const handleStartScheduledNow = async () => {
+    try {
+      const res = await fetch('/api/queue/schedule/start-now', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        addToast('Scheduled campaign started immediately!', 'success');
+      } else {
+        addToast(data.error || 'Failed to start scheduled campaign.', 'error');
+      }
+    } catch {
+      addToast('Network error starting campaign.', 'error');
     }
   };
 
@@ -2651,18 +2831,71 @@ export default function App() {
     });
   };
 
+  // Construct a live campaign object merging activeQueue state with campaigns.json record
+  const getActiveCampaignObject = () => {
+    const existing = campaigns.find(c => c.id === campaignState.campaignId);
+    const contactsList = (activeQueue && activeQueue.length > 0) ? activeQueue.map(q => {
+      const match = existing?.contacts?.find(c => c.phone === q.phone || c.formattedPhone === q.formattedPhone);
+      return {
+        ...(match || {}),
+        id: q.id,
+        phone: q.phone,
+        formattedPhone: q.formattedPhone || q.phone,
+        name: q.name || match?.name || '',
+        course: q.course || campaignState.course || match?.course || '',
+        universityName: campaignState.universityName || match?.universityName || '',
+        status: q.status,
+        callOutcome: q.status === 'completed' ? (match?.callOutcome || 'Completed') : (q.reason || match?.callOutcome || (q.status === 'queued' ? 'Queued' : q.status)),
+        callDuration: (q.duration && q.duration !== '—') ? q.duration : (match?.callDuration || '—'),
+        extraFields: q.extraFields || match?.extraFields || {},
+        originalIndex: q.originalIndex || match?.originalIndex,
+        excelRow: q.excelRow || match?.excelRow,
+        callSummary: match?.callSummary || q.reason || '',
+        callTranscript: match?.callTranscript || ''
+      };
+    }) : (existing?.contacts || []);
+
+    return {
+      ...(existing || {}),
+      id: campaignState.campaignId || `camp-${Date.now()}`,
+      name: campaignState.campaignName || `${campaignState.universityName || 'Campaign'} (In-Progress)`,
+      universityName: campaignState.universityName || 'Vidyavision AI',
+      course: campaignState.course || '',
+      totalCount: campaignState.totalCount || contactsList.length,
+      completedCount: campaignState.completedCount || contactsList.filter(c => c.status === 'completed' || c.status === 'no-answer').length,
+      answeredCount: campaignState.answeredCount || 0,
+      unansweredCount: campaignState.unansweredCount || 0,
+      startedAt: campaignState.startedAt || new Date().toISOString(),
+      status: campaignState.isRunning ? 'in-progress' : (campaignState.isPaused ? 'paused' : 'stopped'),
+      contacts: contactsList
+    };
+  };
+
   // Export full campaign contacts and results to formatted Excel workbook (.xlsx) with all rich analytics columns
-  const handleDownloadCampaignExcel = (camp) => {
+  const handleDownloadCampaignExcel = (camp, onlyCompleted = false) => {
     if (!camp) return;
     try {
       const workbook = XLSX.utils.book_new();
-      const contacts = camp.contacts || [];
+      let contacts = camp.contacts || [];
+      if (onlyCompleted) {
+        contacts = contacts.filter(c => c.status !== 'queued' && c.status !== 'in-progress');
+      }
+
+      if (contacts.length === 0) {
+        addToast(onlyCompleted ? 'No completed calls yet to export.' : 'No contacts found in campaign.', 'info');
+        return;
+      }
+
+      const campaignForExport = {
+        ...camp,
+        contacts
+      };
 
       // 1. Leads Table Sheet (with full comprehensive columns identical to Excel Report)
-      const rows = formatCampaignContactsForExport(camp);
+      const rows = formatCampaignContactsForExport(campaignForExport);
       const wsContacts = XLSX.utils.json_to_sheet(rows.length > 0 ? rows : [{ 'Status': 'No contacts in campaign' }]);
       if (rows.length > 0) wsContacts['!cols'] = calculateColWidths(rows);
-      XLSX.utils.book_append_sheet(workbook, wsContacts, "Campaign Leads");
+      XLSX.utils.book_append_sheet(workbook, wsContacts, onlyCompleted ? "Completed Leads" : "Campaign Leads");
 
       // 2. Overview Sheet
       const answeredCount = rows.filter(r => !String(r['Lead Status'] || '').includes('Not Answered') && !String(r['Lead Status'] || '').includes('Queued')).length;
@@ -2675,18 +2908,20 @@ export default function App() {
         { 'Metric': 'Campaign Name', 'Value': camp.name || 'Untitled Campaign' },
         { 'Metric': 'Target University', 'Value': camp.universityName || '—' },
         { 'Metric': 'Target Course', 'Value': camp.course || '—' },
-        { 'Metric': 'Total Contacts', 'Value': contacts.length },
-        { 'Metric': 'Status', 'Value': (camp.status || 'COMPLETED').toUpperCase() },
+        { 'Metric': 'Export Type', 'Value': onlyCompleted ? 'Partial (Completed Calls Only)' : 'Full Campaign Progress' },
+        { 'Metric': 'Exported Calls Count', 'Value': rows.length },
+        { 'Metric': 'Total Campaign Contacts', 'Value': (camp.contacts || []).length },
+        { 'Metric': 'Status', 'Value': (camp.status || 'IN-PROGRESS').toUpperCase() },
         { 'Metric': 'Started At', 'Value': camp.startedAt ? new Date(camp.startedAt).toLocaleString('en-IN') : '—' },
-        { 'Metric': 'Completed At', 'Value': camp.completedAt ? new Date(camp.completedAt).toLocaleString('en-IN') : '—' },
+        { 'Metric': 'Exported At', 'Value': new Date().toLocaleString('en-IN') },
         { 'Metric': 'Calls Answered', 'Value': answeredCount },
         { 'Metric': 'Calls Not Answered', 'Value': unansweredCount },
         { 'Metric': 'Interested Leads', 'Value': interestedCount },
         { 'Metric': 'Callbacks Requested', 'Value': callbackCount },
-        { 'Metric': 'Queued / Pending', 'Value': queuedCount }
+        ...(onlyCompleted ? [] : [{ 'Metric': 'Queued / Pending', 'Value': queuedCount }])
       ];
       const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
-      wsSummary['!cols'] = [{ wch: 24 }, { wch: 38 }];
+      wsSummary['!cols'] = [{ wch: 26 }, { wch: 40 }];
       XLSX.utils.book_append_sheet(workbook, wsSummary, "Overview");
 
       // 3. Category sheets for fast counselor follow-up
@@ -2705,16 +2940,17 @@ export default function App() {
       appendCategorySheet("Calls Not Answered", r => String(r['Lead Status'] || '').includes('Not Answered'));
 
       const safeName = (camp.name || 'campaign').replace(/[^a-zA-Z0-9_-]/g, '_');
-      XLSX.writeFile(workbook, `${safeName}_Report.xlsx`);
-      addToast(`Downloaded Excel report for "${camp.name}".`, 'success');
+      const filenameSuffix = onlyCompleted ? '_Completed_Calls' : '_Report';
+      XLSX.writeFile(workbook, `${safeName}${filenameSuffix}.xlsx`);
+      addToast(`Downloaded Excel report (${rows.length} contacts) for "${camp.name}".`, 'success');
     } catch (err) {
       console.error('Failed to export campaign Excel:', err);
-      handleDownloadCampaignCsv(camp);
+      handleDownloadCampaignCsv(camp, camp.name, onlyCompleted);
     }
   };
 
   // Export campaign CSV with full columns identical to Excel
-  const handleDownloadCampaignCsv = (campOrId, campaignName) => {
+  const handleDownloadCampaignCsv = (campOrId, campaignName, onlyCompleted = false) => {
     let camp = null;
     if (typeof campOrId === 'object' && campOrId !== null) {
       camp = campOrId;
@@ -2722,7 +2958,15 @@ export default function App() {
       camp = campaigns.find(c => c.id === campOrId) || { id: campOrId, name: campaignName, contacts: [] };
     }
 
+    if (onlyCompleted && camp && Array.isArray(camp.contacts)) {
+      camp = {
+        ...camp,
+        contacts: camp.contacts.filter(c => c.status !== 'queued' && c.status !== 'in-progress')
+      };
+    }
+
     const safeName = (camp.name || campaignName || 'campaign').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const suffix = onlyCompleted ? '_Completed_Calls' : '';
 
     try {
       const rows = formatCampaignContactsForExport(camp);
@@ -2733,7 +2977,7 @@ export default function App() {
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `${safeName}.csv`;
+        link.download = `${safeName}${suffix}.csv`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -2747,13 +2991,14 @@ export default function App() {
 
     // Fallback to server route if client generation could not run
     const link = document.createElement('a');
-    link.href = `/api/campaigns/${camp.id || campOrId}/export`;
-    link.download = `${safeName}.csv`;
+    link.href = `/api/campaigns/${camp.id || campOrId}/export${onlyCompleted ? '?completedOnly=true' : ''}`;
+    link.download = `${safeName}${suffix}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     addToast(`Downloading report for "${camp.name || campaignName || 'campaign'}"...`, 'info');
   };
+
 
   // Compute stats dynamically for every university in configured universities array
   const uniStats = React.useMemo(() => {
@@ -2935,6 +3180,28 @@ export default function App() {
 
   // Sort the final list
   const finalDashboardList = sortCalls(searchFiltered, sortBy);
+
+  // Paginated slice for the dashboard table
+  const dashboardTotalPages = Math.max(1, Math.ceil(finalDashboardList.length / dashboardPageSize));
+  const safeDashboardPage = Math.min(Math.max(1, dashboardPage), dashboardTotalPages);
+  const dashboardStartIndex = (safeDashboardPage - 1) * dashboardPageSize;
+  const paginatedDashboardList = finalDashboardList.slice(dashboardStartIndex, dashboardStartIndex + dashboardPageSize);
+
+  // Filtered & Paginated slice for the Recent Calls table
+  const filteredRecentCalls = calls.filter(c => {
+    if (!recentCallsSearch.trim()) return true;
+    const q = recentCallsSearch.toLowerCase().trim();
+    const contact = String(c.to_number || c.phone_number || c.to || '').toLowerCase();
+    const status = String(c.call_status || c.status || '').toLowerCase();
+    const id = String(c.id || c.call_log_id || '').toLowerCase();
+    const transcript = String(c.call_conversation || c.transcript || c.conversation || '').toLowerCase();
+    return contact.includes(q) || status.includes(q) || id.includes(q) || transcript.includes(q);
+  });
+
+  const recentCallsTotalPages = Math.max(1, Math.ceil(filteredRecentCalls.length / recentCallsPageSize));
+  const safeRecentCallsPage = Math.min(Math.max(1, recentCallsPage), recentCallsTotalPages);
+  const recentCallsStartIndex = (safeRecentCallsPage - 1) * recentCallsPageSize;
+  const paginatedRecentCalls = filteredRecentCalls.slice(recentCallsStartIndex, recentCallsStartIndex + recentCallsPageSize);
 
   // Extract unique statuses dynamically from mergedCalls
   const uniqueStatuses = Array.from(new Set(
@@ -3901,6 +4168,279 @@ export default function App() {
                         </table>
                       </div>
 
+                      {/* Campaign Timing & Auto-Stop Limits Panel */}
+                      <div style={{
+                        borderRadius: '12px',
+                        border: '1px solid var(--border)',
+                        backgroundColor: '#ffffff',
+                        overflow: 'hidden',
+                        transition: 'all 0.2s ease',
+                        marginBottom: '1rem'
+                      }}>
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            padding: '0.85rem 1.25rem',
+                            backgroundColor: 'rgba(27, 59, 111, 0.02)',
+                            cursor: 'pointer',
+                            userSelect: 'none'
+                          }}
+                          onClick={() => setShowTimingPanel(prev => !prev)}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                            <Clock size={17} style={{ color: '#6366f1' }} />
+                            <span style={{ fontWeight: '700', fontSize: '0.92rem', color: 'var(--text-primary)' }}>
+                              Campaign Schedule & Time Limits
+                            </span>
+                            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                              (Optional)
+                            </span>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                            <span style={{
+                              fontSize: '0.76rem',
+                              fontWeight: '600',
+                              padding: '0.2rem 0.55rem',
+                              borderRadius: '6px',
+                              backgroundColor: campaignStartMode === 'scheduled' || campaignEndMode !== 'none' ? 'rgba(99, 102, 241, 0.1)' : 'rgba(148, 163, 184, 0.12)',
+                              color: campaignStartMode === 'scheduled' || campaignEndMode !== 'none' ? '#4f46e5' : 'var(--text-muted)'
+                            }}>
+                              {campaignStartMode === 'scheduled'
+                                ? `📅 Start: ${campaignScheduledTime ? new Date(campaignScheduledTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Scheduled'}`
+                                : '⚡ Immediate'}
+                              {' • '}
+                              {campaignEndMode === 'duration'
+                                ? `⏳ Stop: ${campaignDurationMinutes}m limit`
+                                : campaignEndMode === 'cutoff'
+                                  ? `🛑 Stop: ${campaignCutoffTime}`
+                                  : campaignEndMode === 'business_window'
+                                    ? '🏢 9:30 AM–6:30 PM'
+                                    : '♾️ No time limit'}
+                            </span>
+
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              style={{ padding: '0.25rem 0.6rem', fontSize: '0.78rem' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setShowTimingPanel(prev => !prev);
+                              }}
+                            >
+                              {showTimingPanel ? <ChevronUp size={14} /> : <ChevronDown size={14} />} {showTimingPanel ? 'Hide' : 'Configure'}
+                            </button>
+                          </div>
+                        </div>
+
+                        {showTimingPanel && (
+                          <div style={{ padding: '1.25rem', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '1.25rem', backgroundColor: '#fafbfc' }}>
+                            {/* 1. START TIMING */}
+                            <div>
+                              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
+                                1. When Should Dialing Start?
+                              </label>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  style={{
+                                    fontSize: '0.82rem',
+                                    padding: '0.4rem 0.8rem',
+                                    borderRadius: '8px',
+                                    border: '1px solid',
+                                    borderColor: campaignStartMode === 'immediate' ? '#10b981' : 'var(--border)',
+                                    backgroundColor: campaignStartMode === 'immediate' ? '#10b981' : '#ffffff',
+                                    color: campaignStartMode === 'immediate' ? '#ffffff' : 'var(--text-primary)',
+                                    fontWeight: '700'
+                                  }}
+                                  onClick={() => setCampaignStartMode('immediate')}
+                                >
+                                  ⚡ Start Immediately
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  style={{
+                                    fontSize: '0.82rem',
+                                    padding: '0.4rem 0.8rem',
+                                    borderRadius: '8px',
+                                    border: '1px solid',
+                                    borderColor: campaignStartMode === 'scheduled' ? '#6366f1' : 'var(--border)',
+                                    backgroundColor: campaignStartMode === 'scheduled' ? '#6366f1' : '#ffffff',
+                                    color: campaignStartMode === 'scheduled' ? '#ffffff' : 'var(--text-primary)',
+                                    fontWeight: '700'
+                                  }}
+                                  onClick={() => {
+                                    setCampaignStartMode('scheduled');
+                                    if (!campaignScheduledTime) setScheduledOffsetMinutes(15);
+                                  }}
+                                >
+                                  📅 Schedule for Later Time
+                                </button>
+                              </div>
+
+                              {campaignStartMode === 'scheduled' && (
+                                <div style={{ padding: '0.85rem 1rem', borderRadius: '8px', backgroundColor: '#ffffff', border: '1px solid rgba(99, 102, 241, 0.25)', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '600' }}>Quick Presets:</span>
+                                    <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }} onClick={() => setScheduledOffsetMinutes(15)}>In 15 mins</button>
+                                    <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }} onClick={() => setScheduledOffsetMinutes(30)}>In 30 mins</button>
+                                    <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }} onClick={() => setScheduledOffsetMinutes(60)}>In 1 hour</button>
+                                    <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }} onClick={() => setScheduledTomorrowMorning(10, 0)}>Tomorrow 10:00 AM</button>
+                                  </div>
+
+                                  <CampaignDateTimePicker
+                                    value={campaignScheduledTime}
+                                    onChange={(newVal) => setCampaignScheduledTime(newVal)}
+                                    countdownText={formatCountdown(campaignScheduledTime)}
+                                    label="Select Exact Date & Time:"
+                                  />
+                                </div>
+
+                              )}
+                            </div>
+
+                            {/* 2. END TIMING / AUTO-STOP */}
+                            <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
+                              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '0.5rem' }}>
+                                2. When Should Dialing Stop? (Time Limit / Cutoff)
+                              </label>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  style={{
+                                    fontSize: '0.82rem',
+                                    padding: '0.4rem 0.8rem',
+                                    borderRadius: '8px',
+                                    border: '1px solid',
+                                    borderColor: campaignEndMode === 'none' ? '#1b3b6f' : 'var(--border)',
+                                    backgroundColor: campaignEndMode === 'none' ? '#1b3b6f' : '#ffffff',
+                                    color: campaignEndMode === 'none' ? '#ffffff' : 'var(--text-primary)',
+                                    fontWeight: '700'
+                                  }}
+                                  onClick={() => setCampaignEndMode('none')}
+                                >
+                                  ♾️ No Limit (Dial until finished)
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  style={{
+                                    fontSize: '0.82rem',
+                                    padding: '0.4rem 0.8rem',
+                                    borderRadius: '8px',
+                                    border: '1px solid',
+                                    borderColor: campaignEndMode === 'duration' ? '#d97706' : 'var(--border)',
+                                    backgroundColor: campaignEndMode === 'duration' ? '#d97706' : '#ffffff',
+                                    color: campaignEndMode === 'duration' ? '#ffffff' : 'var(--text-primary)',
+                                    fontWeight: '700'
+                                  }}
+                                  onClick={() => setCampaignEndMode('duration')}
+                                >
+                                  ⏳ Duration Limit (e.g. 1h / 2h)
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  style={{
+                                    fontSize: '0.82rem',
+                                    padding: '0.4rem 0.8rem',
+                                    borderRadius: '8px',
+                                    border: '1px solid',
+                                    borderColor: campaignEndMode === 'cutoff' ? '#ef4444' : 'var(--border)',
+                                    backgroundColor: campaignEndMode === 'cutoff' ? '#ef4444' : '#ffffff',
+                                    color: campaignEndMode === 'cutoff' ? '#ffffff' : 'var(--text-primary)',
+                                    fontWeight: '700'
+                                  }}
+                                  onClick={() => setCampaignEndMode('cutoff')}
+                                >
+                                  🛑 Cutoff Time (e.g. 6:30 PM)
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn"
+                                  style={{
+                                    fontSize: '0.82rem',
+                                    padding: '0.4rem 0.8rem',
+                                    borderRadius: '8px',
+                                    border: '1px solid',
+                                    borderColor: campaignEndMode === 'business_window' ? '#6366f1' : 'var(--border)',
+                                    backgroundColor: campaignEndMode === 'business_window' ? '#6366f1' : '#ffffff',
+                                    color: campaignEndMode === 'business_window' ? '#ffffff' : 'var(--text-primary)',
+                                    fontWeight: '700'
+                                  }}
+                                  onClick={() => setCampaignEndMode('business_window')}
+                                  title="Auto-pause outside 09:30 AM – 06:30 PM"
+                                >
+                                  🏢 TRAI Window (9:30 AM–6:30 PM)
+                                </button>
+                              </div>
+
+                              {campaignEndMode === 'duration' && (
+                                <div style={{ padding: '0.85rem 1rem', borderRadius: '8px', backgroundColor: '#ffffff', border: '1px solid rgba(217, 119, 6, 0.25)', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '600' }}>Quick Duration Presets:</span>
+                                    <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }} onClick={() => setCampaignDurationMinutes(30)}>30 mins</button>
+                                    <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }} onClick={() => setCampaignDurationMinutes(60)}>1 hour</button>
+                                    <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }} onClick={() => setCampaignDurationMinutes(120)}>2 hours</button>
+                                    <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }} onClick={() => setCampaignDurationMinutes(180)}>3 hours</button>
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <span style={{ fontSize: '0.82rem', fontWeight: '600', color: 'var(--text-secondary)' }}>Stop after:</span>
+                                    <input
+                                      type="number"
+                                      min={5}
+                                      max={720}
+                                      value={campaignDurationMinutes}
+                                      onChange={(e) => setCampaignDurationMinutes(e.target.value)}
+                                      className="form-input"
+                                      style={{ width: '90px', padding: '0.35rem 0.6rem', textAlign: 'center', fontWeight: '700' }}
+                                    />
+                                    <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>minutes of calling ({Math.round(Number(campaignDurationMinutes || 0) / 60 * 10) / 10} hours)</span>
+                                  </div>
+                                  <p style={{ margin: 0, fontSize: '0.76rem', color: '#b45309' }}>
+                                    💡 When the time limit expires, calling auto-stops immediately. All uncalled numbers are saved and can be resumed with 1 click.
+                                  </p>
+                                </div>
+                              )}
+
+                              {campaignEndMode === 'cutoff' && (
+                                <div style={{ padding: '0.85rem 1rem', borderRadius: '8px', backgroundColor: '#ffffff', border: '1px solid rgba(239, 68, 68, 0.25)', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '600' }}>Quick Cutoff Presets:</span>
+                                    <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }} onClick={() => setCampaignCutoffTime('17:00')}>5:00 PM</button>
+                                    <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }} onClick={() => setCampaignCutoffTime('18:00')}>6:00 PM</button>
+                                    <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }} onClick={() => setCampaignCutoffTime('18:30')}>6:30 PM</button>
+                                    <button type="button" className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem' }} onClick={() => setCampaignCutoffTime('19:00')}>7:00 PM</button>
+                                  </div>
+                                  <CampaignTimePicker
+                                    value={campaignCutoffTime}
+                                    onChange={(newVal) => setCampaignCutoffTime(newVal)}
+                                    label="Stop calls strictly at:"
+                                  />
+
+                                  <p style={{ margin: 0, fontSize: '0.76rem', color: '#b91c1c' }}>
+                                    💡 Ideal for ensuring calls cease before evening quiet hours. Remaining contacts will be ready to resume next morning.
+                                  </p>
+                                </div>
+                              )}
+
+                              {campaignEndMode === 'business_window' && (
+                                <div style={{ padding: '0.85rem 1rem', borderRadius: '8px', backgroundColor: 'rgba(99, 102, 241, 0.05)', border: '1px solid rgba(99, 102, 241, 0.25)' }}>
+                                  <p style={{ margin: 0, fontSize: '0.82rem', color: '#4338ca', fontWeight: '600' }}>
+                                    🏢 Telecom Compliance Enabled: Voice AI calls will only dispatch between 09:30 AM and 06:30 PM IST. If the clock passes 06:30 PM, the campaign automatically pauses.
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
                       {/* Start Campaign Bar */}
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(27, 59, 111, 0.03)', padding: '1rem 1.5rem', borderRadius: '12px', border: '1px solid var(--border)' }}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
@@ -3920,13 +4460,29 @@ export default function App() {
                           </span>
                         </div>
 
-                        <button
-                          className="btn btn-primary"
-                          style={{ padding: '0.75rem 2rem', fontSize: '1rem' }}
-                          onClick={handleStartCampaign}
-                        >
-                          <Play size={18} /> Start Sequential Calling Campaign ({stagedContacts.length})
-                        </button>
+                        {campaignStartMode === 'scheduled' ? (
+                          <button
+                            className="btn btn-primary"
+                            style={{
+                              padding: '0.75rem 2rem',
+                              fontSize: '1rem',
+                              backgroundColor: '#4f46e5',
+                              borderColor: '#6366f1',
+                              boxShadow: '0 4px 12px rgba(79, 70, 229, 0.25)'
+                            }}
+                            onClick={handleStartCampaign}
+                          >
+                            <Calendar size={18} /> Schedule Campaign ({stagedContacts.length} Contacts)
+                          </button>
+                        ) : (
+                          <button
+                            className="btn btn-primary"
+                            style={{ padding: '0.75rem 2rem', fontSize: '1rem' }}
+                            onClick={handleStartCampaign}
+                          >
+                            <Play size={18} /> Start Sequential Calling Campaign ({stagedContacts.length})
+                          </button>
+                        )}
                       </div>
 
                     </div>
@@ -3936,8 +4492,46 @@ export default function App() {
               </div>
             )}
 
+            {/* Banner: Scheduled Campaign Waiting to Start */}
+            {campaignState.isScheduled && !campaignState.isRunning && (
+              <div className="card" style={{ borderLeft: '5px solid #6366f1', background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(168, 85, 247, 0.04) 100%)', padding: '1.25rem 1.5rem', marginBottom: '1.25rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.9rem' }}>
+                    <div style={{ width: '44px', height: '44px', borderRadius: '10px', backgroundColor: 'rgba(99, 102, 241, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6366f1' }}>
+                      <Clock size={24} className="animate-pulse" />
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                        <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '800', color: 'var(--text-primary)' }}>
+                          Campaign Scheduled: Starts in {formatCountdown(campaignState.scheduledStartTime)}
+                        </h3>
+                        <span className="status-pill" style={{ backgroundColor: 'rgba(99, 102, 241, 0.15)', color: '#4f46e5', fontWeight: '700', fontSize: '0.72rem' }}>
+                          SCHEDULED
+                        </span>
+                      </div>
+                      <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                        Scheduled for <b>{new Date(campaignState.scheduledStartTime).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</b> • {campaignState.totalCount} Contacts • {campaignState.universityName}
+                        {campaignState.endMode === 'duration' && ` • Auto-stops after ${campaignState.maxDurationMinutes} mins`}
+                        {campaignState.endMode === 'cutoff' && ` • Auto-stops at ${campaignState.cutoffTimeDisplay || 'cutoff'}`}
+                        {campaignState.endMode === 'business_window' && ` • Business Window: 09:30 AM–06:30 PM`}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <button className="btn btn-primary" onClick={handleStartScheduledNow} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', backgroundColor: '#059669', borderColor: '#10b981' }}>
+                      <Play size={16} /> Start Dialing Now
+                    </button>
+                    <button className="btn btn-danger-outline" onClick={handleCancelScheduled} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <XCircle size={16} /> Cancel Schedule
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Banner to resume remaining contacts if campaign stopped/incomplete */}
-            {!campaignState.isRunning && activeQueue.length > 0 && campaignState.completedCount < activeQueue.length && (
+            {!campaignState.isRunning && !campaignState.isScheduled && activeQueue.length > 0 && campaignState.completedCount < activeQueue.length && (
               <div className="card" style={{ borderLeft: '4px solid #f59e0b', backgroundColor: 'rgba(245, 158, 11, 0.04)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', padding: '1rem 1.25rem', marginBottom: '1.25rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                   <RotateCcw size={22} style={{ color: '#d97706' }} />
@@ -3951,17 +4545,44 @@ export default function App() {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', backgroundColor: '#059669', borderColor: '#10b981' }}
-                  onClick={handleStageRemainingContacts}
-                  title="Stage remaining uncalled contacts into dialer"
-                >
-                  <RotateCcw size={15} /> Stage Remaining (#{campaignState.completedCount + 1} to #{activeQueue.length})
-                </button>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  {campaignState.completedCount > 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.4rem',
+                        fontSize: '0.85rem',
+                        fontWeight: '700',
+                        borderColor: '#10b981',
+                        color: '#059669',
+                        backgroundColor: '#ffffff'
+                      }}
+                      onClick={() => {
+                        const camp = getActiveCampaignObject();
+                        handleDownloadCampaignExcel(camp, true);
+                      }}
+                      title="Download Excel with contacts completed before campaign was stopped"
+                    >
+                      <Download size={15} /> Download Completed Excel ({campaignState.completedCount})
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', backgroundColor: '#059669', borderColor: '#10b981' }}
+                    onClick={handleStageRemainingContacts}
+                    title="Stage remaining uncalled contacts into dialer"
+                  >
+                    <RotateCcw size={15} /> Stage Remaining (#{campaignState.completedCount + 1} to #{activeQueue.length})
+                  </button>
+                </div>
               </div>
             )}
+
 
             {/* ACTIVE CAMPAIGN DASHBOARD - Displays when calling campaign is active */}
             {campaignState.isRunning && (
@@ -3975,9 +4596,24 @@ export default function App() {
                         <Volume2 size={22} className="animate-pulse" style={{ color: 'var(--accent)' }} />
                         Sequential Outbound Campaign Active
                       </h2>
-                      <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                        Dialing sequential list using <b>{campaignState.universityName || 'Selected Bot'}</b> (Agent ID: <b>#{campaignState.agentId || 'N/A'}</b> • <span style={{ color: isUgCourse(campaignState.course) ? '#10b981' : '#818cf8', fontWeight: '700' }}>{isUgCourse(campaignState.course) ? 'UG Bot' : 'PG Bot'}</span>)
-                      </p>
+                      <div style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', marginTop: '0.35rem', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                        <span>Dialing sequential list using <b>{campaignState.universityName || 'Selected Bot'}</b> (Agent ID: <b>#{campaignState.agentId || 'N/A'}</b> • <span style={{ color: isUgCourse(campaignState.course) ? '#10b981' : '#818cf8', fontWeight: '700' }}>{isUgCourse(campaignState.course) ? 'UG Bot' : 'PG Bot'}</span>)</span>
+                        {campaignState.timeLimitExpiresAt && (
+                          <span className="status-pill" style={{ backgroundColor: 'rgba(245, 158, 11, 0.14)', color: '#d97706', border: '1px solid rgba(245, 158, 11, 0.35)', fontWeight: '700', fontSize: '0.78rem' }}>
+                            <Clock size={13} /> Limit Remaining: {formatCountdown(campaignState.timeLimitExpiresAt)}
+                          </span>
+                        )}
+                        {campaignState.cutoffTimestamp && (
+                          <span className="status-pill" style={{ backgroundColor: 'rgba(245, 158, 11, 0.14)', color: '#d97706', border: '1px solid rgba(245, 158, 11, 0.35)', fontWeight: '700', fontSize: '0.78rem' }}>
+                            <Clock size={13} /> Auto-stops at {campaignState.cutoffTimeDisplay || 'cutoff'} ({formatCountdown(campaignState.cutoffTimestamp)} left)
+                          </span>
+                        )}
+                        {campaignState.endMode === 'business_window' && (
+                          <span className="status-pill" style={{ backgroundColor: 'rgba(99, 102, 241, 0.14)', color: '#4f46e5', border: '1px solid rgba(99, 102, 241, 0.35)', fontWeight: '700', fontSize: '0.78rem' }}>
+                            🏢 Business Window (09:30 AM–06:30 PM)
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     <div style={{ display: 'flex', gap: '0.65rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -4001,6 +4637,157 @@ export default function App() {
                           <RotateCcw size={15} /> Stage Remaining (#{campaignState.completedCount + 1}–#{campaignState.totalCount})
                         </button>
                       )}
+
+                      {/* Live In-Progress Excel Export Dropdown */}
+                      <div style={{ position: 'relative' }} ref={liveDownloadMenuRef}>
+                        <button
+                          type="button"
+                          className="btn"
+                          style={{
+                            backgroundColor: '#10b981',
+                            color: '#ffffff',
+                            border: '1px solid #059669',
+                            fontSize: '0.82rem',
+                            fontWeight: '700',
+                            padding: '0.45rem 0.85rem',
+                            borderRadius: '8px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            boxShadow: '0 2px 6px rgba(16, 185, 129, 0.25)',
+                            cursor: 'pointer'
+                          }}
+                          onClick={() => setShowLiveDownloadMenu(prev => !prev)}
+                          title="Download Excel report for dialed contacts while campaign is still active"
+                        >
+                          <Download size={15} />
+                          Download Excel {campaignState.completedCount > 0 ? `(${campaignState.completedCount} Done)` : ''}
+                          <ChevronDown size={14} />
+                        </button>
+
+                        {showLiveDownloadMenu && (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              top: 'calc(100% + 6px)',
+                              right: 0,
+                              backgroundColor: '#ffffff',
+                              border: '1px solid rgba(16, 185, 129, 0.25)',
+                              borderRadius: '10px',
+                              boxShadow: '0 10px 25px -5px rgba(0,0,0,0.15), 0 8px 10px -6px rgba(0,0,0,0.08)',
+                              padding: '0.5rem',
+                              minWidth: '290px',
+                              zIndex: 100,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '0.35rem'
+                            }}
+                          >
+                            <div style={{ padding: '0.35rem 0.6rem', fontSize: '0.72rem', fontWeight: '800', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                              In-Progress Campaign Export
+                            </div>
+
+                            <button
+                              type="button"
+                              style={{
+                                border: 'none',
+                                background: 'transparent',
+                                padding: '0.55rem 0.75rem',
+                                borderRadius: '6px',
+                                textAlign: 'left',
+                                cursor: campaignState.completedCount > 0 ? 'pointer' : 'not-allowed',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '2px',
+                                opacity: campaignState.completedCount > 0 ? 1 : 0.6,
+                                transition: 'background-color 0.15s ease'
+                              }}
+                              onMouseEnter={(e) => { if (campaignState.completedCount > 0) e.currentTarget.style.backgroundColor = 'rgba(16, 185, 129, 0.08)'; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                              onClick={() => {
+                                if (campaignState.completedCount === 0) {
+                                  addToast('No contacts completed yet. Please wait until at least one call finishes.', 'info');
+                                  return;
+                                }
+                                setShowLiveDownloadMenu(false);
+                                const camp = getActiveCampaignObject();
+                                handleDownloadCampaignExcel(camp, true);
+                              }}
+                            >
+                              <span style={{ fontSize: '0.84rem', fontWeight: '700', color: '#047857', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                <FileSpreadsheet size={15} /> Completed Calls Only ({campaignState.completedCount})
+                              </span>
+                              <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                                Export only dialed contacts with durations & call outcomes
+                              </span>
+                            </button>
+
+                            <button
+                              type="button"
+                              style={{
+                                border: 'none',
+                                background: 'transparent',
+                                padding: '0.55rem 0.75rem',
+                                borderRadius: '6px',
+                                textAlign: 'left',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '2px',
+                                transition: 'background-color 0.15s ease'
+                              }}
+                              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(99, 102, 241, 0.08)'; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                              onClick={() => {
+                                setShowLiveDownloadMenu(false);
+                                const camp = getActiveCampaignObject();
+                                handleDownloadCampaignExcel(camp, false);
+                              }}
+                            >
+                              <span style={{ fontSize: '0.84rem', fontWeight: '700', color: '#4f46e5', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                <FileSpreadsheet size={15} /> Full Campaign Snapshot ({activeQueue.length})
+                              </span>
+                              <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                                Export all {activeQueue.length} contacts ({campaignState.completedCount} dialed + {activeQueue.length - campaignState.completedCount} queued)
+                              </span>
+                            </button>
+
+                            <div style={{ borderTop: '1px solid #e2e8f0', margin: '0.2rem 0' }} />
+
+                            <button
+                              type="button"
+                              style={{
+                                border: 'none',
+                                background: 'transparent',
+                                padding: '0.45rem 0.75rem',
+                                borderRadius: '6px',
+                                textAlign: 'left',
+                                cursor: campaignState.completedCount > 0 ? 'pointer' : 'not-allowed',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.4rem',
+                                fontSize: '0.78rem',
+                                fontWeight: '600',
+                                color: '#334155',
+                                opacity: campaignState.completedCount > 0 ? 1 : 0.6
+                              }}
+                              onMouseEnter={(e) => { if (campaignState.completedCount > 0) e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.04)'; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                              onClick={() => {
+                                if (campaignState.completedCount === 0) {
+                                  addToast('No contacts completed yet.', 'info');
+                                  return;
+                                }
+                                setShowLiveDownloadMenu(false);
+                                const camp = getActiveCampaignObject();
+                                handleDownloadCampaignCsv(camp, camp.name, true);
+                              }}
+                            >
+                              <FileText size={14} /> Quick CSV (Completed Calls)
+                            </button>
+                          </div>
+                        )}
+                      </div>
 
                       {campaignState.isPaused ? (
                         <button className="btn btn-primary" onClick={handleResumeCampaign}>
@@ -4085,9 +4872,35 @@ export default function App() {
 
                 {/* LIVE CAMPAIGN QUEUE TABLE */}
                 <div className="card" style={{ width: '100%' }}>
-                  <h3 style={{ fontSize: '1.2rem', fontWeight: '700', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem' }}>
-                    Dialing Queue Contacts Progress
-                  </h3>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem' }}>
+                    <h3 style={{ fontSize: '1.2rem', fontWeight: '700', margin: 0 }}>
+                      Dialing Queue Contacts Progress ({campaignState.completedCount} / {campaignState.totalCount})
+                    </h3>
+                    {campaignState.completedCount > 0 && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{
+                          fontSize: '0.8rem',
+                          padding: '0.35rem 0.75rem',
+                          borderColor: '#10b981',
+                          color: '#059669',
+                          backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                          fontWeight: '700',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.35rem'
+                        }}
+                        onClick={() => {
+                          const camp = getActiveCampaignObject();
+                          handleDownloadCampaignExcel(camp, true);
+                        }}
+                        title="Download Excel report with only contacts completed so far"
+                      >
+                        <Download size={14} /> Download Completed Excel ({campaignState.completedCount})
+                      </button>
+                    )}
+                  </div>
 
                   <div className="staged-table-container" style={{ maxHeight: '450px', overflowY: 'auto' }}>
                     <table className="calls-table" style={{ width: '100%' }}>
@@ -5428,7 +6241,7 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {finalDashboardList.map((call) => {
+                      {paginatedDashboardList.map((call) => {
                         const isHot = String(call.leadStatus).toUpperCase().includes('HOT');
                         const primaryStatus = getPrimaryCallStatus(call);
                         const statusInfo = getStatusDisplay(primaryStatus);
@@ -5686,6 +6499,18 @@ export default function App() {
                       })}
                     </tbody>
                   </table>
+                  <TablePagination
+                    totalItems={finalDashboardList.length}
+                    currentPage={safeDashboardPage}
+                    pageSize={dashboardPageSize}
+                    pageSizeOptions={[10, 20, 50, 100]}
+                    onPageChange={(page) => setDashboardPage(page)}
+                    onPageSizeChange={(newSize) => {
+                      setDashboardPageSize(newSize);
+                      setDashboardPage(1);
+                    }}
+                    itemLabel="leads"
+                  />
                 </div>
               )}
 
@@ -5698,15 +6523,29 @@ export default function App() {
         {/* ========================================== */}
         {activeTab === 'calls' && (
           <div>
-            <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: '1rem' }}>
+            <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
               <div>
                 <h1>Recent Outbound Call Logs</h1>
                 <p>Full synchronized history of dispatches and agent conversation transcripts from OmniDimension.</p>
               </div>
 
-              <button onClick={triggerReloadCalls} className="btn btn-secondary">
-                <RefreshCw size={16} /> Sync Calls
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <div style={{ position: 'relative', minWidth: '260px' }}>
+                  <input
+                    type="text"
+                    placeholder="Search phone, status, or ID..."
+                    value={recentCallsSearch}
+                    onChange={(e) => setRecentCallsSearch(e.target.value)}
+                    className="form-input"
+                    style={{ paddingLeft: '2.2rem', paddingRight: '0.8rem', paddingBottom: '0.45rem', paddingTop: '0.45rem' }}
+                  />
+                  <Search size={15} style={{ position: 'absolute', left: '0.8rem', top: '0.7rem', color: 'var(--text-muted)' }} />
+                </div>
+
+                <button onClick={triggerReloadCalls} className="btn btn-secondary" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <RefreshCw size={16} /> Sync Calls
+                </button>
+              </div>
             </div>
 
             <div className="card" style={{ padding: '1rem' }}>
@@ -5715,6 +6554,20 @@ export default function App() {
                   <PhoneCall className="empty-icon" />
                   <h3>No call history found</h3>
                   <p>Start a sequential campaign from the Dispatch Console to trigger live Voice AI calls.</p>
+                </div>
+              ) : filteredRecentCalls.length === 0 ? (
+                <div className="empty-state" style={{ padding: '2.5rem 1rem' }}>
+                  <Search className="empty-icon" style={{ color: 'var(--text-muted)' }} />
+                  <h3>No matching calls found</h3>
+                  <p>Try adjusting your search query "{recentCallsSearch}".</p>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    style={{ marginTop: '0.75rem', fontSize: '0.85rem' }}
+                    onClick={() => setRecentCallsSearch('')}
+                  >
+                    Clear Search
+                  </button>
                 </div>
               ) : (
                 <div className="calls-table-container">
@@ -5729,7 +6582,7 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {calls.map((call, idx) => {
+                      {paginatedRecentCalls.map((call, idx) => {
                         const contact = call.to_number || call.phone_number || call.to || '—';
                         const status = call.call_status || call.status || '—';
                         const rawDuration = call.call_duration || call.duration || '—';
@@ -5778,6 +6631,18 @@ export default function App() {
                       })}
                     </tbody>
                   </table>
+                  <TablePagination
+                    totalItems={filteredRecentCalls.length}
+                    currentPage={safeRecentCallsPage}
+                    pageSize={recentCallsPageSize}
+                    pageSizeOptions={[10, 20, 50, 100]}
+                    onPageChange={(page) => setRecentCallsPage(page)}
+                    onPageSizeChange={(newSize) => {
+                      setRecentCallsPageSize(newSize);
+                      setRecentCallsPage(1);
+                    }}
+                    itemLabel="calls"
+                  />
                 </div>
               )}
             </div>

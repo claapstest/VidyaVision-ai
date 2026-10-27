@@ -363,6 +363,15 @@ const PENDING_CALLS = new Map(); // Key: to_number, Value: { fullName, dispatchT
 let CAMPAIGN_STATE = {
   isRunning: false,
   isPaused: false,
+  isScheduled: false,
+  scheduledStartTime: null,
+  endMode: 'none', // 'none' | 'duration' | 'cutoff' | 'business_window'
+  maxDurationMinutes: null,
+  timeLimitExpiresAt: null,
+  cutoffTimeDisplay: null,
+  cutoffTimestamp: null,
+  stoppedReason: null,
+  startedAt: null,
   totalCount: 0,
   completedCount: 0,
   answeredCount: 0,
@@ -374,6 +383,8 @@ let CAMPAIGN_STATE = {
 let CALL_QUEUE = []; // Array of { id, phone, formattedPhone, name, status: 'queued'|'in-progress'|'completed'|'no-answer'|'canceled', duration, reason, dispatchTime }
 let CURRENT_CALL = null;
 let queueNextTimer = null;
+let campaignScheduleTimer = null;
+let campaignEndTimer = null;
 
 // Helper to format duration to a readable MM:SS layout for logs
 function formatDuration(durationStr) {
@@ -1728,6 +1739,51 @@ function updateWsPolling() {
   }
 }
 
+// Scheduled Campaign Auto-Start Processor
+function startScheduledCampaign() {
+  if (!CAMPAIGN_STATE.isScheduled) return;
+  if (campaignScheduleTimer) {
+    clearTimeout(campaignScheduleTimer);
+    campaignScheduleTimer = null;
+  }
+
+  CAMPAIGN_STATE.isScheduled = false;
+  CAMPAIGN_STATE.isRunning = true;
+  CAMPAIGN_STATE.isPaused = false;
+  CAMPAIGN_STATE.startedAt = new Date().toISOString();
+
+  // If duration limit was set, calculate timeLimitExpiresAt from current start
+  if (CAMPAIGN_STATE.endMode === 'duration' && CAMPAIGN_STATE.maxDurationMinutes > 0) {
+    const expiresAt = new Date(Date.now() + CAMPAIGN_STATE.maxDurationMinutes * 60 * 1000);
+    CAMPAIGN_STATE.timeLimitExpiresAt = expiresAt.toISOString();
+
+    const msUntilEnd = Math.max(0, expiresAt.getTime() - Date.now());
+    if (msUntilEnd > 0 && msUntilEnd < 2147483647) {
+      campaignEndTimer = setTimeout(() => {
+        if (CAMPAIGN_STATE.isRunning) {
+          processNextInQueue();
+        }
+      }, msUntilEnd);
+    }
+  } else if (CAMPAIGN_STATE.endMode === 'cutoff' && CAMPAIGN_STATE.cutoffTimestamp) {
+    const msUntilEnd = Math.max(0, new Date(CAMPAIGN_STATE.cutoffTimestamp).getTime() - Date.now());
+    if (msUntilEnd > 0 && msUntilEnd < 2147483647) {
+      campaignEndTimer = setTimeout(() => {
+        if (CAMPAIGN_STATE.isRunning) {
+          processNextInQueue();
+        }
+      }, msUntilEnd);
+    }
+  }
+
+  const universityDisplay = CAMPAIGN_STATE.universityName || 'Vidyavision AI';
+  const activeAgentId = CAMPAIGN_STATE.agentId || getAgentId();
+  addLog('success', `⏰ Scheduled start time reached! Campaign "${CAMPAIGN_STATE.campaignName}" is now actively dialing ${CAMPAIGN_STATE.totalCount} contacts for ${universityDisplay} (Agent ID: ${activeAgentId})!`);
+  broadcastQueueUpdate();
+
+  processNextInQueue();
+}
+
 // Sequential Execution Processor
 async function processNextInQueue() {
   if (queueNextTimer) {
@@ -1738,6 +1794,62 @@ async function processNextInQueue() {
   if (!CAMPAIGN_STATE.isRunning || CAMPAIGN_STATE.isPaused) {
     broadcastQueueUpdate();
     return;
+  }
+
+  // Check if Campaign has reached its End Time / Duration Limit
+  if (CAMPAIGN_STATE.endMode && CAMPAIGN_STATE.endMode !== 'none') {
+    let limitReached = false;
+    let limitReason = '';
+    const now = Date.now();
+
+    if (CAMPAIGN_STATE.endMode === 'duration' && CAMPAIGN_STATE.timeLimitExpiresAt) {
+      if (now >= new Date(CAMPAIGN_STATE.timeLimitExpiresAt).getTime()) {
+        limitReached = true;
+        limitReason = `Campaign duration limit of ${CAMPAIGN_STATE.maxDurationMinutes} minutes reached`;
+      }
+    } else if (CAMPAIGN_STATE.endMode === 'cutoff' && CAMPAIGN_STATE.cutoffTimestamp) {
+      if (now >= new Date(CAMPAIGN_STATE.cutoffTimestamp).getTime()) {
+        limitReached = true;
+        limitReason = `Scheduled cutoff time of ${CAMPAIGN_STATE.cutoffTimeDisplay || 'set cutoff'} reached`;
+      }
+    } else if (CAMPAIGN_STATE.endMode === 'business_window') {
+      const localDate = new Date();
+      const currentMinutes = localDate.getHours() * 60 + localDate.getMinutes();
+      const startMinutes = 9 * 60 + 30; // 09:30 AM
+      const endMinutes = 18 * 60 + 30;  // 06:30 PM
+      if (currentMinutes < startMinutes || currentMinutes >= endMinutes) {
+        limitReached = true;
+        limitReason = 'Permissible business calling window (09:30 AM – 06:30 PM) ended for today';
+      }
+    }
+
+    if (limitReached) {
+      if (campaignEndTimer) {
+        clearTimeout(campaignEndTimer);
+        campaignEndTimer = null;
+      }
+      CAMPAIGN_STATE.isRunning = false;
+      CAMPAIGN_STATE.isPaused = false;
+      CURRENT_CALL = null;
+      CAMPAIGN_STATE.stoppedReason = limitReason;
+      const uncalledCount = CALL_QUEUE.filter(c => c.status === 'queued').length;
+      addLog('warning', `⏰ ${limitReason}! Campaign auto-stopped. ${CAMPAIGN_STATE.completedCount} calls made, ${uncalledCount} uncalled contacts remaining. You can resume calling uncalled contacts anytime from the Dialer.`);
+
+      if (CAMPAIGN_STATE.campaignId) {
+        loadCampaigns().then(async (all) => {
+          const camp = all.find(c => c.id === CAMPAIGN_STATE.campaignId);
+          if (camp) {
+            camp.status = 'stopped_by_timelimit';
+            camp.stoppedReason = limitReason;
+            await saveCampaigns(all);
+            broadcast({ type: 'campaigns', data: all });
+          }
+        }).catch(() => {});
+      }
+
+      broadcastQueueUpdate();
+      return;
+    }
   }
 
   const nextIndex = CALL_QUEUE.findIndex(c => c.status === 'queued');
@@ -2071,7 +2183,23 @@ app.delete('/api/colleges/:id', async (req, res) => {
 
 // 1. Batch & Sequential Calling API
 app.post('/api/queue/start', (req, res) => {
-  const { contacts, delaySeconds, agentId, universityName, universityId, collegePlace, applicationUrl, course, campaignName } = req.body;
+  try {
+    const {
+    contacts,
+    delaySeconds,
+    agentId,
+    universityName,
+    universityId,
+    collegePlace,
+    applicationUrl,
+    course,
+    campaignName,
+    startMode = 'immediate',
+    scheduledStartTime = null,
+    endMode = 'none',
+    maxDurationMinutes = null,
+    cutoffTime = null
+  } = req.body;
 
   if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
     addLog('error', 'Batch call failed: No contacts provided.');
@@ -2113,12 +2241,177 @@ app.post('/api/queue/start', (req, res) => {
   const finalCampaignName = campaignName && campaignName.trim() ? campaignName.trim() : defaultCampaignName;
   const newCampaignId = `camp-${Date.now()}`;
 
-  // Reset campaign state
+  // Clear any existing timers
+  if (campaignScheduleTimer) {
+    clearTimeout(campaignScheduleTimer);
+    campaignScheduleTimer = null;
+  }
+  if (campaignEndTimer) {
+    clearTimeout(campaignEndTimer);
+    campaignEndTimer = null;
+  }
+  if (queueNextTimer) {
+    clearTimeout(queueNextTimer);
+    queueNextTimer = null;
+  }
+
+  // Resolve Cutoff Timestamp if specified
+  let resolvedCutoffTimestamp = null;
+  let resolvedCutoffDisplay = null;
+  if (endMode === 'cutoff' && cutoffTime) {
+    if (String(cutoffTime).includes('T')) {
+      const dt = new Date(cutoffTime);
+      if (!isNaN(dt.getTime())) {
+        resolvedCutoffTimestamp = dt.toISOString();
+        resolvedCutoffDisplay = dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      }
+    } else {
+      const [h, m] = String(cutoffTime).split(':').map(Number);
+      if (!isNaN(h) && !isNaN(m)) {
+        const dt = new Date();
+        dt.setHours(h, m, 0, 0);
+        if (startMode === 'immediate' && dt.getTime() <= Date.now()) {
+          dt.setDate(dt.getDate() + 1);
+        }
+        resolvedCutoffTimestamp = dt.toISOString();
+        resolvedCutoffDisplay = dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      }
+    }
+  }
+
+  // Reset campaign queue
   CALL_QUEUE = parsedQueue;
   CURRENT_CALL = null;
+
+  // Persist call targets mapping for student history
+  parsedQueue.forEach(ct => rememberCallTarget(ct.formattedPhone, {
+    name: ct.name || '',
+    collegeName: universityName || '',
+    universityId: universityId || '',
+    applicationUrl: applicationUrl || '',
+    course: ct.course || course || '',
+    email: ct.email || '',
+    state: ct.state || '',
+    district: ct.district || '',
+    program: ct.program || '',
+    extraFields: ct.extraFields || {}
+  }));
+
+  // Check if Campaign is Scheduled for Future
+  const targetStartTime = scheduledStartTime ? new Date(scheduledStartTime).getTime() : 0;
+  const msUntilStart = targetStartTime - Date.now();
+  const isScheduledFuture = startMode === 'scheduled' && msUntilStart > 5000;
+
+  if (isScheduledFuture) {
+    CAMPAIGN_STATE = {
+      isRunning: false,
+      isPaused: false,
+      isScheduled: true,
+      scheduledStartTime: new Date(targetStartTime).toISOString(),
+      endMode: endMode || 'none',
+      maxDurationMinutes: maxDurationMinutes ? Number(maxDurationMinutes) : null,
+      timeLimitExpiresAt: null,
+      cutoffTimestamp: resolvedCutoffTimestamp,
+      cutoffTimeDisplay: resolvedCutoffDisplay,
+      stoppedReason: null,
+      startedAt: null,
+      campaignId: newCampaignId,
+      campaignName: finalCampaignName,
+      totalCount: parsedQueue.length,
+      completedCount: 0,
+      answeredCount: 0,
+      unansweredCount: 0,
+      delayMs: (Number(delaySeconds) || 2) * 1000,
+      currentContactIndex: -1,
+      agentId: resolveAgentIdForCourse(course || parsedQueue[0]?.course, agentId),
+      universityId: universityId ? String(universityId) : '',
+      universityName: universityName ? String(universityName) : 'Vidyavision AI Admission Assistant',
+      collegePlace: collegePlace ? String(collegePlace) : '',
+      applicationUrl: applicationUrl ? String(applicationUrl) : '',
+      course: course ? String(course).trim() : ''
+    };
+
+    campaignScheduleTimer = setTimeout(() => {
+      startScheduledCampaign();
+    }, msUntilStart);
+
+    const scheduledDateStr = new Date(targetStartTime).toLocaleString('en-US', {
+      weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+    });
+    addLog('info', `📅 Campaign "${finalCampaignName}" SCHEDULED to start automatically on ${scheduledDateStr} with ${parsedQueue.length} contacts.`);
+
+    // Persist scheduled campaign record
+    const campaignRecord = {
+      id: newCampaignId,
+      name: finalCampaignName,
+      universityId: universityId || '',
+      universityName: universityName || 'Vidyavision AI',
+      collegePlace: collegePlace || '',
+      course: course || '',
+      agentId: CAMPAIGN_STATE.agentId,
+      startedAt: null,
+      scheduledStartTime: CAMPAIGN_STATE.scheduledStartTime,
+      totalCount: parsedQueue.length,
+      completedCount: 0,
+      answeredCount: 0,
+      unansweredCount: 0,
+      status: 'scheduled',
+      contacts: parsedQueue.map(c => ({
+        id: c.id,
+        name: c.name || '',
+        phone: c.phone || '',
+        formattedPhone: c.formattedPhone || (c.phone ? `+91${c.phone}` : ''),
+        course: c.course || course || '',
+        universityName: universityName || '',
+        email: c.email || '',
+        state: c.state || '',
+        district: c.district || '',
+        program: c.program || c.course || course || '',
+        extraFields: c.extraFields || {},
+        status: 'queued',
+        callDuration: '—',
+        callOutcome: 'Pending',
+        timestamp: new Date().toISOString()
+      }))
+    };
+
+    loadCampaigns().then(async (all) => {
+      const updated = [campaignRecord, ...all];
+      await saveCampaigns(updated);
+      broadcast({ type: 'campaigns', data: updated });
+    }).catch(() => { });
+
+    broadcastQueueUpdate();
+
+    return res.json({
+      success: true,
+      isScheduled: true,
+      scheduledStartTime: CAMPAIGN_STATE.scheduledStartTime,
+      campaignId: newCampaignId,
+      campaignName: finalCampaignName,
+      message: `Campaign scheduled to start on ${scheduledDateStr}.`,
+      totalCount: parsedQueue.length
+    });
+  }
+
+  // Immediate start with optional duration/cutoff limit
+  let timeLimitExpiresAt = null;
+  if (endMode === 'duration' && maxDurationMinutes && Number(maxDurationMinutes) > 0) {
+    timeLimitExpiresAt = new Date(Date.now() + Number(maxDurationMinutes) * 60 * 1000).toISOString();
+  }
+
   CAMPAIGN_STATE = {
     isRunning: true,
     isPaused: false,
+    isScheduled: false,
+    scheduledStartTime: null,
+    endMode: endMode || 'none',
+    maxDurationMinutes: maxDurationMinutes ? Number(maxDurationMinutes) : null,
+    timeLimitExpiresAt,
+    cutoffTimestamp: resolvedCutoffTimestamp,
+    cutoffTimeDisplay: resolvedCutoffDisplay,
+    stoppedReason: null,
+    startedAt: new Date().toISOString(),
     campaignId: newCampaignId,
     campaignName: finalCampaignName,
     totalCount: parsedQueue.length,
@@ -2134,6 +2427,19 @@ app.post('/api/queue/start', (req, res) => {
     applicationUrl: applicationUrl ? String(applicationUrl) : '',
     course: course ? String(course).trim() : ''
   };
+
+  // Set timeout watcher if duration or cutoff limit exists
+  const targetEnd = timeLimitExpiresAt ? new Date(timeLimitExpiresAt).getTime() : (resolvedCutoffTimestamp ? new Date(resolvedCutoffTimestamp).getTime() : null);
+  if (targetEnd) {
+    const msUntilEnd = Math.max(0, targetEnd - Date.now());
+    if (msUntilEnd > 0 && msUntilEnd < 2147483647) {
+      campaignEndTimer = setTimeout(() => {
+        if (CAMPAIGN_STATE.isRunning) {
+          processNextInQueue();
+        }
+      }, msUntilEnd);
+    }
+  }
 
   const initialBotLabel = isUgCourse(CAMPAIGN_STATE.course || parsedQueue[0]?.course) ? 'UG Bot (#270740)' : 'PG Bot (#270604)';
   addLog('info', `Campaign "${finalCampaignName}" initialized with ${initialBotLabel} for course "${CAMPAIGN_STATE.course || 'General'}".`);
@@ -2183,31 +2489,23 @@ app.post('/api/queue/start', (req, res) => {
   addLog('success', `Campaign "${finalCampaignName}" initialized for ${universityDisplay} (Agent ID: ${activeAgentId}) with ${parsedQueue.length} contacts! Starting sequential calling...`);
   broadcastQueueUpdate();
 
-  // Remember which college + name each number was called with (persists restarts)
-  parsedQueue.forEach(ct => rememberCallTarget(ct.formattedPhone, {
-    name: ct.name || '',
-    collegeName: CAMPAIGN_STATE.universityName || '',
-    universityId: CAMPAIGN_STATE.universityId || '',
-    applicationUrl: CAMPAIGN_STATE.applicationUrl || '',
-    course: ct.course || CAMPAIGN_STATE.course || '',
-    email: ct.email || '',
-    state: ct.state || '',
-    district: ct.district || '',
-    program: ct.program || '',
-    extraFields: ct.extraFields || {}
-  }));
-
   // Kick off sequential execution
   processNextInQueue();
 
-  res.json({
-    success: true,
-    campaignId: newCampaignId,
-    campaignName: finalCampaignName,
-    message: `Started sequential calling campaign "${finalCampaignName}" with ${parsedQueue.length} contacts.`,
-    totalCount: parsedQueue.length
-  });
+    res.json({
+      success: true,
+      campaignId: newCampaignId,
+      campaignName: finalCampaignName,
+      message: `Started sequential calling campaign "${finalCampaignName}" with ${parsedQueue.length} contacts.`,
+      totalCount: parsedQueue.length
+    });
+  } catch (err) {
+    console.error('Error starting campaign:', err);
+    addLog('error', `Failed to start campaign: ${err.message}`);
+    res.status(500).json({ success: false, error: err.message || 'Server error starting campaign' });
+  }
 });
+
 
 // Campaign Management Endpoints
 app.get('/api/campaigns', async (req, res) => {
@@ -2267,6 +2565,11 @@ app.get('/api/campaigns/:id/export', async (req, res) => {
     const camp = all.find(c => c.id === req.params.id);
     if (!camp) return res.status(404).json({ success: false, error: 'Campaign not found' });
 
+    let campaignContacts = camp.contacts || [];
+    if (req.query.completedOnly === 'true') {
+      campaignContacts = campaignContacts.filter(c => c.status !== 'queued' && c.status !== 'in-progress');
+    }
+
     const cachedSheets = await loadCache();
     const cachedOmni = await loadOmniCache();
     const phoneMap = new Map();
@@ -2316,7 +2619,7 @@ app.get('/api/campaigns/:id/export', async (req, res) => {
 
     // Discover dynamic extra columns from uploaded Excel sheets
     const extraFieldKeys = [];
-    (camp.contacts || []).forEach(c => {
+    campaignContacts.forEach(c => {
       if (c.extraFields && typeof c.extraFields === 'object') {
         Object.keys(c.extraFields).forEach(k => {
           if (!isStandardKey(k) && !extraFieldKeys.includes(k)) {
@@ -2340,7 +2643,7 @@ app.get('/api/campaigns/:id/export', async (req, res) => {
       return `"${str}"`;
     };
 
-    const rows = (camp.contacts || []).map((c, i) => {
+    const rows = campaignContacts.map((c, i) => {
       const cleanPhone = String(c.formattedPhone || c.phone || '').replace(/\D/g, '').slice(-10);
       const match = cleanPhone ? phoneMap.get(cleanPhone) : null;
       const rf = match?.rawFields || {};
@@ -2489,9 +2792,18 @@ app.post('/api/queue/cancel', (req, res) => {
     clearTimeout(queueNextTimer);
     queueNextTimer = null;
   }
+  if (campaignScheduleTimer) {
+    clearTimeout(campaignScheduleTimer);
+    campaignScheduleTimer = null;
+  }
+  if (campaignEndTimer) {
+    clearTimeout(campaignEndTimer);
+    campaignEndTimer = null;
+  }
 
   CAMPAIGN_STATE.isRunning = false;
   CAMPAIGN_STATE.isPaused = false;
+  CAMPAIGN_STATE.isScheduled = false;
 
   CALL_QUEUE.forEach(c => {
     if (c.status === 'queued' || c.status === 'in-progress') {
@@ -2504,6 +2816,33 @@ app.post('/api/queue/cancel', (req, res) => {
   addLog('warning', 'Sequential calling campaign CANCELLED by user.');
   broadcastQueueUpdate();
   res.json({ success: true, message: 'Campaign cancelled.' });
+});
+
+// 4b. Schedule Controls: Cancel Scheduled Campaign
+app.post('/api/queue/schedule/cancel', (req, res) => {
+  if (campaignScheduleTimer) {
+    clearTimeout(campaignScheduleTimer);
+    campaignScheduleTimer = null;
+  }
+  CAMPAIGN_STATE.isScheduled = false;
+  CAMPAIGN_STATE.isRunning = false;
+  CAMPAIGN_STATE.scheduledStartTime = null;
+
+  CALL_QUEUE = [];
+  CURRENT_CALL = null;
+
+  addLog('warning', 'Scheduled campaign has been cancelled.');
+  broadcastQueueUpdate();
+  res.json({ success: true, message: 'Scheduled campaign cancelled.' });
+});
+
+// 4c. Schedule Controls: Start Now (Force start a scheduled campaign immediately)
+app.post('/api/queue/schedule/start-now', (req, res) => {
+  if (!CAMPAIGN_STATE.isScheduled) {
+    return res.status(400).json({ error: 'No scheduled campaign waiting to start.' });
+  }
+  startScheduledCampaign();
+  res.json({ success: true, message: 'Scheduled campaign started now.' });
 });
 
 // 5. Get Campaign & Queue Status
