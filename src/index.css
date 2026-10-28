@@ -1753,6 +1753,15 @@ tr.row-unanswered:hover {
   color: var(--text-secondary);
 }
 
+.pagination-bar.pagination-top {
+  border-top: none;
+  border-bottom: 1px solid rgba(27, 59, 111, 0.08);
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
 .pagination-left {
   display: flex;
   align-items: center;

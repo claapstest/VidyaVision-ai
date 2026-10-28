@@ -19,7 +19,10 @@ export default function TablePagination({
   pageSizeOptions = [10, 20, 50, 100],
   onPageChange,
   onPageSizeChange,
-  itemLabel = 'records'
+  itemLabel = 'records',
+  className = '',
+  style = {},
+  idPrefix = ''
 }) {
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
   const safePage = Math.min(Math.max(1, currentPage), totalPages);
@@ -56,16 +59,18 @@ export default function TablePagination({
     }
   };
 
+  const selectId = `${idPrefix ? idPrefix + '-' : ''}page-size-${itemLabel}`;
+
   return (
-    <div className="pagination-bar">
+    <div className={`pagination-bar ${className}`.trim()} style={style}>
       {/* Left section: Rows Per Page & Range Info */}
       <div className="pagination-left">
         <div className="pagination-page-size">
-          <label htmlFor={`page-size-${itemLabel}`} style={{ fontSize: '0.85rem' }}>
+          <label htmlFor={selectId} style={{ fontSize: '0.85rem' }}>
             Rows per page:
           </label>
           <select
-            id={`page-size-${itemLabel}`}
+            id={selectId}
             value={pageSize}
             onChange={handlePageSizeChange}
             className="pagination-select"

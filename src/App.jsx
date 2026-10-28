@@ -509,6 +509,7 @@ export default function App() {
   const [dashboardFilter, setDashboardFilter] = useState('ALL');
   const [dashboardSearch, setDashboardSearch] = useState('');
   const [dashboardUniversityFilter, setDashboardUniversityFilter] = useState(['ALL']);
+  const [dashboardCampaignFilter, setDashboardCampaignFilter] = useState('ALL');
   // Multi-select scope: ['ALL'] (or empty) = all colleges; otherwise selected college ids
   const toggleUniScope = (id) => {
     setDashboardUniversityFilter(prev => {
@@ -538,7 +539,7 @@ export default function App() {
   // Auto-reset Dashboard page to 1 when filters or search change
   useEffect(() => {
     setDashboardPage(1);
-  }, [dashboardFilter, dashboardSearch, dashboardUniversityFilter, dateFilter, statusFilter, sortBy, customStartDate, customEndDate]);
+  }, [dashboardFilter, dashboardSearch, dashboardUniversityFilter, dashboardCampaignFilter, dateFilter, statusFilter, sortBy, customStartDate, customEndDate]);
 
   // Auto-reset Recent Calls page to 1 when search or page size changes
   useEffect(() => {
@@ -589,12 +590,15 @@ export default function App() {
   }, [universities]);
 
   // Dashboard multi-select scope helpers (after universities is defined)
+  const selectedDashboardCamp = dashboardCampaignFilter !== 'ALL' ? campaigns.find(c => c.id === dashboardCampaignFilter) : null;
   const isAllUniScope = dashboardUniversityFilter.includes('ALL') || dashboardUniversityFilter.length === 0;
-  const uniScopeLabel = isAllUniScope
-    ? 'All Universities'
-    : dashboardUniversityFilter.length === 1
-      ? ((universities.find(u => u.id === dashboardUniversityFilter[0]) || {}).name || dashboardUniversityFilter[0])
-      : `${dashboardUniversityFilter.length} Colleges`;
+  const uniScopeLabel = selectedDashboardCamp
+    ? `Campaign: ${selectedDashboardCamp.name}`
+    : isAllUniScope
+      ? 'All Universities'
+      : dashboardUniversityFilter.length === 1
+        ? ((universities.find(u => u.id === dashboardUniversityFilter[0]) || {}).name || dashboardUniversityFilter[0])
+        : `${dashboardUniversityFilter.length} Colleges`;
 
   const syncColleges = (items) => {
     if (Array.isArray(items) && items.length > 0) {
@@ -2725,22 +2729,24 @@ export default function App() {
       const cleanOutcomeUpper = String(c.callOutcome || '').toUpperCase().trim();
       if (cStatus === 'queued') {
         resolvedStatus = 'QUEUED';
-      } else if (cleanOutcomeUpper === 'INTERESTED' || cleanOutcomeUpper.includes('INTEREST')) {
-        resolvedStatus = CALL_OUTCOME_STATUS.INTERESTED;
-      } else if (cleanOutcomeUpper === 'CALLBACK' || cleanOutcomeUpper.includes('CALLBACK')) {
-        resolvedStatus = CALL_OUTCOME_STATUS.CALLBACK;
-      } else if (cleanOutcomeUpper.includes('NOT INTERESTED')) {
+      } else if (cleanOutcomeUpper.includes('NOT INTERESTED') || cleanOutcomeUpper.includes('NOT_INTERESTED')) {
         resolvedStatus = CALL_OUTCOME_STATUS.NOT_INTERESTED;
-      } else if (cleanOutcomeUpper.includes('APPLICATION SENT')) {
+      } else if (cleanOutcomeUpper.includes('APPLICATION SENT') || cleanOutcomeUpper.includes('APPLICATION_SENT')) {
         resolvedStatus = CALL_OUTCOME_STATUS.APPLICATION_SENT;
-      } else if (cleanOutcomeUpper.includes('ALREADY JOINED')) {
+      } else if (cleanOutcomeUpper.includes('ALREADY JOINED') || cleanOutcomeUpper.includes('ALREADY_JOINED')) {
         resolvedStatus = CALL_OUTCOME_STATUS.ALREADY_JOINED;
-      } else if (cleanOutcomeUpper.includes('ALREADY APPLIED')) {
+      } else if (cleanOutcomeUpper.includes('ALREADY APPLIED') || cleanOutcomeUpper.includes('ALREADY_APPLIED')) {
         resolvedStatus = CALL_OUTCOME_STATUS.ALREADY_APPLIED;
       } else if (cleanOutcomeUpper.includes('WRONG') || cleanOutcomeUpper.includes('INVALID')) {
         resolvedStatus = CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID;
+      } else if (cleanOutcomeUpper.includes('CALLBACK')) {
+        resolvedStatus = CALL_OUTCOME_STATUS.CALLBACK;
+      } else if (cleanOutcomeUpper === 'INTERESTED' || cleanOutcomeUpper === 'HOT LEAD' || (!cleanOutcomeUpper.includes('NOT') && cleanOutcomeUpper.includes('INTEREST'))) {
+        resolvedStatus = CALL_OUTCOME_STATUS.INTERESTED;
       } else if (isContactUnanswered) {
         resolvedStatus = CALL_OUTCOME_STATUS.NOT_ANSWERED;
+      } else if (matchedCall) {
+        resolvedStatus = resolveCallFinalStatus(matchedCall);
       }
 
       // Merge extra fields ensuring all discovered keys exist with default '—'
@@ -2897,12 +2903,31 @@ export default function App() {
       if (rows.length > 0) wsContacts['!cols'] = calculateColWidths(rows);
       XLSX.utils.book_append_sheet(workbook, wsContacts, onlyCompleted ? "Completed Leads" : "Campaign Leads");
 
-      // 2. Overview Sheet
-      const answeredCount = rows.filter(r => !String(r['Lead Status'] || '').includes('Not Answered') && !String(r['Lead Status'] || '').includes('Queued')).length;
-      const interestedCount = rows.filter(r => String(r['Lead Status'] || '').includes('Interested')).length;
-      const callbackCount = rows.filter(r => String(r['Lead Status'] || '').includes('Callback')).length;
-      const unansweredCount = rows.filter(r => String(r['Lead Status'] || '').includes('Not Answered')).length;
-      const queuedCount = rows.filter(r => String(r['Lead Status'] || '').includes('Queued')).length;
+      // 2. Overview Sheet - strictly mutually exclusive matching
+      const isLeadInterested = (statusStr) => {
+        const s = String(statusStr || '');
+        return s.includes('Interested') && !s.includes('Not Interested');
+      };
+      const isLeadNotInterested = (statusStr) => String(statusStr || '').includes('Not Interested');
+      const isLeadAppSent = (statusStr) => String(statusStr || '').includes('Application Sent');
+      const isLeadCallback = (statusStr) => String(statusStr || '').includes('Callback');
+      const isLeadAlreadyApplied = (statusStr) => String(statusStr || '').includes('Already Applied');
+      const isLeadAlreadyJoined = (statusStr) => String(statusStr || '').includes('Already Joined');
+      const isLeadWrongNumber = (statusStr) => String(statusStr || '').includes('Wrong') || String(statusStr || '').includes('Invalid');
+      const isLeadUnanswered = (statusStr) => String(statusStr || '').includes('Not Answered');
+      const isLeadQueued = (statusStr) => String(statusStr || '').includes('Queued');
+      const isLeadAnswered = (statusStr) => !isLeadUnanswered(statusStr) && !isLeadQueued(statusStr);
+
+      const answeredCount = rows.filter(r => isLeadAnswered(r['Lead Status'])).length;
+      const unansweredCount = rows.filter(r => isLeadUnanswered(r['Lead Status'])).length;
+      const interestedCount = rows.filter(r => isLeadInterested(r['Lead Status'])).length;
+      const appSentCount = rows.filter(r => isLeadAppSent(r['Lead Status'])).length;
+      const callbackCount = rows.filter(r => isLeadCallback(r['Lead Status'])).length;
+      const alreadyAppliedCount = rows.filter(r => isLeadAlreadyApplied(r['Lead Status'])).length;
+      const alreadyJoinedCount = rows.filter(r => isLeadAlreadyJoined(r['Lead Status'])).length;
+      const notInterestedCount = rows.filter(r => isLeadNotInterested(r['Lead Status'])).length;
+      const wrongNumberCount = rows.filter(r => isLeadWrongNumber(r['Lead Status'])).length;
+      const queuedCount = rows.filter(r => isLeadQueued(r['Lead Status'])).length;
 
       const summaryRows = [
         { 'Metric': 'Campaign Name', 'Value': camp.name || 'Untitled Campaign' },
@@ -2917,14 +2942,19 @@ export default function App() {
         { 'Metric': 'Calls Answered', 'Value': answeredCount },
         { 'Metric': 'Calls Not Answered', 'Value': unansweredCount },
         { 'Metric': 'Interested Leads', 'Value': interestedCount },
+        { 'Metric': 'Application Sent (WhatsApp)', 'Value': appSentCount },
         { 'Metric': 'Callbacks Requested', 'Value': callbackCount },
+        { 'Metric': 'Already Applied', 'Value': alreadyAppliedCount },
+        { 'Metric': 'Already Joined / Enrolled', 'Value': alreadyJoinedCount },
+        { 'Metric': 'Not Interested', 'Value': notInterestedCount },
+        { 'Metric': 'Wrong / Invalid Number', 'Value': wrongNumberCount },
         ...(onlyCompleted ? [] : [{ 'Metric': 'Queued / Pending', 'Value': queuedCount }])
       ];
       const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
-      wsSummary['!cols'] = [{ wch: 26 }, { wch: 40 }];
+      wsSummary['!cols'] = [{ wch: 30 }, { wch: 42 }];
       XLSX.utils.book_append_sheet(workbook, wsSummary, "Overview");
 
-      // 3. Category sheets for fast counselor follow-up
+      // 3. Category sheets for fast counselor follow-up (strictly mutually exclusive)
       const appendCategorySheet = (sheetTitle, filterFn) => {
         const catRows = rows.filter(filterFn);
         if (catRows.length > 0) {
@@ -2934,10 +2964,14 @@ export default function App() {
         }
       };
 
-      appendCategorySheet("Interested", r => String(r['Lead Status'] || '').includes('Interested'));
-      appendCategorySheet("Callback", r => String(r['Lead Status'] || '').includes('Callback'));
-      appendCategorySheet("Application Sent", r => String(r['Lead Status'] || '').includes('Application Sent'));
-      appendCategorySheet("Calls Not Answered", r => String(r['Lead Status'] || '').includes('Not Answered'));
+      appendCategorySheet("Interested", r => isLeadInterested(r['Lead Status']));
+      appendCategorySheet("Application Sent", r => isLeadAppSent(r['Lead Status']));
+      appendCategorySheet("Callback", r => isLeadCallback(r['Lead Status']));
+      appendCategorySheet("Already Applied", r => isLeadAlreadyApplied(r['Lead Status']));
+      appendCategorySheet("Already Joined", r => isLeadAlreadyJoined(r['Lead Status']));
+      appendCategorySheet("Not Interested", r => isLeadNotInterested(r['Lead Status']));
+      appendCategorySheet("Wrong or Invalid", r => isLeadWrongNumber(r['Lead Status']));
+      appendCategorySheet("Calls Not Answered", r => isLeadUnanswered(r['Lead Status']));
 
       const safeName = (camp.name || 'campaign').replace(/[^a-zA-Z0-9_-]/g, '_');
       const filenameSuffix = onlyCompleted ? '_Completed_Calls' : '_Report';
@@ -3068,8 +3102,22 @@ export default function App() {
     return mergedCalls.filter(c => dashboardUniversityFilter.includes(getCallUniversityId(c)));
   }, [mergedCalls, dashboardUniversityFilter]);
 
-  // Date Filtered Calls (Base subset for dashboard, using university-filtered base)
-  const dateFilteredCalls = filterByDate(universityFilteredCalls, dateFilter, customStartDate, customEndDate);
+  // Filter by selected campaign (if a specific campaign is selected)
+  const campaignFilteredCalls = React.useMemo(() => {
+    if (dashboardCampaignFilter === 'ALL') return universityFilteredCalls;
+    const selectedCamp = campaigns.find(c => c.id === dashboardCampaignFilter);
+    if (!selectedCamp) return universityFilteredCalls;
+    const phoneSet = new Set(
+      (selectedCamp.contacts || []).map(c => String(c.formattedPhone || c.phone || '').replace(/\D/g, '').slice(-10)).filter(Boolean)
+    );
+    return universityFilteredCalls.filter(c => {
+      const p = String(c.contactNumber || c.to_number || c.phone_number || c.phone || c.rawFields?.to_number || '').replace(/\D/g, '').slice(-10);
+      return phoneSet.has(p);
+    });
+  }, [universityFilteredCalls, dashboardCampaignFilter, campaigns]);
+
+  // Date Filtered Calls (Base subset for dashboard, using university and campaign filtered base)
+  const dateFilteredCalls = filterByDate(campaignFilteredCalls, dateFilter, customStartDate, customEndDate);
 
   // Count metrics from date-filtered subset (strictly mutually exclusive per call!)
   const totalDispatchedCount = dateFilteredCalls.length;
@@ -5159,7 +5207,19 @@ export default function App() {
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', flex: '1 1 320px' }}>
                   <GraduationCap size={18} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-                  {isAllUniScope ? (
+                  {selectedDashboardCamp ? (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <span>Showing call history for Campaign: <strong style={{ color: 'var(--text-primary)' }}>{selectedDashboardCamp.name}</strong> • <strong style={{ color: '#818cf8' }}>{totalDispatchedCount} calls</strong> in scope</span>
+                      <button
+                        type="button"
+                        onClick={() => setDashboardCampaignFilter('ALL')}
+                        style={{ background: 'none', border: '1px solid rgba(99,102,241,0.4)', borderRadius: '4px', color: '#818cf8', cursor: 'pointer', fontSize: '0.74rem', padding: '0.1rem 0.4rem', fontWeight: '600' }}
+                        title="Show all campaigns"
+                      >
+                        ✕ Clear Campaign
+                      </button>
+                    </span>
+                  ) : isAllUniScope ? (
                     <span>Showing call history across <strong style={{ color: 'var(--text-primary)' }}>All Universities</strong> ({universities.length} colleges) • <b>{uniStats.ALL.total}</b> total calls</span>
                   ) : dashboardUniversityFilter.length === 1 ? (() => {
                     const sel = universities.find(u => u.id === dashboardUniversityFilter[0]);
@@ -5345,14 +5405,25 @@ export default function App() {
 
                                 {/* Action Buttons */}
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.4rem', borderTop: '1px solid var(--border)', paddingTop: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
-                                  <button
-                                    type="button"
-                                    className="btn btn-primary"
-                                    style={{ fontSize: '0.78rem', padding: '0.35rem 0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
-                                    onClick={() => { setSelectedCampaignDetail(camp); setCampaignCheckedContacts([]); setCameFromPastCampaignsModal(false); }}
-                                  >
-                                    <span>👁️</span> View Student Table ({camp.contacts?.length || camp.totalCount || 0})
-                                  </button>
+                                  <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                    <button
+                                      type="button"
+                                      className="btn btn-primary"
+                                      style={{ fontSize: '0.78rem', padding: '0.35rem 0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                                      onClick={() => { setSelectedCampaignDetail(camp); setCampaignCheckedContacts([]); setCameFromPastCampaignsModal(false); }}
+                                    >
+                                      <span>👁️</span> View Student Table ({camp.contacts?.length || camp.totalCount || 0})
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className={`btn ${dashboardCampaignFilter === camp.id ? 'btn-primary' : 'btn-secondary'}`}
+                                      style={{ fontSize: '0.78rem', padding: '0.35rem 0.65rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem', ...(dashboardCampaignFilter === camp.id ? { backgroundColor: '#6366f1', borderColor: '#4f46e5' } : {}) }}
+                                      onClick={() => setDashboardCampaignFilter(prev => prev === camp.id ? 'ALL' : camp.id)}
+                                      title={dashboardCampaignFilter === camp.id ? 'Currently filtered on Call Analytics dashboard. Click to show all campaigns.' : 'Filter Call Analytics Dashboard to this campaign'}
+                                    >
+                                      <span>🔍</span> {dashboardCampaignFilter === camp.id ? 'Filtered' : 'Filter'}
+                                    </button>
+                                  </div>
 
                                   <div style={{ display: 'flex', gap: '0.35rem' }}>
                                     <button
@@ -6133,7 +6204,27 @@ export default function App() {
                   </select>
                 </div>
 
-                {/* 3. Sorting */}
+                {/* 3. Campaign Filter */}
+                {campaigns.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                    <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Campaign</label>
+                    <select
+                      className="form-input"
+                      style={{ padding: '0.45rem 0.8rem', fontSize: '0.85rem', minWidth: '180px', maxWidth: '280px' }}
+                      value={dashboardCampaignFilter}
+                      onChange={(e) => setDashboardCampaignFilter(e.target.value)}
+                    >
+                      <option value="ALL">📢 All Campaigns ({campaigns.length})</option>
+                      {campaigns.map(camp => (
+                        <option key={camp.id} value={camp.id}>
+                          {camp.name} ({camp.totalCount || (camp.contacts && camp.contacts.length) || 0})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* 4. Sorting */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                   <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: '700', textTransform: 'uppercase' }}>Sort Order</label>
                   <select
@@ -6152,7 +6243,7 @@ export default function App() {
                 </div>
 
                 {/* Clear Button */}
-                {(dashboardFilter !== 'ALL' || dateFilter !== 'ALL' || statusFilter !== 'ALL' || dashboardSearch.trim() || !isAllUniScope) && (
+                {(dashboardFilter !== 'ALL' || dateFilter !== 'ALL' || statusFilter !== 'ALL' || dashboardCampaignFilter !== 'ALL' || dashboardSearch.trim() || !isAllUniScope) && (
                   <button
                     className="btn btn-secondary"
                     style={{ padding: '0.45rem 0.85rem', fontSize: '0.82rem', height: 'fit-content' }}
@@ -6162,6 +6253,7 @@ export default function App() {
                       setCustomStartDate('');
                       setCustomEndDate('');
                       setStatusFilter('ALL');
+                      setDashboardCampaignFilter('ALL');
                       setDashboardSearch('');
                       setDashboardUniversityFilter(['ALL']);
                       addToast('Reset filters.', 'info');
@@ -6229,6 +6321,20 @@ export default function App() {
                 </div>
               ) : (
                 <div className="calls-table-container">
+                  <TablePagination
+                    totalItems={finalDashboardList.length}
+                    currentPage={safeDashboardPage}
+                    pageSize={dashboardPageSize}
+                    pageSizeOptions={[10, 20, 50, 100]}
+                    onPageChange={(page) => setDashboardPage(page)}
+                    onPageSizeChange={(newSize) => {
+                      setDashboardPageSize(newSize);
+                      setDashboardPage(1);
+                    }}
+                    itemLabel="leads"
+                    className="pagination-top"
+                    idPrefix="top"
+                  />
                   <table className="calls-table">
                     <thead>
                       <tr>
@@ -6510,6 +6616,7 @@ export default function App() {
                       setDashboardPage(1);
                     }}
                     itemLabel="leads"
+                    idPrefix="bottom"
                   />
                 </div>
               )}
