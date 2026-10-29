@@ -9,9 +9,52 @@ import { google } from 'googleapis';
 
 dotenv.config();
 
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
+  : [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:5000',
+    'http://127.0.0.1:5000',
+    'http://localhost:3000',
+    'http://127.0.0.1:3000'
+  ];
+
+function isOriginAllowed(origin) {
+  if (!origin) return true; // Direct non-browser requests or same-origin
+  if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) return true;
+  // Permit any local development port on localhost or 127.0.0.1
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return true;
+  return false;
+}
+
 const app = express();
-app.use(cors());
-app.use(express.json());
+app.use(cors({
+  origin: (origin, callback) => {
+    if (isOriginAllowed(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
+  credentials: true
+}));
+app.use(express.json({ limit: '15mb' }));
+app.use(express.urlencoded({ extended: true, limit: '15mb' }));
+
+// API Authentication Middleware (SEC-01)
+const requireAuth = (req, res, next) => {
+  const configuredKey = process.env.APP_API_KEY;
+  if (!configuredKey) {
+    // If no APP_API_KEY is configured in .env, permit requests (development/internal mode)
+    return next();
+  }
+  const providedKey = req.headers['x-api-key'] || req.query.apiKey;
+  if (!providedKey || providedKey !== configuredKey) {
+    return res.status(401).json({ success: false, error: 'Unauthorized: Invalid or missing API key' });
+  }
+  next();
+};
+app.use('/api', requireAuth);
 
 const PORT = process.env.PORT || 5000;
 
@@ -334,6 +377,18 @@ function rememberCallTarget(formattedPhone, info) {
   fs.writeFile(CALL_TARGETS_FILE, JSON.stringify(CALL_TARGETS, null, 2), 'utf8').catch(() => { });
 }
 
+function rememberCallTargetsBulk(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) return;
+  const now = new Date().toISOString();
+  entries.forEach(({ formattedPhone, info }) => {
+    const digits = String(formattedPhone || '').replace(/\D/g, '');
+    const key = digits.length === 10 ? digits : digits.slice(-10);
+    if (!key) return;
+    CALL_TARGETS[key] = { ...(CALL_TARGETS[key] || {}), ...info, updatedAt: now };
+  });
+  fs.writeFile(CALL_TARGETS_FILE, JSON.stringify(CALL_TARGETS, null, 2), 'utf8').catch(() => { });
+}
+
 function getCallTarget(cleanPhone) {
   return (cleanPhone && CALL_TARGETS[cleanPhone]) || null;
 }
@@ -398,16 +453,23 @@ function formatDuration(durationStr) {
   return durationStr;
 }
 
+function maskPii(str) {
+  if (typeof str !== 'string') return str;
+  // Mask 10-digit Indian phone numbers to preserve privacy (TC-SEC-06)
+  return str.replace(/(\+?91[\s-]?)?([6-9]\d{4})(\d{5})/g, '$1$2*****');
+}
+
 function addLog(type, message) {
+  const sanitizedMessage = maskPii(String(message || ''));
   const logEntry = {
     id: String(Date.now()) + '-' + Math.random().toString(36).substr(2, 4),
     timestamp: new Date().toISOString(),
     type, // 'info', 'success', 'error', 'warning'
-    message
+    message: sanitizedMessage
   };
   LOGS.push(logEntry);
   if (LOGS.length > 150) LOGS.shift(); // Keep logs memory clean
-  console.log(`[${type.toUpperCase()}] ${message}`);
+  console.log(`[${type.toUpperCase()}] ${sanitizedMessage}`);
   broadcast({ type: 'logs', data: LOGS });
 }
 
@@ -1339,10 +1401,12 @@ function buildAdmissionMessage({ studentName, collegeName, applicationUrl }) {
 // action — never attempt HTTP delivery from here.
 
 async function maybeAutoSendWhatsApp(matchedCall, pending) {
-  // NOTE: OmniDimension exposes NO WhatsApp-send REST endpoint, so this backend
-  // does not attempt HTTP delivery. The real WhatsApp goes out via the AGENT's
-  // Post-Call Cloud WhatsApp action. Here we only record the outcome so the
-  // dashboard flips to APPLICATION_SENT the moment interest is detected.
+  // WhatsApp dispatch option is currently stopped/disabled.
+  // Do not auto-flip contacts to APPLICATION_SENT so data truthfully reflects INTERESTED.
+  return null;
+}
+
+async function _deprecatedAutoSendWhatsApp(matchedCall, pending) {
   try {
     const enriched = enrichCallWithInterest(matchedCall || {});
     if (enriched.interestStatus !== CALL_OUTCOME_STATUS.INTERESTED) return null;
@@ -1560,7 +1624,7 @@ function handleQueueContactFinished(contact, isAnswered, statusText, durationStr
         else camp.unansweredCount = (camp.unansweredCount || 0) + 1;
         camp.completedCount = (camp.completedCount || 0) + 1;
         if (Array.isArray(camp.contacts)) {
-          const cMatch = camp.contacts.find(c => c.phone === contact.phone || c.formattedPhone === contact.formattedPhone);
+          const cMatch = camp.contacts.find(c => (contact.id && c.id === contact.id) || (!contact.id && (c.phone === contact.phone || c.formattedPhone === contact.formattedPhone)));
           if (cMatch) {
             cMatch.status = isAnswered ? 'completed' : 'no-answer';
             cMatch.callOutcome = isAnswered ? 'Completed' : (statusText || 'No Answer');
@@ -1681,23 +1745,23 @@ async function pollCallsOnce() {
         }
       }
     } else {
-      // Omni posts call logs with a delay (often 1-4 min after hang-up for
-      // recording/analysis/post-actions). Keep waiting up to 8 minutes so a
-      // slow log never strands the queue as "dialing" forever.
+      // Omni posts call logs with a delay (often 30s - 2 min after hang-up for
+      // recording/analysis/post-actions). Keep waiting up to 2.5 minutes (150s)
+      // so a delayed log is caught, but never freezes the sequential dialer for 8 minutes.
       const waitedSec = Math.floor((Date.now() - pending.dispatchTime) / 1000);
-      if (waitedSec > 150 && !pending.waitingLogged) {
+      if (waitedSec > 60 && !pending.waitingLogged) {
         pending.waitingLogged = true;
-        addLog('info', `Still waiting for the call log of "${pending.fullName}" (${phone}) — Omni publishes it a few minutes after hang-up. Queue stays on this contact.`);
+        addLog('info', `Still waiting for the call log of "${pending.fullName}" (${phone}) — checking Omni updates...`);
       }
-      if (Date.now() - pending.dispatchTime > 480000) {
+      if (Date.now() - pending.dispatchTime > 150000) {
         PENDING_CALLS.delete(phone);
         updateWsPolling();
 
-        const queueContact = CALL_QUEUE.find(q => q.id === pending.queueContactId || q.formattedPhone === phone);
+        const queueContact = CALL_QUEUE.find(q => (pending.queueContactId && q.id === pending.queueContactId) || q.formattedPhone === phone);
         if (queueContact && queueContact.status === 'in-progress') {
           handleQueueContactFinished(queueContact, false, 'timeout', '0:00');
         } else {
-          addLog('error', `Call status tracking for "${pending.fullName}" (${phone}) timed out.`);
+          addLog('error', `Call status tracking for "${pending.fullName}" (${phone}) timed out (exceeded 2.5 minutes). Moving to next contact.`);
         }
       }
     }
@@ -1844,7 +1908,7 @@ async function processNextInQueue() {
             await saveCampaigns(all);
             broadcast({ type: 'campaigns', data: all });
           }
-        }).catch(() => {});
+        }).catch(() => { });
       }
 
       broadcastQueueUpdate();
@@ -2049,6 +2113,13 @@ wss.on('connection', (ws) => {
 });
 
 server.on('upgrade', (req, socket, head) => {
+  const origin = req.headers.origin;
+  // Protect against Cross-Site WebSocket Hijacking (SEC-02)
+  if (origin && !isOriginAllowed(origin)) {
+    socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+    socket.destroy();
+    return;
+  }
   const url = new URL(req.url, `http://${req.headers.host}`);
   if (url.pathname === '/api/stream') {
     wss.handleUpgrade(req, socket, head, (ws) => {
@@ -2170,6 +2241,19 @@ app.delete('/api/colleges/:id', async (req, res) => {
       return res.status(404).json({ success: false, error: 'College not found.' });
     }
 
+    // Reject deletion if referenced by an active, paused, or scheduled campaign (TC-CAM-03)
+    const allCampaigns = await loadCampaigns();
+    const activeCamp = allCampaigns.find(camp =>
+      (camp.universityId === id || camp.universityName?.toLowerCase() === target.name?.toLowerCase()) &&
+      (camp.status === 'in-progress' || camp.status === 'scheduled' || camp.status === 'paused')
+    );
+    if (activeCamp && req.query.force !== 'true') {
+      return res.status(409).json({
+        success: false,
+        error: `Cannot delete "${target.name}" because it is currently used by campaign "${activeCamp.name}" (${activeCamp.status}). Please complete or cancel the campaign first.`
+      });
+    }
+
     const updatedList = currentList.filter(c => c.id !== id);
     await saveColleges(updatedList);
     broadcast({ type: 'colleges', data: updatedList });
@@ -2185,136 +2269,252 @@ app.delete('/api/colleges/:id', async (req, res) => {
 app.post('/api/queue/start', (req, res) => {
   try {
     const {
-    contacts,
-    delaySeconds,
-    agentId,
-    universityName,
-    universityId,
-    collegePlace,
-    applicationUrl,
-    course,
-    campaignName,
-    startMode = 'immediate',
-    scheduledStartTime = null,
-    endMode = 'none',
-    maxDurationMinutes = null,
-    cutoffTime = null
-  } = req.body;
+      contacts,
+      delaySeconds,
+      agentId,
+      universityName,
+      universityId,
+      collegePlace,
+      applicationUrl,
+      course,
+      campaignName,
+      startMode = 'immediate',
+      scheduledStartTime = null,
+      endMode = 'none',
+      maxDurationMinutes = null,
+      cutoffTime = null
+    } = req.body;
 
-  if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
-    addLog('error', 'Batch call failed: No contacts provided.');
-    return res.status(400).json({ error: 'Please provide at least one contact to start dialing.' });
-  }
+    if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
+      addLog('error', 'Batch call failed: No contacts provided.');
+      return res.status(400).json({ error: 'Please provide at least one contact to start dialing.' });
+    }
 
-  // Validate and parse contacts
-  const parsedQueue = [];
-
-  contacts.forEach((c, idx) => {
-    const formatted = validateAndFormatMobile(c.phone);
-    if (formatted) {
-      parsedQueue.push({
-        id: `contact-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 4)}`,
-        phone: c.phone,
-        formattedPhone: formatted,
-        name: c.name ? String(c.name).trim() : '',
-        universityId: universityId ? String(universityId) : '',
-        universityName: universityName ? String(universityName) : '',
-        course: (c.course ? String(c.course).trim() : '') || (course ? String(course).trim() : ''),
-        status: 'queued',
-        duration: '—',
-        reason: '',
-        email: c.email ? String(c.email).trim() : '',
-        state: c.state ? String(c.state).trim() : '',
-        district: c.district ? String(c.district).trim() : '',
-        program: (c.program ? String(c.program).trim() : '') || (c.course ? String(c.course).trim() : '') || (course ? String(course).trim() : ''),
-        extraFields: (c.extraFields && typeof c.extraFields === 'object') ? c.extraFields : {}
+    // Prevent accidental overwriting of an active dialing queue (TC-API-02)
+    if (CAMPAIGN_STATE && CAMPAIGN_STATE.isRunning && !req.body.force && CAMPAIGN_STATE.campaignId !== req.body?.campaignId) {
+      return res.status(409).json({
+        success: false,
+        error: `Campaign "${CAMPAIGN_STATE.campaignName || 'Active Campaign'}" is currently actively dialing. Please pause or cancel the running campaign first before starting a new one.`
       });
     }
-  });
 
-  if (parsedQueue.length === 0) {
-    addLog('error', 'Batch call failed: No valid phone numbers found in list.');
-    return res.status(400).json({ error: 'No valid mobile numbers found in submission.' });
-  }
+    // Validate and parse contacts
+    const parsedQueue = [];
 
-  const defaultCampaignName = `${universityName || 'University'} - ${course ? course + ' ' : ''}Campaign (${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}, ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })})`;
-  const finalCampaignName = campaignName && campaignName.trim() ? campaignName.trim() : defaultCampaignName;
-  const newCampaignId = `camp-${Date.now()}`;
-
-  // Clear any existing timers
-  if (campaignScheduleTimer) {
-    clearTimeout(campaignScheduleTimer);
-    campaignScheduleTimer = null;
-  }
-  if (campaignEndTimer) {
-    clearTimeout(campaignEndTimer);
-    campaignEndTimer = null;
-  }
-  if (queueNextTimer) {
-    clearTimeout(queueNextTimer);
-    queueNextTimer = null;
-  }
-
-  // Resolve Cutoff Timestamp if specified
-  let resolvedCutoffTimestamp = null;
-  let resolvedCutoffDisplay = null;
-  if (endMode === 'cutoff' && cutoffTime) {
-    if (String(cutoffTime).includes('T')) {
-      const dt = new Date(cutoffTime);
-      if (!isNaN(dt.getTime())) {
-        resolvedCutoffTimestamp = dt.toISOString();
-        resolvedCutoffDisplay = dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    contacts.forEach((c, idx) => {
+      const formatted = validateAndFormatMobile(c.phone);
+      if (formatted) {
+        parsedQueue.push({
+          id: `contact-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 4)}`,
+          phone: c.phone,
+          formattedPhone: formatted,
+          name: c.name ? String(c.name).trim() : '',
+          universityId: universityId ? String(universityId) : '',
+          universityName: universityName ? String(universityName) : '',
+          course: (c.course ? String(c.course).trim() : '') || (course ? String(course).trim() : ''),
+          status: 'queued',
+          duration: '—',
+          reason: '',
+          email: c.email ? String(c.email).trim() : '',
+          state: c.state ? String(c.state).trim() : '',
+          district: c.district ? String(c.district).trim() : '',
+          program: (c.program ? String(c.program).trim() : '') || (c.course ? String(c.course).trim() : '') || (course ? String(course).trim() : ''),
+          extraFields: (c.extraFields && typeof c.extraFields === 'object') ? c.extraFields : {}
+        });
       }
-    } else {
-      const [h, m] = String(cutoffTime).split(':').map(Number);
-      if (!isNaN(h) && !isNaN(m)) {
-        const dt = new Date();
-        dt.setHours(h, m, 0, 0);
-        if (startMode === 'immediate' && dt.getTime() <= Date.now()) {
-          dt.setDate(dt.getDate() + 1);
+    });
+
+    if (parsedQueue.length === 0) {
+      addLog('error', 'Batch call failed: No valid phone numbers found in list.');
+      return res.status(400).json({ error: 'No valid mobile numbers found in submission.' });
+    }
+
+    const defaultCampaignName = `${universityName || 'University'} - ${course ? course + ' ' : ''}Campaign (${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}, ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })})`;
+    const finalCampaignName = campaignName && campaignName.trim() ? campaignName.trim() : defaultCampaignName;
+    const newCampaignId = req.body?.campaignId || req.body?.existingCampaignId || `camp-${Date.now()}`;
+
+    // Clear any existing timers
+    if (campaignScheduleTimer) {
+      clearTimeout(campaignScheduleTimer);
+      campaignScheduleTimer = null;
+    }
+    if (campaignEndTimer) {
+      clearTimeout(campaignEndTimer);
+      campaignEndTimer = null;
+    }
+    if (queueNextTimer) {
+      clearTimeout(queueNextTimer);
+      queueNextTimer = null;
+    }
+
+    // Resolve Cutoff Timestamp if specified
+    let resolvedCutoffTimestamp = null;
+    let resolvedCutoffDisplay = null;
+    if (endMode === 'cutoff' && cutoffTime) {
+      if (String(cutoffTime).includes('T')) {
+        const dt = new Date(cutoffTime);
+        if (!isNaN(dt.getTime())) {
+          resolvedCutoffTimestamp = dt.toISOString();
+          resolvedCutoffDisplay = dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
         }
-        resolvedCutoffTimestamp = dt.toISOString();
-        resolvedCutoffDisplay = dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+      } else {
+        const [h, m] = String(cutoffTime).split(':').map(Number);
+        if (!isNaN(h) && !isNaN(m)) {
+          const dt = new Date();
+          dt.setHours(h, m, 0, 0);
+          if (startMode === 'immediate' && dt.getTime() <= Date.now()) {
+            dt.setDate(dt.getDate() + 1);
+          }
+          resolvedCutoffTimestamp = dt.toISOString();
+          resolvedCutoffDisplay = dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        }
       }
     }
-  }
 
-  // Reset campaign queue
-  CALL_QUEUE = parsedQueue;
-  CURRENT_CALL = null;
+    // Reset campaign queue
+    CALL_QUEUE = parsedQueue;
+    CURRENT_CALL = null;
 
-  // Persist call targets mapping for student history
-  parsedQueue.forEach(ct => rememberCallTarget(ct.formattedPhone, {
-    name: ct.name || '',
-    collegeName: universityName || '',
-    universityId: universityId || '',
-    applicationUrl: applicationUrl || '',
-    course: ct.course || course || '',
-    email: ct.email || '',
-    state: ct.state || '',
-    district: ct.district || '',
-    program: ct.program || '',
-    extraFields: ct.extraFields || {}
-  }));
+    // Persist call targets mapping for student history in a single atomic batch
+    const bulkTargets = parsedQueue.map(ct => ({
+      formattedPhone: ct.formattedPhone,
+      info: {
+        name: ct.name || '',
+        collegeName: universityName || '',
+        universityId: universityId || '',
+        applicationUrl: applicationUrl || '',
+        course: ct.course || course || '',
+        email: ct.email || '',
+        state: ct.state || '',
+        district: ct.district || '',
+        program: ct.program || '',
+        extraFields: ct.extraFields || {}
+      }
+    }));
+    rememberCallTargetsBulk(bulkTargets);
 
-  // Check if Campaign is Scheduled for Future
-  const targetStartTime = scheduledStartTime ? new Date(scheduledStartTime).getTime() : 0;
-  const msUntilStart = targetStartTime - Date.now();
-  const isScheduledFuture = startMode === 'scheduled' && msUntilStart > 5000;
+    // Check if Campaign is Scheduled for Future
+    const targetStartTime = scheduledStartTime ? new Date(scheduledStartTime).getTime() : 0;
+    const msUntilStart = targetStartTime - Date.now();
+    const isScheduledFuture = startMode === 'scheduled' && msUntilStart > 5000;
 
-  if (isScheduledFuture) {
+    if (isScheduledFuture) {
+      CAMPAIGN_STATE = {
+        isRunning: false,
+        isPaused: false,
+        isScheduled: true,
+        scheduledStartTime: new Date(targetStartTime).toISOString(),
+        endMode: endMode || 'none',
+        maxDurationMinutes: maxDurationMinutes ? Number(maxDurationMinutes) : null,
+        timeLimitExpiresAt: null,
+        cutoffTimestamp: resolvedCutoffTimestamp,
+        cutoffTimeDisplay: resolvedCutoffDisplay,
+        stoppedReason: null,
+        startedAt: null,
+        campaignId: newCampaignId,
+        campaignName: finalCampaignName,
+        totalCount: parsedQueue.length,
+        completedCount: 0,
+        answeredCount: 0,
+        unansweredCount: 0,
+        delayMs: (Number(delaySeconds) || 2) * 1000,
+        currentContactIndex: -1,
+        agentId: resolveAgentIdForCourse(course || parsedQueue[0]?.course, agentId),
+        universityId: universityId ? String(universityId) : '',
+        universityName: universityName ? String(universityName) : 'Vidyavision AI Admission Assistant',
+        collegePlace: collegePlace ? String(collegePlace) : '',
+        applicationUrl: applicationUrl ? String(applicationUrl) : '',
+        course: course ? String(course).trim() : ''
+      };
+
+      campaignScheduleTimer = setTimeout(() => {
+        startScheduledCampaign();
+      }, msUntilStart);
+
+      const scheduledDateStr = new Date(targetStartTime).toLocaleString('en-US', {
+        weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+      });
+      addLog('info', `📅 Campaign "${finalCampaignName}" SCHEDULED to start automatically on ${scheduledDateStr} with ${parsedQueue.length} contacts.`);
+
+      // Persist scheduled campaign record
+      const campaignRecord = {
+        id: newCampaignId,
+        name: finalCampaignName,
+        universityId: universityId || '',
+        universityName: universityName || 'Vidyavision AI',
+        collegePlace: collegePlace || '',
+        course: course || '',
+        agentId: CAMPAIGN_STATE.agentId,
+        startedAt: null,
+        scheduledStartTime: CAMPAIGN_STATE.scheduledStartTime,
+        totalCount: parsedQueue.length,
+        completedCount: 0,
+        answeredCount: 0,
+        unansweredCount: 0,
+        status: 'scheduled',
+        contacts: parsedQueue.map(c => ({
+          id: c.id,
+          name: c.name || '',
+          phone: c.phone || '',
+          formattedPhone: c.formattedPhone || (c.phone ? `+91${c.phone}` : ''),
+          course: c.course || course || '',
+          universityName: universityName || '',
+          email: c.email || '',
+          state: c.state || '',
+          district: c.district || '',
+          program: c.program || c.course || course || '',
+          extraFields: c.extraFields || {},
+          status: 'queued',
+          callDuration: '—',
+          callOutcome: 'Pending',
+          timestamp: new Date().toISOString()
+        }))
+      };
+
+      loadCampaigns().then(async (all) => {
+        const existingIdx = all.findIndex(c => c.id === newCampaignId);
+        let updated;
+        if (existingIdx !== -1) {
+          all[existingIdx] = { ...all[existingIdx], ...campaignRecord };
+          updated = all;
+        } else {
+          updated = [campaignRecord, ...all];
+        }
+        await saveCampaigns(updated);
+        broadcast({ type: 'campaigns', data: updated });
+      }).catch(() => { });
+
+      broadcastQueueUpdate();
+
+      return res.json({
+        success: true,
+        isScheduled: true,
+        scheduledStartTime: CAMPAIGN_STATE.scheduledStartTime,
+        campaignId: newCampaignId,
+        campaignName: finalCampaignName,
+        message: `Campaign scheduled to start on ${scheduledDateStr}.`,
+        totalCount: parsedQueue.length
+      });
+    }
+
+    // Immediate start with optional duration/cutoff limit
+    let timeLimitExpiresAt = null;
+    if (endMode === 'duration' && maxDurationMinutes && Number(maxDurationMinutes) > 0) {
+      timeLimitExpiresAt = new Date(Date.now() + Number(maxDurationMinutes) * 60 * 1000).toISOString();
+    }
+
     CAMPAIGN_STATE = {
-      isRunning: false,
+      isRunning: true,
       isPaused: false,
-      isScheduled: true,
-      scheduledStartTime: new Date(targetStartTime).toISOString(),
+      isScheduled: false,
+      scheduledStartTime: null,
       endMode: endMode || 'none',
       maxDurationMinutes: maxDurationMinutes ? Number(maxDurationMinutes) : null,
-      timeLimitExpiresAt: null,
+      timeLimitExpiresAt,
       cutoffTimestamp: resolvedCutoffTimestamp,
       cutoffTimeDisplay: resolvedCutoffDisplay,
       stoppedReason: null,
-      startedAt: null,
+      startedAt: new Date().toISOString(),
       campaignId: newCampaignId,
       campaignName: finalCampaignName,
       totalCount: parsedQueue.length,
@@ -2331,16 +2531,23 @@ app.post('/api/queue/start', (req, res) => {
       course: course ? String(course).trim() : ''
     };
 
-    campaignScheduleTimer = setTimeout(() => {
-      startScheduledCampaign();
-    }, msUntilStart);
+    // Set timeout watcher if duration or cutoff limit exists
+    const targetEnd = timeLimitExpiresAt ? new Date(timeLimitExpiresAt).getTime() : (resolvedCutoffTimestamp ? new Date(resolvedCutoffTimestamp).getTime() : null);
+    if (targetEnd) {
+      const msUntilEnd = Math.max(0, targetEnd - Date.now());
+      if (msUntilEnd > 0 && msUntilEnd < 2147483647) {
+        campaignEndTimer = setTimeout(() => {
+          if (CAMPAIGN_STATE.isRunning) {
+            processNextInQueue();
+          }
+        }, msUntilEnd);
+      }
+    }
 
-    const scheduledDateStr = new Date(targetStartTime).toLocaleString('en-US', {
-      weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-    });
-    addLog('info', `📅 Campaign "${finalCampaignName}" SCHEDULED to start automatically on ${scheduledDateStr} with ${parsedQueue.length} contacts.`);
+    const initialBotLabel = isUgCourse(CAMPAIGN_STATE.course || parsedQueue[0]?.course) ? 'UG Bot (#270740)' : 'PG Bot (#270604)';
+    addLog('info', `Campaign "${finalCampaignName}" initialized with ${initialBotLabel} for course "${CAMPAIGN_STATE.course || 'General'}".`);
 
-    // Persist scheduled campaign record
+    // Persist new campaign into campaigns.json
     const campaignRecord = {
       id: newCampaignId,
       name: finalCampaignName,
@@ -2349,13 +2556,12 @@ app.post('/api/queue/start', (req, res) => {
       collegePlace: collegePlace || '',
       course: course || '',
       agentId: CAMPAIGN_STATE.agentId,
-      startedAt: null,
-      scheduledStartTime: CAMPAIGN_STATE.scheduledStartTime,
+      startedAt: new Date().toISOString(),
       totalCount: parsedQueue.length,
       completedCount: 0,
       answeredCount: 0,
       unansweredCount: 0,
-      status: 'scheduled',
+      status: 'in-progress',
       contacts: parsedQueue.map(c => ({
         id: c.id,
         name: c.name || '',
@@ -2376,121 +2582,25 @@ app.post('/api/queue/start', (req, res) => {
     };
 
     loadCampaigns().then(async (all) => {
-      const updated = [campaignRecord, ...all];
+      const existingIdx = all.findIndex(c => c.id === newCampaignId);
+      let updated;
+      if (existingIdx !== -1) {
+        all[existingIdx] = { ...all[existingIdx], ...campaignRecord };
+        updated = all;
+      } else {
+        updated = [campaignRecord, ...all];
+      }
       await saveCampaigns(updated);
       broadcast({ type: 'campaigns', data: updated });
     }).catch(() => { });
 
+    const universityDisplay = CAMPAIGN_STATE.universityName;
+    const activeAgentId = CAMPAIGN_STATE.agentId || getAgentId();
+    addLog('success', `Campaign "${finalCampaignName}" initialized for ${universityDisplay} (Agent ID: ${activeAgentId}) with ${parsedQueue.length} contacts! Starting sequential calling...`);
     broadcastQueueUpdate();
 
-    return res.json({
-      success: true,
-      isScheduled: true,
-      scheduledStartTime: CAMPAIGN_STATE.scheduledStartTime,
-      campaignId: newCampaignId,
-      campaignName: finalCampaignName,
-      message: `Campaign scheduled to start on ${scheduledDateStr}.`,
-      totalCount: parsedQueue.length
-    });
-  }
-
-  // Immediate start with optional duration/cutoff limit
-  let timeLimitExpiresAt = null;
-  if (endMode === 'duration' && maxDurationMinutes && Number(maxDurationMinutes) > 0) {
-    timeLimitExpiresAt = new Date(Date.now() + Number(maxDurationMinutes) * 60 * 1000).toISOString();
-  }
-
-  CAMPAIGN_STATE = {
-    isRunning: true,
-    isPaused: false,
-    isScheduled: false,
-    scheduledStartTime: null,
-    endMode: endMode || 'none',
-    maxDurationMinutes: maxDurationMinutes ? Number(maxDurationMinutes) : null,
-    timeLimitExpiresAt,
-    cutoffTimestamp: resolvedCutoffTimestamp,
-    cutoffTimeDisplay: resolvedCutoffDisplay,
-    stoppedReason: null,
-    startedAt: new Date().toISOString(),
-    campaignId: newCampaignId,
-    campaignName: finalCampaignName,
-    totalCount: parsedQueue.length,
-    completedCount: 0,
-    answeredCount: 0,
-    unansweredCount: 0,
-    delayMs: (Number(delaySeconds) || 2) * 1000,
-    currentContactIndex: -1,
-    agentId: resolveAgentIdForCourse(course || parsedQueue[0]?.course, agentId),
-    universityId: universityId ? String(universityId) : '',
-    universityName: universityName ? String(universityName) : 'Vidyavision AI Admission Assistant',
-    collegePlace: collegePlace ? String(collegePlace) : '',
-    applicationUrl: applicationUrl ? String(applicationUrl) : '',
-    course: course ? String(course).trim() : ''
-  };
-
-  // Set timeout watcher if duration or cutoff limit exists
-  const targetEnd = timeLimitExpiresAt ? new Date(timeLimitExpiresAt).getTime() : (resolvedCutoffTimestamp ? new Date(resolvedCutoffTimestamp).getTime() : null);
-  if (targetEnd) {
-    const msUntilEnd = Math.max(0, targetEnd - Date.now());
-    if (msUntilEnd > 0 && msUntilEnd < 2147483647) {
-      campaignEndTimer = setTimeout(() => {
-        if (CAMPAIGN_STATE.isRunning) {
-          processNextInQueue();
-        }
-      }, msUntilEnd);
-    }
-  }
-
-  const initialBotLabel = isUgCourse(CAMPAIGN_STATE.course || parsedQueue[0]?.course) ? 'UG Bot (#270740)' : 'PG Bot (#270604)';
-  addLog('info', `Campaign "${finalCampaignName}" initialized with ${initialBotLabel} for course "${CAMPAIGN_STATE.course || 'General'}".`);
-
-  // Persist new campaign into campaigns.json
-  const campaignRecord = {
-    id: newCampaignId,
-    name: finalCampaignName,
-    universityId: universityId || '',
-    universityName: universityName || 'Vidyavision AI',
-    collegePlace: collegePlace || '',
-    course: course || '',
-    agentId: CAMPAIGN_STATE.agentId,
-    startedAt: new Date().toISOString(),
-    totalCount: parsedQueue.length,
-    completedCount: 0,
-    answeredCount: 0,
-    unansweredCount: 0,
-    status: 'in-progress',
-    contacts: parsedQueue.map(c => ({
-      id: c.id,
-      name: c.name || '',
-      phone: c.phone || '',
-      formattedPhone: c.formattedPhone || (c.phone ? `+91${c.phone}` : ''),
-      course: c.course || course || '',
-      universityName: universityName || '',
-      email: c.email || '',
-      state: c.state || '',
-      district: c.district || '',
-      program: c.program || c.course || course || '',
-      extraFields: c.extraFields || {},
-      status: 'queued',
-      callDuration: '—',
-      callOutcome: 'Pending',
-      timestamp: new Date().toISOString()
-    }))
-  };
-
-  loadCampaigns().then(async (all) => {
-    const updated = [campaignRecord, ...all];
-    await saveCampaigns(updated);
-    broadcast({ type: 'campaigns', data: updated });
-  }).catch(() => { });
-
-  const universityDisplay = CAMPAIGN_STATE.universityName;
-  const activeAgentId = CAMPAIGN_STATE.agentId || getAgentId();
-  addLog('success', `Campaign "${finalCampaignName}" initialized for ${universityDisplay} (Agent ID: ${activeAgentId}) with ${parsedQueue.length} contacts! Starting sequential calling...`);
-  broadcastQueueUpdate();
-
-  // Kick off sequential execution
-  processNextInQueue();
+    // Kick off sequential execution
+    processNextInQueue();
 
     res.json({
       success: true,
@@ -2567,7 +2677,7 @@ app.get('/api/campaigns/:id/export', async (req, res) => {
 
     let campaignContacts = camp.contacts || [];
     if (req.query.completedOnly === 'true') {
-      campaignContacts = campaignContacts.filter(c => c.status !== 'queued' && c.status !== 'in-progress');
+      campaignContacts = campaignContacts.filter(c => c.status === 'completed' || (c.callOutcome && String(c.callOutcome).toLowerCase() === 'completed'));
     }
 
     const cachedSheets = await loadCache();
@@ -2617,17 +2727,34 @@ app.get('/api/campaigns/:id/export', async (req, res) => {
       return '—';
     };
 
-    // Discover dynamic extra columns from uploaded Excel sheets
+    // Discover dynamic extra columns from uploaded Excel sheets (casing and punctuation normalized)
     const extraFieldKeys = [];
+    const normKeyMap = new Map();
     campaignContacts.forEach(c => {
       if (c.extraFields && typeof c.extraFields === 'object') {
         Object.keys(c.extraFields).forEach(k => {
-          if (!isStandardKey(k) && !extraFieldKeys.includes(k)) {
-            extraFieldKeys.push(k);
+          if (!isStandardKey(k)) {
+            const norm = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (norm && !normKeyMap.has(norm)) {
+              normKeyMap.set(norm, k);
+              extraFieldKeys.push(k);
+            }
           }
         });
       }
     });
+
+    const getExtraFieldValue = (obj, key) => {
+      if (!obj || typeof obj !== 'object') return null;
+      if (obj[key] !== undefined && obj[key] !== null && String(obj[key]).trim() !== '') return String(obj[key]).trim();
+      const norm = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+      for (const [k, v] of Object.entries(obj)) {
+        if (k.toLowerCase().replace(/[^a-z0-9]/g, '') === norm && v !== undefined && v !== null && String(v).trim() !== '') {
+          return String(v).trim();
+        }
+      }
+      return null;
+    };
 
     const csvHeaders = [
       'S.No', 'Full Name', 'Phone Number', 'Email ID', 'State', 'District',
@@ -2639,7 +2766,12 @@ app.get('/api/campaigns/:id/export', async (req, res) => {
 
     const escapeCsv = (val) => {
       if (val === undefined || val === null) return '""';
-      const str = String(val).replace(/"/g, '""');
+      let str = String(val);
+      // Neutralize CSV formula injection & preserve phone prefixes (SEC-03, TC-EXP-02, TC-EXP-03)
+      if (/^[=+\-@\t\r]/.test(str)) {
+        str = `'${str}`;
+      }
+      str = str.replace(/"/g, '""');
       return `"${str}"`;
     };
 
@@ -2715,7 +2847,7 @@ app.get('/api/campaigns/:id/export', async (req, res) => {
       }
 
       const extraVals = extraFieldKeys.map(k => {
-        const val = c.extraFields?.[k] || match?.extraFields?.[k] || rf?.[k] || '—';
+        const val = getExtraFieldValue(c.extraFields, k) || getExtraFieldValue(match?.extraFields, k) || getExtraFieldValue(rf, k) || '—';
         return escapeCsv(val);
       });
 
@@ -2753,7 +2885,7 @@ app.get('/api/campaigns/:id/export', async (req, res) => {
   }
 });
 
-// 2. Pause Sequential Queue
+// 2. Pause Sequential Queue (Temporary In-Place Pause)
 app.post('/api/queue/pause', (req, res) => {
   if (!CAMPAIGN_STATE.isRunning) {
     return res.status(400).json({ error: 'No campaign is currently running.' });
@@ -2764,30 +2896,268 @@ app.post('/api/queue/pause', (req, res) => {
     clearTimeout(queueNextTimer);
     queueNextTimer = null;
   }
+
+  if (CAMPAIGN_STATE.campaignId) {
+    loadCampaigns().then(async (all) => {
+      const camp = all.find(c => c.id === CAMPAIGN_STATE.campaignId);
+      if (camp) {
+        camp.status = 'paused';
+        await saveCampaigns(all);
+        broadcast({ type: 'campaigns', data: all });
+      }
+    }).catch(() => { });
+  }
+
   addLog('warning', 'Sequential calling campaign PAUSED.');
   broadcastQueueUpdate();
   res.json({ success: true, message: 'Campaign paused.' });
 });
 
-// 3. Resume Sequential Queue
-app.post('/api/queue/resume', (req, res) => {
-  if (!CAMPAIGN_STATE.isRunning) {
-    return res.status(400).json({ error: 'No active campaign to resume.' });
+// 2b. Split Campaign: Part 1 (Completed) & Part 2 (Paused Remaining)
+app.post('/api/queue/split', async (req, res) => {
+  try {
+    if (queueNextTimer) {
+      clearTimeout(queueNextTimer);
+      queueNextTimer = null;
+    }
+    if (campaignScheduleTimer) {
+      clearTimeout(campaignScheduleTimer);
+      campaignScheduleTimer = null;
+    }
+    if (campaignEndTimer) {
+      clearTimeout(campaignEndTimer);
+      campaignEndTimer = null;
+    }
+
+    const allCampaigns = await loadCampaigns();
+    const activeCampId = req.body?.campaignId || CAMPAIGN_STATE.campaignId;
+    let camp = null;
+    if (activeCampId) {
+      camp = allCampaigns.find(c => c.id === activeCampId);
+    }
+    if (!camp && CAMPAIGN_STATE.campaignName) {
+      camp = allCampaigns.find(c => c.name === CAMPAIGN_STATE.campaignName);
+    }
+    if (!camp && allCampaigns.length > 0) {
+      camp = allCampaigns[0];
+    }
+
+    if (!camp) {
+      return res.status(404).json({ success: false, error: 'No campaign record found to split.' });
+    }
+
+    // Sync any recent in-memory queue statuses into camp.contacts
+    if (Array.isArray(camp.contacts) && Array.isArray(CALL_QUEUE)) {
+      camp.contacts.forEach(c => {
+        const q = CALL_QUEUE.find(item => item.id === c.id || item.formattedPhone === c.formattedPhone || item.phone === c.phone);
+        if (q && q.status && q.status !== 'queued') {
+          c.status = q.status;
+          if (q.duration) c.callDuration = q.duration;
+          if (q.reason) c.callOutcome = q.reason;
+        }
+      });
+    }
+
+    const contactsList = Array.isArray(camp.contacts) ? camp.contacts : [];
+
+    // Separate completed contacts vs uncalled contacts
+    const completedContacts = contactsList.filter(c =>
+      c.status === 'completed' || c.status === 'no-answer' || c.status === 'answered' || c.status === 'failed' || c.status === 'busy'
+    );
+    const uncalledContacts = contactsList.filter(c => !completedContacts.includes(c));
+
+    if (completedContacts.length === 0) {
+      return res.status(400).json({ success: false, error: 'No contacts have been dialed yet to split into Part 1. You can pause temporarily instead.' });
+    }
+
+    if (uncalledContacts.length === 0) {
+      return res.status(400).json({ success: false, error: 'All contacts in this campaign have already been dialed. No remaining contacts to split into Part 2.' });
+    }
+
+    // Smart naming without redundant nesting (e.g., "Batch - Part 1" -> Part 1 & Part 2)
+    const rawName = (camp.name || 'Campaign').trim();
+    const partMatch = rawName.match(/^(.*?)(?:\s*-\s*Part\s*(\d+))?$/i);
+    const baseName = partMatch && partMatch[1] ? partMatch[1].trim() : rawName;
+    const currentPartNum = partMatch && partMatch[2] ? parseInt(partMatch[2], 10) : 1;
+
+    const part1Name = partMatch && partMatch[2] ? rawName : `${baseName} - Part ${currentPartNum}`;
+    const part2Name = `${baseName} - Part ${currentPartNum + 1}`;
+
+    // Clean uncalled contacts for Part 2 so they are ready to call
+    const remainingContacts = uncalledContacts.map((c, i) => ({
+      ...c,
+      id: c.id || `contact-${Date.now()}-${i}`,
+      status: 'queued',
+      callOutcome: 'Pending',
+      callDuration: '—',
+      timestamp: new Date().toISOString()
+    }));
+
+    // Update Part 1 (Completed)
+    const p1Answered = completedContacts.filter(c => c.status === 'completed' || c.status === 'answered' || (c.callOutcome && c.callOutcome.toLowerCase().includes('answer'))).length;
+    const p1Unanswered = completedContacts.length - p1Answered;
+
+    camp.name = part1Name;
+    camp.contacts = completedContacts;
+    camp.totalCount = completedContacts.length;
+    camp.completedCount = completedContacts.length;
+    camp.answeredCount = p1Answered;
+    camp.unansweredCount = p1Unanswered;
+    camp.status = 'completed';
+    camp.completedAt = new Date().toISOString();
+
+    // Create Part 2 (Paused)
+    const part2Id = `camp-${Date.now()}`;
+    const part2Campaign = {
+      id: part2Id,
+      name: part2Name,
+      universityId: camp.universityId || '',
+      universityName: camp.universityName || 'Vidyavision AI',
+      collegePlace: camp.collegePlace || '',
+      course: camp.course || '',
+      agentId: camp.agentId || CAMPAIGN_STATE.agentId || 270740,
+      startedAt: new Date().toISOString(),
+      totalCount: remainingContacts.length,
+      completedCount: 0,
+      answeredCount: 0,
+      unansweredCount: 0,
+      status: 'paused',
+      contacts: remainingContacts
+    };
+
+    // Place Part 2 right above Part 1 in list
+    const campIdx = allCampaigns.findIndex(c => c.id === camp.id);
+    if (campIdx !== -1) {
+      allCampaigns.splice(campIdx, 0, part2Campaign);
+    } else {
+      allCampaigns.unshift(part2Campaign);
+    }
+
+    await saveCampaigns(allCampaigns);
+
+    // Reset in-memory active queue state
+    CAMPAIGN_STATE.isRunning = false;
+    CAMPAIGN_STATE.isPaused = false;
+    CAMPAIGN_STATE.isScheduled = false;
+    CAMPAIGN_STATE.campaignId = null;
+    CAMPAIGN_STATE.campaignName = '';
+    CAMPAIGN_STATE.totalCount = 0;
+    CAMPAIGN_STATE.completedCount = 0;
+    CAMPAIGN_STATE.answeredCount = 0;
+    CAMPAIGN_STATE.unansweredCount = 0;
+    CALL_QUEUE = [];
+    CURRENT_CALL = null;
+
+    addLog('success', `Campaign split into "${part1Name}" (Completed, ${completedContacts.length} calls) & "${part2Name}" (Paused, ${remainingContacts.length} remaining contacts).`);
+
+    broadcast({ type: 'campaigns', data: allCampaigns });
+    broadcastQueueUpdate();
+
+    res.json({
+      success: true,
+      part1: { id: camp.id, name: part1Name, completedCount: completedContacts.length },
+      part2: { id: part2Campaign.id, name: part2Name, remainingCount: remainingContacts.length },
+      message: `Successfully split campaign into "${part1Name}" and "${part2Name}".`
+    });
+  } catch (err) {
+    console.error('Error splitting campaign:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 3. Resume Sequential Queue (supports in-memory resume and post-restart recovery)
+app.post('/api/queue/resume', async (req, res) => {
+  const reqCampId = req.body?.campaignId || CAMPAIGN_STATE?.campaignId;
+
+  // Case 1: Campaign is already loaded in memory and paused
+  if (CAMPAIGN_STATE && CAMPAIGN_STATE.isRunning && CAMPAIGN_STATE.isPaused) {
+    CAMPAIGN_STATE.isPaused = false;
+    if (CAMPAIGN_STATE.campaignId) {
+      try {
+        const all = await loadCampaigns();
+        const camp = all.find(c => c.id === CAMPAIGN_STATE.campaignId);
+        if (camp) {
+          camp.status = 'in-progress';
+          await saveCampaigns(all);
+          broadcast({ type: 'campaigns', data: all });
+        }
+      } catch (e) { }
+    }
+    addLog('info', 'Sequential calling campaign RESUMED.');
+    broadcastQueueUpdate();
+    if (!CURRENT_CALL) {
+      processNextInQueue();
+    }
+    return res.json({ success: true, message: 'Campaign resumed.' });
   }
 
-  CAMPAIGN_STATE.isPaused = false;
-  addLog('info', 'Sequential calling campaign RESUMED.');
-  broadcastQueueUpdate();
+  // Case 2: Server restarted or no active in-memory queue, but a paused campaign exists
+  try {
+    const all = await loadCampaigns();
+    const campToResume = reqCampId
+      ? all.find(c => c.id === reqCampId)
+      : all.find(c => c.status === 'paused');
 
-  if (!CURRENT_CALL) {
+    if (!campToResume) {
+      return res.status(400).json({ error: 'No paused campaign found to resume.' });
+    }
+
+    // Filter uncalled contacts
+    const uncalledContacts = (campToResume.contacts || []).filter(c => c.status === 'queued' || !c.status);
+    if (uncalledContacts.length === 0) {
+      campToResume.status = 'completed';
+      await saveCampaigns(all);
+      broadcast({ type: 'campaigns', data: all });
+      return res.status(400).json({ error: 'All contacts in this campaign have already been completed.' });
+    }
+
+    // Re-hydrate queue and state
+    CALL_QUEUE = uncalledContacts.map(c => ({
+      ...c,
+      status: 'queued',
+      duration: '—',
+      reason: ''
+    }));
+    CURRENT_CALL = null;
+
+    CAMPAIGN_STATE = {
+      isRunning: true,
+      isPaused: false,
+      isScheduled: false,
+      scheduledStartTime: null,
+      campaignId: campToResume.id,
+      campaignName: campToResume.name,
+      totalCount: campToResume.totalCount || campToResume.contacts.length,
+      completedCount: campToResume.completedCount || 0,
+      answeredCount: campToResume.answeredCount || 0,
+      unansweredCount: campToResume.unansweredCount || 0,
+      delayMs: (Number(campToResume.delaySeconds) || 2) * 1000,
+      currentContactIndex: -1,
+      agentId: campToResume.agentId || getAgentId(),
+      universityId: campToResume.universityId || '',
+      universityName: campToResume.universityName || 'Vidyavision AI',
+      collegePlace: campToResume.collegePlace || '',
+      course: campToResume.course || ''
+    };
+
+    campToResume.status = 'in-progress';
+    delete campToResume.stoppedReason;
+    await saveCampaigns(all);
+
+    addLog('success', `Campaign "${campToResume.name}" RESUMED from paused state (${uncalledContacts.length} uncalled contacts remaining).`);
+    broadcastQueueUpdate();
+    broadcast({ type: 'campaigns', data: all });
+
     processNextInQueue();
+    return res.json({ success: true, message: `Resumed campaign "${campToResume.name}".`, remainingCount: uncalledContacts.length });
+  } catch (err) {
+    console.error('Error resuming paused campaign:', err);
+    return res.status(500).json({ error: err.message });
   }
-
-  res.json({ success: true, message: 'Campaign resumed.' });
 });
 
 // 4. Cancel/Stop Sequential Queue
-app.post('/api/queue/cancel', (req, res) => {
+app.post('/api/queue/cancel', async (req, res) => {
   if (queueNextTimer) {
     clearTimeout(queueNextTimer);
     queueNextTimer = null;
@@ -2800,6 +3170,8 @@ app.post('/api/queue/cancel', (req, res) => {
     clearTimeout(campaignEndTimer);
     campaignEndTimer = null;
   }
+
+  const activeCampId = CAMPAIGN_STATE.campaignId;
 
   CAMPAIGN_STATE.isRunning = false;
   CAMPAIGN_STATE.isPaused = false;
@@ -2815,15 +3187,42 @@ app.post('/api/queue/cancel', (req, res) => {
   CURRENT_CALL = null;
   addLog('warning', 'Sequential calling campaign CANCELLED by user.');
   broadcastQueueUpdate();
+
+  // Persist cancellation to campaigns.json (Defect BUG-04)
+  if (activeCampId) {
+    try {
+      const all = await loadCampaigns();
+      const camp = all.find(c => c.id === activeCampId);
+      if (camp) {
+        camp.status = 'canceled';
+        camp.canceledAt = new Date().toISOString();
+        if (Array.isArray(camp.contacts)) {
+          camp.contacts.forEach(c => {
+            if (c.status === 'queued' || c.status === 'in-progress') {
+              c.status = 'canceled';
+              c.callOutcome = 'User stopped campaign';
+            }
+          });
+        }
+        await saveCampaigns(all);
+        broadcast({ type: 'campaigns', data: all });
+      }
+    } catch (err) {
+      console.error('Error persisting campaign cancellation:', err);
+    }
+  }
+
   res.json({ success: true, message: 'Campaign cancelled.' });
 });
 
 // 4b. Schedule Controls: Cancel Scheduled Campaign
-app.post('/api/queue/schedule/cancel', (req, res) => {
+app.post('/api/queue/schedule/cancel', async (req, res) => {
   if (campaignScheduleTimer) {
     clearTimeout(campaignScheduleTimer);
     campaignScheduleTimer = null;
   }
+  const scheduledCampId = CAMPAIGN_STATE.campaignId;
+
   CAMPAIGN_STATE.isScheduled = false;
   CAMPAIGN_STATE.isRunning = false;
   CAMPAIGN_STATE.scheduledStartTime = null;
@@ -2833,6 +3232,23 @@ app.post('/api/queue/schedule/cancel', (req, res) => {
 
   addLog('warning', 'Scheduled campaign has been cancelled.');
   broadcastQueueUpdate();
+
+  // Persist scheduled cancellation to campaigns.json
+  if (scheduledCampId) {
+    try {
+      const all = await loadCampaigns();
+      const camp = all.find(c => c.id === scheduledCampId);
+      if (camp) {
+        camp.status = 'canceled';
+        camp.canceledAt = new Date().toISOString();
+        await saveCampaigns(all);
+        broadcast({ type: 'campaigns', data: all });
+      }
+    } catch (err) {
+      console.error('Error persisting scheduled campaign cancellation:', err);
+    }
+  }
+
   res.json({ success: true, message: 'Scheduled campaign cancelled.' });
 });
 
@@ -3072,13 +3488,107 @@ app.get('/api/call-analytics', async (req, res) => {
   }
 });
 
+// Recover running / scheduled campaign state on server boot (Defect BUG-05)
+async function recoverServerState() {
+  try {
+    const all = await loadCampaigns();
+    if (!Array.isArray(all) || all.length === 0) return;
+
+    let hasChanges = false;
+    const now = Date.now();
+
+    // 1. Recover in-progress campaigns interrupted by server restart
+    const interrupted = all.filter(c => c.status === 'in-progress');
+    for (const camp of interrupted) {
+      camp.status = 'paused';
+      camp.stoppedReason = 'Server restarted. Click Resume to continue uncalled contacts.';
+      camp.pausedAt = new Date().toISOString();
+      hasChanges = true;
+      const uncalledCount = Array.isArray(camp.contacts)
+        ? camp.contacts.filter(ct => ct.status === 'queued').length
+        : 0;
+      addLog('warning', `[RECOVERY] Recovered interrupted campaign "${camp.name}". Marked as paused (${uncalledCount} uncalled contacts remaining).`);
+    }
+
+    // 2. Recover scheduled campaigns
+    const scheduled = all.filter(c => c.status === 'scheduled');
+
+    // Check for missed schedules that passed while offline
+    const missed = scheduled.filter(c => new Date(c.scheduledStartTime).getTime() <= now);
+    for (const camp of missed) {
+      camp.status = 'paused';
+      camp.stoppedReason = 'Scheduled start time passed while server was offline. Click Resume to start.';
+      hasChanges = true;
+      addLog('warning', `[RECOVERY] Scheduled time for "${camp.name}" passed while server was offline. Marked as paused.`);
+    }
+
+    // Find the next upcoming scheduled campaign in the future
+    const upcoming = scheduled
+      .filter(c => new Date(c.scheduledStartTime).getTime() > now)
+      .sort((a, b) => new Date(a.scheduledStartTime).getTime() - new Date(b.scheduledStartTime).getTime())[0];
+
+    if (upcoming && !campaignScheduleTimer) {
+      const targetTime = new Date(upcoming.scheduledStartTime).getTime();
+      const msUntilStart = targetTime - now;
+
+      // Re-hydrate queue and in-memory campaign state
+      const queuedContacts = Array.isArray(upcoming.contacts)
+        ? upcoming.contacts.map(ct => ({
+          ...ct,
+          status: ct.status || 'queued',
+          duration: ct.duration || '—',
+          reason: ct.callOutcome || ''
+        }))
+        : [];
+
+      CALL_QUEUE = queuedContacts;
+
+      CAMPAIGN_STATE = {
+        isRunning: false,
+        isPaused: false,
+        isScheduled: true,
+        scheduledStartTime: upcoming.scheduledStartTime,
+        campaignId: upcoming.id,
+        campaignName: upcoming.name,
+        totalCount: upcoming.totalCount || queuedContacts.length,
+        completedCount: upcoming.completedCount || 0,
+        answeredCount: upcoming.answeredCount || 0,
+        unansweredCount: upcoming.unansweredCount || 0,
+        delayMs: (Number(upcoming.delaySeconds) || 2) * 1000,
+        agentId: upcoming.agentId || getAgentId(),
+        universityId: upcoming.universityId || '',
+        universityName: upcoming.universityName || 'Vidyavision AI',
+        collegePlace: upcoming.collegePlace || '',
+        course: upcoming.course || ''
+      };
+
+      campaignScheduleTimer = setTimeout(() => {
+        startScheduledCampaign();
+      }, msUntilStart);
+
+      const sDate = new Date(targetTime).toLocaleString('en-IN');
+      addLog('info', `[RECOVERY] Re-scheduled campaign "${upcoming.name}" to auto-start on ${sDate} with ${queuedContacts.length} contacts.`);
+      broadcastQueueUpdate();
+    }
+
+    if (hasChanges) {
+      await saveCampaigns(all);
+      broadcast({ type: 'campaigns', data: all });
+    }
+  } catch (err) {
+    console.error('Error during server restart recovery:', err);
+  }
+}
+
 // Start Server
-// Trigger server restart for google sheets cache clearing
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   console.log(`========================================`);
   console.log(`OmniDimension Backend running on port ${PORT}`);
   console.log(`WebSocket endpoint: ws://localhost:${PORT}/api/stream`);
   console.log(`========================================`);
+
+  // Recover any interrupted or scheduled campaigns from disk on reboot (Defect BUG-05)
+  await recoverServerState();
 
   // Initial OmniDimension call logs fetch & campaign data enrichment
   setTimeout(() => {

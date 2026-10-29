@@ -145,12 +145,14 @@ export default function App() {
       endRow: lastItem?.excelRow || (lastItem?.originalIndex ? lastItem.originalIndex + 1 : e + 1)
     };
   };
-  // Recently used contacts (persisted): re-add past numbers to call again, e.g. with another college
+  // Recently used contacts (session-scoped for privacy compliance, SEC-06):
   const getInitialRecent = () => {
     try {
-      const raw = localStorage.getItem('vv_recent_contacts');
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed.slice(0, 50);
+      const raw = sessionStorage.getItem('vv_recent_contacts') || localStorage.getItem('vv_recent_contacts');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed.slice(0, 50);
+      }
     } catch (e) { }
     return [];
   };
@@ -171,6 +173,13 @@ export default function App() {
   const [pastCampaignSearch, setPastCampaignSearch] = useState('');
   const [pastCampaignUniFilter, setPastCampaignUniFilter] = useState('ALL');
   const [campaignContactStatusFilter, setCampaignContactStatusFilter] = useState('ALL');
+  const [showPauseModal, setShowPauseModal] = useState(false);
+  const [isSplittingCampaign, setIsSplittingCampaign] = useState(false);
+  const [resumingCampaignId, setResumingCampaignId] = useState(null);
+  const [resumingCampaignName, setResumingCampaignName] = useState('');
+  const [campaignRangeFrom, setCampaignRangeFrom] = useState('');
+  const [campaignRangeTo, setCampaignRangeTo] = useState('');
+  const [showPausedCampaignsSection, setShowPausedCampaignsSection] = useState(true);
 
   const pushRecentContacts = (items) => {
     if (!items || items.length === 0) return;
@@ -196,7 +205,10 @@ export default function App() {
         }
       });
       const next = Array.from(seen.values()).slice(0, 50);
-      try { localStorage.setItem('vv_recent_contacts', JSON.stringify(next)); } catch (e) { }
+      try {
+        sessionStorage.setItem('vv_recent_contacts', JSON.stringify(next));
+        localStorage.removeItem('vv_recent_contacts'); // Clean up persistent localStorage PII
+      } catch (e) { }
       return next;
     });
   };
@@ -232,15 +244,16 @@ export default function App() {
   const RECENT_PAGE_SIZE = 8;
   const [recentPage, setRecentPage] = useState(0);
 
-  // Recently uploaded Excel/CSV files (parsed contacts kept, so any file can be
-  // re-loaded later to call with another college without re-uploading)
+  // Recently uploaded Excel/CSV files (session-scoped to prevent disk PII leakage & storage exhaustion, SEC-06)
   const RECENT_FILES_MAX = 8;
   const RECENT_FILE_CONTACTS_MAX = 5000;
   const getInitialRecentFiles = () => {
     try {
-      const raw = localStorage.getItem('vv_recent_files');
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed.slice(0, RECENT_FILES_MAX);
+      const raw = sessionStorage.getItem('vv_recent_files') || localStorage.getItem('vv_recent_files');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed.slice(0, RECENT_FILES_MAX);
+      }
     } catch (e) { }
     return [];
   };
@@ -250,7 +263,10 @@ export default function App() {
     if (!entry || !entry.fileName) return;
     setRecentFiles(prev => {
       const next = [{ ...entry, id: `file-${Date.now()}` }, ...prev.filter(f => f.fileName !== entry.fileName)].slice(0, RECENT_FILES_MAX);
-      try { localStorage.setItem('vv_recent_files', JSON.stringify(next)); } catch (e) { }
+      try {
+        sessionStorage.setItem('vv_recent_files', JSON.stringify(next));
+        localStorage.removeItem('vv_recent_files');
+      } catch (e) { }
       return next;
     });
   };
@@ -269,7 +285,10 @@ export default function App() {
         return f;
       });
       if (changed) {
-        try { localStorage.setItem('vv_recent_files', JSON.stringify(updated)); } catch (e) { }
+        try {
+          sessionStorage.setItem('vv_recent_files', JSON.stringify(updated));
+          localStorage.removeItem('vv_recent_files');
+        } catch (e) { }
         return updated;
       }
       return prev;
@@ -954,6 +973,8 @@ export default function App() {
 
     const lines = bulkText.split(/\r?\n/).filter(line => line.trim().length > 0);
     const newItems = [];
+    const seenPhones = new Set();
+    let duplicateCount = 0;
 
     lines.forEach(line => {
       const parts = line.split(/[,;\t]/);
@@ -974,6 +995,12 @@ export default function App() {
 
       const formatted = validatePhone(phoneCandidate);
       if (formatted) {
+        const cleanKey = formatted.replace(/\D/g, '').slice(-10);
+        if (seenPhones.has(cleanKey)) {
+          duplicateCount++;
+          return;
+        }
+        seenPhones.add(cleanKey);
         newItems.push({
           id: `staged-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
           phone: phoneCandidate.replace(/\D/g, ''),
@@ -990,7 +1017,11 @@ export default function App() {
       setTempContacts(newItems);
       setTempInputMode('bulk');
       setBulkText('');
-      addToast(`Imported ${newItems.length} contacts! Select university and delay below.`, 'success');
+      if (duplicateCount > 0) {
+        addToast(`Imported ${newItems.length} unique contacts (${duplicateCount} duplicate phone numbers removed).`, 'success');
+      } else {
+        addToast(`Imported ${newItems.length} contacts! Select university and delay below.`, 'success');
+      }
     }
   };
 
@@ -1027,6 +1058,8 @@ export default function App() {
         if (nameIdx === -1 && headers.length > 1) nameIdx = phoneIdx === 0 ? 1 : 0;
 
         const parsedContacts = [];
+        const seenPhones = new Set();
+        let duplicateCount = 0;
 
         for (let i = (headers.length > 0 && phoneIdx !== -1 && isNaN(jsonData[0][phoneIdx]) ? 1 : 0); i < jsonData.length; i++) {
           const row = jsonData[i];
@@ -1067,6 +1100,13 @@ export default function App() {
 
           const formatted = validatePhone(rawPhone);
           if (formatted) {
+            const cleanKey = formatted.replace(/\D/g, '').slice(-10);
+            if (seenPhones.has(cleanKey)) {
+              duplicateCount++;
+              continue;
+            }
+            seenPhones.add(cleanKey);
+
             parsedContacts.push({
               id: `excel-${Date.now()}-${i}`,
               originalIndex: parsedContacts.length + 1,
@@ -1119,7 +1159,11 @@ export default function App() {
               extraFields: c.extraFields || {}
             }))
           });
-          addToast(`Imported ${parsedContacts.length} contacts from ${file.name}! Select settings below.`, 'success');
+          if (duplicateCount > 0) {
+            addToast(`Imported ${parsedContacts.length} unique contacts from ${file.name} (${duplicateCount} duplicate phone numbers removed).`, 'success');
+          } else {
+            addToast(`Imported ${parsedContacts.length} contacts from ${file.name}! Select settings below.`, 'success');
+          }
         }
       } catch (err) {
         console.error(err);
@@ -1232,17 +1276,26 @@ export default function App() {
         });
 
         let addedCount = 0;
+        let skippedDuplicates = 0;
         newParsed.forEach(c => {
           const p = String(c.phone || c.formattedPhone || '').replace(/\D/g, '').slice(-10);
           if (p) {
-            if (!phoneMap.has(p)) addedCount++;
-            phoneMap.set(p, c);
+            if (!phoneMap.has(p)) {
+              addedCount++;
+              phoneMap.set(p, c);
+            } else {
+              skippedDuplicates++;
+            }
           }
         });
 
         const merged = Array.from(phoneMap.values());
         setTempContacts(merged);
-        addToast(`Added ${addedCount} new numbers from ${file.name}! Total batch now: ${merged.length} contacts.`, 'success');
+        if (skippedDuplicates > 0) {
+          addToast(`Added ${addedCount} new numbers from ${file.name} (${skippedDuplicates} duplicate numbers skipped). Total batch now: ${merged.length} contacts.`, 'success');
+        } else {
+          addToast(`Added ${addedCount} new numbers from ${file.name}! Total batch now: ${merged.length} contacts.`, 'success');
+        }
       } catch (err) {
         console.error(err);
         addToast('Error reading Excel file.', 'error');
@@ -1449,7 +1502,8 @@ export default function App() {
           applicationUrl: uni.websiteUrl || uni.applicationUrl || uni.admissionLink || '',
           course: campaignCourse,
           fileName: uploadedFileInfo?.fileName || '',
-          campaignName: campaignCustomName && campaignCustomName.trim() ? campaignCustomName.trim() : undefined,
+          campaignId: resumingCampaignId || undefined,
+          campaignName: resumingCampaignName || (campaignCustomName && campaignCustomName.trim() ? campaignCustomName.trim() : undefined),
           startMode: campaignStartMode,
           scheduledStartTime: resolvedScheduledStartTime,
           endMode: campaignEndMode,
@@ -1475,6 +1529,8 @@ export default function App() {
         pushRecentContacts(stagedContacts.map(c => ({ ...c, usedAt: new Date().toISOString() })));
         setStagedContacts([]);
         setCampaignCustomName('');
+        setResumingCampaignId(null);
+        setResumingCampaignName('');
         setShowLogs(true); // Auto-expand logs terminal
         fetchCampaigns();
       } else {
@@ -1516,13 +1572,15 @@ export default function App() {
   };
 
   // Campaign Management Action Handlers
-  const handleLoadContactsToNewCampaign = (contactsToLoad) => {
-    if (!contactsToLoad || contactsToLoad.length === 0) {
+  const handleLoadContactsToNewCampaign = (contactsToLoad, keepOpen = false) => {
+    const itemsToProcess = contactsToLoad && contactsToLoad.length > 0 ? contactsToLoad : [];
+
+    if (itemsToProcess.length === 0 && (!tempContacts || tempContacts.length === 0)) {
       addToast('Please select at least one contact to add.', 'error');
       return;
     }
 
-    const valid = contactsToLoad.map(c => {
+    const valid = itemsToProcess.map(c => {
       const formatted = validatePhone(c.phone || c.formattedPhone);
       return formatted ? {
         id: `staged-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
@@ -1540,7 +1598,7 @@ export default function App() {
       } : null;
     }).filter(Boolean);
 
-    if (valid.length === 0) {
+    if (itemsToProcess.length > 0 && valid.length === 0) {
       addToast('No valid phone numbers found in selection.', 'error');
       return;
     }
@@ -1564,15 +1622,27 @@ export default function App() {
     const combined = Array.from(phoneMap.values());
     setTempContacts(combined);
     setTempInputMode('campaign');
-    setShowPastCampaignsModal(false);
-    setSelectedCampaignDetail(null);
-    setCameFromPastCampaignsModal(false);
-    setCampaignCheckedContacts([]);
-    setActiveTab('dispatch');
-    if (existing.length > 0) {
-      addToast(`Added ${newAdded} contacts from campaign! Total batch now: ${combined.length} contacts. You can also upload files to add more numbers.`, 'success');
+
+    if (selectedCampaignDetail) {
+      if (selectedCampaignDetail.universityId) setSelectedUniversity(selectedCampaignDetail.universityId);
+      if (selectedCampaignDetail.course) setSelectedCourse(selectedCampaignDetail.course);
+    }
+
+    if (keepOpen) {
+      // Keep modal open so user can continue selecting other ranges or individual contacts!
+      setCampaignCheckedContacts([]);
+      addToast(`Added ${newAdded} contacts to Staging! (${combined.length} total in batch). You can select more ranges or click Proceed when ready.`, 'success');
     } else {
-      addToast(`Loaded ${valid.length} contact${valid.length > 1 ? 's' : ''} into Step 2! You can also upload files to add more numbers to this campaign.`, 'success');
+      setShowPastCampaignsModal(false);
+      setSelectedCampaignDetail(null);
+      setCameFromPastCampaignsModal(false);
+      setCampaignCheckedContacts([]);
+      setActiveTab('dispatch');
+      if (existing.length > 0) {
+        addToast(`Added ${newAdded} contacts from campaign! Total batch now: ${combined.length} contacts. Ready in Step 2.`, 'success');
+      } else {
+        addToast(`Loaded ${valid.length} contact${valid.length > 1 ? 's' : ''} into Step 2! Ready to configure and call.`, 'success');
+      }
     }
   };
 
@@ -1611,12 +1681,150 @@ export default function App() {
     }
   };
 
-  // Campaign Control Actions
-  const handlePauseCampaign = async () => {
+  // Campaign Control Actions (Option A: Modal to Split vs Pause Temporarily)
+  const handlePauseButtonClick = () => {
+    const completed = campaignState.completedCount || 0;
+    const total = campaignState.totalCount || 0;
+    if (completed > 0 && total > completed) {
+      setShowPauseModal(true);
+    } else {
+      handlePauseTemporarily();
+    }
+  };
+
+  const handlePauseTemporarily = async () => {
     try {
       const res = await fetch('/api/queue/pause', { method: 'POST' });
-      if (res.ok) addToast('Campaign paused', 'info');
+      if (res.ok) {
+        setShowPauseModal(false);
+        addToast('Campaign paused temporarily', 'info');
+      }
     } catch (err) { addToast('Error pausing campaign', 'error'); }
+  };
+
+  const handlePauseCampaign = handlePauseButtonClick;
+
+  const handleConfirmSplitCampaign = async () => {
+    try {
+      setIsSplittingCampaign(true);
+      const res = await fetch('/api/queue/split', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaignId: campaignState.campaignId })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setShowPauseModal(false);
+        addToast(`Campaign split into "${data.part1?.name}" (Completed) & "${data.part2?.name}" (Paused)!`, 'success');
+        fetchCampaigns();
+      } else {
+        addToast(data.error || 'Failed to split campaign', 'error');
+      }
+    } catch (err) {
+      addToast('Error splitting campaign', 'error');
+    } finally {
+      setIsSplittingCampaign(false);
+    }
+  };
+
+  const handleResumePausedCampaign = async (camp) => {
+    if (!camp || !Array.isArray(camp.contacts) || camp.contacts.length === 0) {
+      addToast('No contacts found in this paused campaign.', 'error');
+      return;
+    }
+
+    const uncalled = camp.contacts.filter(c => c.status === 'queued' || c.status !== 'completed');
+    if (uncalled.length === 0) {
+      addToast('All contacts in this campaign have already been dialed.', 'warning');
+      return;
+    }
+
+    const uni = universities.find(u => u.id === camp.universityId) || universities[0];
+    const campaignCourse = camp.course || uncalled[0]?.course || '';
+    const campaignAgentId = camp.agentId || (isUgCourse(campaignCourse) ? 270740 : (uni?.agentId || 270604));
+
+    try {
+      const res = await fetch('/api/queue/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          campaignId: camp.id,
+          campaignName: camp.name,
+          universityId: camp.universityId || uni?.id || '',
+          universityName: camp.universityName || uni?.name || 'Vidyavision AI',
+          collegePlace: camp.collegePlace || uni?.place || '',
+          course: campaignCourse,
+          agentId: campaignAgentId,
+          startMode: 'immediate',
+          delaySeconds: callDelay !== '' ? callDelay : 2,
+          contacts: uncalled.map((c, i) => ({
+            id: c.id || `contact-${Date.now()}-${i}`,
+            phone: c.phone || '',
+            formattedPhone: c.formattedPhone || (c.phone ? `+91${c.phone}` : ''),
+            name: c.name || '',
+            course: c.course || campaignCourse,
+            email: c.email || '',
+            state: c.state || '',
+            district: c.district || '',
+            program: c.program || campaignCourse,
+            extraFields: c.extraFields || {}
+          }))
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        addToast(`Resumed calling "${camp.name}" (${uncalled.length} contacts)!`, 'success');
+        setActiveTab('dispatch');
+        fetchCampaigns();
+      } else {
+        addToast(data.error || 'Failed to resume campaign', 'error');
+      }
+    } catch (err) {
+      addToast('Failed to resume campaign', 'error');
+    }
+  };
+
+  const handleAppendContactsToPausedCampaign = (camp) => {
+    if (!camp || !Array.isArray(camp.contacts) || camp.contacts.length === 0) {
+      addToast('No contacts found in this paused campaign.', 'error');
+      return;
+    }
+
+    const uncalled = camp.contacts.filter(c => c.status === 'queued' || c.status !== 'completed');
+    if (uncalled.length === 0) {
+      addToast('All contacts in this campaign have already been completed.', 'warning');
+      return;
+    }
+
+    const staged = uncalled.map((c, idx) => ({
+      id: c.id || `contact-${Date.now()}-${idx}`,
+      phone: c.phone || '',
+      formattedPhone: c.formattedPhone || (c.phone ? `+91${c.phone}` : ''),
+      name: c.name || '',
+      hasName: Boolean(c.name && c.name !== 'Student'),
+      originalIndex: c.originalIndex !== undefined ? c.originalIndex : (idx + 1),
+      excelRow: c.excelRow !== undefined ? c.excelRow : (idx + 2),
+      universityId: camp.universityId || selectedUniversity,
+      universityName: camp.universityName || 'Vidyavision AI',
+      collegePlace: camp.collegePlace || '',
+      agentId: camp.agentId || 270740,
+      course: c.course || camp.course || selectedCourse,
+      email: c.email || '',
+      state: c.state || '',
+      district: c.district || '',
+      program: c.program || c.course || camp.course || '',
+      extraFields: c.extraFields || {}
+    }));
+
+    setStagedContacts(staged);
+    setResumingCampaignId(camp.id);
+    setResumingCampaignName(camp.name);
+    if (camp.universityId) setSelectedUniversity(camp.universityId);
+    if (camp.course) setSelectedCourse(camp.course);
+    setActiveTab('dispatch');
+
+    addToast(`Loaded ${staged.length} uncalled contacts from "${camp.name}" into Staging Queue. You can upload more numbers to append or start dialing!`, 'success');
   };
 
   const handleResumeCampaign = async () => {
@@ -2318,7 +2526,22 @@ export default function App() {
     rowObj['Call Recording URL'] = recordingLink;
     rowObj['Call Transcript / Full Conversation'] = callTranscript;
 
-    return rowObj;
+    // Neutralize spreadsheet formula injection & preserve phone formatting (SEC-03, TC-EXP-02, TC-EXP-03)
+    const sanitizeCellValue = (val) => {
+      if (val === undefined || val === null) return '';
+      if (typeof val === 'number') return val;
+      const str = String(val);
+      if (/^[=+\-@\t\r]/.test(str)) {
+        return `'${str}`;
+      }
+      return str;
+    };
+
+    const sanitizedRow = {};
+    for (const [k, v] of Object.entries(rowObj)) {
+      sanitizedRow[k] = sanitizeCellValue(v);
+    }
+    return sanitizedRow;
   };
 
   // Helper to dynamically calculate custom column widths based on content lengths
@@ -2655,17 +2878,34 @@ export default function App() {
       return ['name', 'fullname', 'studentname', 'student', 'phone', 'phonenumber', 'mobile', 'mobilenumber', 'contact', 'contactnumber', 'email', 'emailid', 'mail', 'mailid', 'state', 'preferredstate', 'stateut', 'district', 'preferredcity', 'city', 'town', 'program', 'course', 'degree', 'branch', 'university', 'college', 'collegename', 'targetcollege', 'preferreduniversity'].includes(norm);
     };
 
-    // Collect all unique extra field keys across all contacts to maintain column alignment
+    // Collect unique extra field keys with case & punctuation normalization
     const extraFieldKeys = [];
+    const normExtraMap = new Map();
     contacts.forEach(c => {
       if (c.extraFields && typeof c.extraFields === 'object') {
         Object.keys(c.extraFields).forEach(k => {
-          if (!isStandardKey(k) && !extraFieldKeys.includes(k)) {
-            extraFieldKeys.push(k);
+          if (!isStandardKey(k)) {
+            const norm = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (norm && !normExtraMap.has(norm)) {
+              normExtraMap.set(norm, k);
+              extraFieldKeys.push(k);
+            }
           }
         });
       }
     });
+
+    const getExtraFieldVal = (obj, key) => {
+      if (!obj || typeof obj !== 'object') return null;
+      if (obj[key] !== undefined && obj[key] !== null && String(obj[key]).trim() !== '') return String(obj[key]).trim();
+      const norm = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+      for (const [fieldK, fieldV] of Object.entries(obj)) {
+        if (fieldK.toLowerCase().replace(/[^a-z0-9]/g, '') === norm && fieldV !== undefined && fieldV !== null && String(fieldV).trim() !== '') {
+          return String(fieldV).trim();
+        }
+      }
+      return null;
+    };
 
     return contacts.map((c, i) => {
       const cleanPhone = String(c.formattedPhone || c.phone || '').replace(/\D/g, '').slice(-10);
@@ -2752,8 +2992,8 @@ export default function App() {
       // Merge extra fields ensuring all discovered keys exist with default '—'
       const mergedExtraFields = {};
       extraFieldKeys.forEach(k => {
-        const val = c.extraFields?.[k] || matchedCall?.extraFields?.[k] || rf?.[k];
-        mergedExtraFields[k] = (val !== undefined && val !== null && String(val).trim() !== '') ? String(val).trim() : '—';
+        const val = getExtraFieldVal(c.extraFields, k) || getExtraFieldVal(matchedCall?.extraFields, k) || getExtraFieldVal(rf, k);
+        mergedExtraFields[k] = val || '—';
       });
 
       // Robust resolver for Call Recording URL
@@ -2884,7 +3124,7 @@ export default function App() {
       const workbook = XLSX.utils.book_new();
       let contacts = camp.contacts || [];
       if (onlyCompleted) {
-        contacts = contacts.filter(c => c.status !== 'queued' && c.status !== 'in-progress');
+        contacts = contacts.filter(c => c.status === 'completed' || (c.callOutcome && String(c.callOutcome).toLowerCase() === 'completed'));
       }
 
       if (contacts.length === 0) {
@@ -2995,7 +3235,7 @@ export default function App() {
     if (onlyCompleted && camp && Array.isArray(camp.contacts)) {
       camp = {
         ...camp,
-        contacts: camp.contacts.filter(c => c.status !== 'queued' && c.status !== 'in-progress')
+        contacts: camp.contacts.filter(c => c.status === 'completed' || (c.callOutcome && String(c.callOutcome).toLowerCase() === 'completed'))
       };
     }
 
@@ -3023,14 +3263,32 @@ export default function App() {
       console.error('Failed to generate CSV client-side:', err);
     }
 
-    // Fallback to server route if client generation could not run
-    const link = document.createElement('a');
-    link.href = `/api/campaigns/${camp.id || campOrId}/export${onlyCompleted ? '?completedOnly=true' : ''}`;
-    link.download = `${safeName}${suffix}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    addToast(`Downloading report for "${camp.name || campaignName || 'campaign'}"...`, 'info');
+    // Safe fallback to server export route checking response status (TC-EXP-04, BUG-08)
+    (async () => {
+      try {
+        const targetCampId = camp?.id || campOrId;
+        const res = await fetch(`/api/campaigns/${targetCampId}/export${onlyCompleted ? '?completedOnly=true' : ''}`);
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          addToast(errData.error || `Export failed with HTTP ${res.status}`, 'error');
+          return;
+        }
+        const textData = await res.text();
+        const blob = new Blob(["\uFEFF" + textData], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${safeName}${suffix}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        addToast(`Downloaded CSV report for "${camp?.name || campaignName || 'campaign'}".`, 'success');
+      } catch (fetchErr) {
+        console.error('Server export fetch failed:', fetchErr);
+        addToast(`Could not download report: ${fetchErr.message}`, 'error');
+      }
+    })();
   };
 
 
@@ -3281,7 +3539,33 @@ export default function App() {
             onClick={() => setActiveTab('dispatch')}
           >
             <PhoneCall size={18} />
-            Call Dialer
+            <span>Call Dialer</span>
+            {(() => {
+              const count = campaigns.filter(c => c.status === 'paused').length;
+              if (count === 0) return null;
+              return (
+                <span
+                  style={{
+                    backgroundColor: '#d97706',
+                    color: '#ffffff',
+                    fontSize: '0.68rem',
+                    fontWeight: '800',
+                    padding: '0.15rem 0.5rem',
+                    borderRadius: '9999px',
+                    marginLeft: '0.35rem',
+                    letterSpacing: '0.02em',
+                    boxShadow: '0 1px 3px rgba(217, 119, 6, 0.4)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.25rem'
+                  }}
+                  title={`${count} paused campaign${count > 1 ? 's' : ''} waiting to resume`}
+                >
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#ffffff', display: 'inline-block' }}></span>
+                  {count} Paused
+                </span>
+              );
+            })()}
           </button>
 
           <button
@@ -3439,9 +3723,170 @@ export default function App() {
               )}
             </div>
 
+            {/* PAUSED CAMPAIGNS READY TO RESUME - PRIME POSITION (DIRECTLY AFTER SAVED COLLEGES) */}
+            {!campaignState.isRunning && (() => {
+              const pausedCamps = campaigns.filter(c => c.status === 'paused');
+              if (pausedCamps.length === 0) return null;
+
+              const totalUncalledAll = pausedCamps.reduce((acc, pc) => {
+                const uncalled = (pc.contacts || []).filter(c => c.status === 'queued' || c.status !== 'completed');
+                return acc + (uncalled.length || pc.totalCount || 0);
+              }, 0);
+
+              return (
+                <div
+                  className="card"
+                  style={{
+                    borderLeft: '5px solid #d97706',
+                    backgroundColor: 'rgba(245, 158, 11, 0.03)',
+                    boxShadow: '0 4px 12px rgba(217, 119, 6, 0.08)',
+                    borderRadius: '12px',
+                    padding: '1.25rem'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: showPausedCampaignsSection ? '1rem' : '0', flexWrap: 'wrap', gap: '0.75rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <div style={{ width: '40px', height: '40px', borderRadius: '10px', backgroundColor: 'rgba(217, 119, 6, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#d97706' }}>
+                        <Pause size={22} />
+                      </div>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: '800', color: 'var(--text-primary)' }}>
+                            Paused Campaigns Ready to Resume ({pausedCamps.length})
+                          </h3>
+                          <span style={{ fontSize: '0.75rem', fontWeight: '700', backgroundColor: 'rgba(217, 119, 6, 0.15)', color: '#b45309', padding: '0.15rem 0.55rem', borderRadius: '9999px' }}>
+                            {totalUncalledAll} Leads Waiting
+                          </span>
+                        </div>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                          Resume dialing unfinished contacts directly, or load into Staging to append more numbers
+                        </span>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{ fontSize: '0.82rem', padding: '0.4rem 0.85rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                        onClick={() => setShowPausedCampaignsSection(prev => !prev)}
+                        title={showPausedCampaignsSection ? 'Collapse paused campaigns' : 'Expand paused campaigns'}
+                      >
+                        {showPausedCampaignsSection ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                        {showPausedCampaignsSection ? 'Collapse' : `Show (${pausedCamps.length})`}
+                      </button>
+                    </div>
+                  </div>
+
+                  {showPausedCampaignsSection && (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: '0.9rem', marginTop: '0.5rem' }}>
+                      {pausedCamps.map((pc) => {
+                        const uncalledContacts = (pc.contacts || []).filter(c => c.status === 'queued' || c.status !== 'completed');
+                        const uncalledCount = uncalledContacts.length || pc.totalCount || 0;
+
+                        return (
+                          <div
+                            key={pc.id}
+                            style={{
+                              borderRadius: '10px',
+                              border: '1px solid rgba(217, 119, 6, 0.25)',
+                              backgroundColor: '#ffffff',
+                              padding: '1.1rem',
+                              boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              justifyContent: 'space-between',
+                              gap: '0.85rem'
+                            }}
+                          >
+                            <div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                                <h4 style={{ margin: 0, fontSize: '0.98rem', fontWeight: '800', color: 'var(--text-primary)', lineHeight: '1.3' }}>
+                                  ⏸️ {pc.name}
+                                </h4>
+                                <span className="status-pill" style={{ backgroundColor: 'rgba(245, 158, 11, 0.18)', color: '#b45309', fontSize: '0.7rem', fontWeight: '800', flexShrink: 0 }}>
+                                  PAUSED
+                                </span>
+                              </div>
+
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginBottom: '0.65rem' }}>
+                                <span style={{ fontSize: '0.74rem', fontWeight: '700', backgroundColor: 'rgba(99, 102, 241, 0.08)', color: '#4f46e5', padding: '0.15rem 0.5rem', borderRadius: '4px' }}>
+                                  🎓 {pc.universityName || 'Vidyavision AI'}
+                                </span>
+                                {pc.course && (
+                                  <span style={{ fontSize: '0.74rem', fontWeight: '700', backgroundColor: 'rgba(16, 185, 129, 0.08)', color: '#047857', padding: '0.15rem 0.5rem', borderRadius: '4px' }}>
+                                    📚 {pc.course}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                <PhoneCall size={14} style={{ color: '#d97706' }} />
+                                <span><b>{uncalledCount} uncalled contacts</b> ready to dial</span>
+                              </div>
+                            </div>
+
+                            {/* Action Buttons */}
+                            <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap', borderTop: '1px solid var(--border)', paddingTop: '0.75rem', alignItems: 'center' }}>
+                              <button
+                                type="button"
+                                className="btn btn-primary"
+                                style={{ fontSize: '0.82rem', padding: '0.45rem 0.85rem', fontWeight: '700', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', backgroundColor: '#059669', borderColor: '#10b981', boxShadow: '0 2px 4px rgba(5, 150, 105, 0.25)' }}
+                                onClick={() => handleResumePausedCampaign(pc)}
+                                title="Directly start calling the remaining contacts"
+                              >
+                                <Play size={14} /> Resume Calling
+                              </button>
+
+                              <button
+                                type="button"
+                                className="btn btn-secondary"
+                                style={{ fontSize: '0.82rem', padding: '0.45rem 0.75rem', fontWeight: '600', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', borderColor: '#818cf8', color: '#4f46e5', backgroundColor: 'rgba(99, 102, 241, 0.06)' }}
+                                onClick={() => handleAppendContactsToPausedCampaign(pc)}
+                                title="Load remaining contacts into staging area so you can upload more numbers to append"
+                              >
+                                <Plus size={14} /> Add / Append Contacts
+                              </button>
+
+                              <button
+                                type="button"
+                                className="btn btn-secondary"
+                                style={{ fontSize: '0.82rem', padding: '0.45rem 0.6rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
+                                onClick={() => handleDownloadCampaignExcel(pc)}
+                                title="Download uncalled contacts Excel list"
+                              >
+                                <Download size={14} /> Excel
+                              </button>
+
+                              <button
+                                type="button"
+                                className="btn btn-danger-outline"
+                                style={{ fontSize: '0.82rem', padding: '0.45rem 0.6rem', marginLeft: 'auto', color: '#ef4444' }}
+                                onClick={() => handleDeleteCampaign(pc.id, pc.name)}
+                                title="Delete paused campaign"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             {/* If campaign is NOT running, show the progressive setup steps */}
             {!campaignState.isRunning && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '0.25rem', marginBottom: '-0.25rem' }}>
+                  <div style={{ flex: 1, height: '1px', backgroundColor: 'var(--border)' }}></div>
+                  <span style={{ fontSize: '0.78rem', fontWeight: '800', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)' }}>
+                    Or Start A New Calling Campaign
+                  </span>
+                  <div style={{ flex: 1, height: '1px', backgroundColor: 'var(--border)' }}></div>
+                </div>
 
                 {/* STEP 1: UPLOAD DATA CARD */}
                 <div className="card" style={{ borderLeft: '4px solid var(--accent)' }}>
@@ -4111,13 +4556,38 @@ export default function App() {
                   </div>
                 )}
 
+                {/* RESUMING & APPENDING BANNER */}
+                {resumingCampaignId && (
+                  <div className="card" style={{ borderLeft: '4px solid #6366f1', backgroundColor: 'rgba(99, 102, 241, 0.05)', marginBottom: '1.25rem', padding: '0.9rem 1.25rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                      <Plus size={20} style={{ color: '#6366f1' }} />
+                      <div>
+                        <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: '700', color: 'var(--text-primary)' }}>
+                          Appending to Paused Campaign: <b>{resumingCampaignName}</b>
+                        </h4>
+                        <p style={{ margin: '0.15rem 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                          {stagedContacts.length} contacts loaded from paused batch. Upload an Excel file or paste more numbers to append to this campaign, then click Start Dialing.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.78rem', padding: '0.3rem 0.65rem' }}
+                      onClick={() => { setResumingCampaignId(null); setResumingCampaignName(''); }}
+                    >
+                      Cancel Append Mode
+                    </button>
+                  </div>
+                )}
+
                 {/* STAGED QUEUE CARD - SHOWING BIGGER & WIDER */}
                 <div className="card" style={{ width: '100%' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid var(--border)', paddingBottom: '1rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                       <Users size={22} style={{ color: 'var(--accent)' }} />
                       <h2 style={{ fontSize: '1.3rem', fontWeight: '700', margin: 0 }}>
-                        Staged Calling Queue ({stagedContacts.length})
+                        Staged Calling Queue ({stagedContacts.length}) {resumingCampaignName ? `• Appending to ${resumingCampaignName}` : ''}
                       </h2>
                     </div>
 
@@ -4630,7 +5100,6 @@ export default function App() {
                 </div>
               </div>
             )}
-
 
             {/* ACTIVE CAMPAIGN DASHBOARD - Displays when calling campaign is active */}
             {campaignState.isRunning && (
@@ -5372,10 +5841,16 @@ export default function App() {
                                     )}
 
                                     <span
-                                      className={`status-pill ${camp.status === 'in-progress' ? 'active' : 'completed'}`}
-                                      style={{ fontSize: '0.68rem', textTransform: 'uppercase', flexShrink: 0 }}
+                                      className={`status-pill ${camp.status === 'in-progress' ? 'active' : camp.status === 'paused' ? 'warning' : 'completed'}`}
+                                      style={{
+                                        fontSize: '0.68rem',
+                                        textTransform: 'uppercase',
+                                        flexShrink: 0,
+                                        fontWeight: '800',
+                                        ...(camp.status === 'paused' ? { backgroundColor: 'rgba(245, 158, 11, 0.15)', color: '#d97706', border: '1px solid rgba(245, 158, 11, 0.35)' } : {})
+                                      }}
                                     >
-                                      {camp.status || 'completed'}
+                                      {camp.status === 'paused' ? '⏸️ PAUSED' : (camp.status || 'completed')}
                                     </span>
                                   </div>
 
@@ -5406,6 +5881,28 @@ export default function App() {
                                 {/* Action Buttons */}
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.4rem', borderTop: '1px solid var(--border)', paddingTop: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
                                   <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                    {camp.status === 'paused' && (
+                                      <>
+                                        <button
+                                          type="button"
+                                          className="btn btn-primary"
+                                          style={{ fontSize: '0.78rem', padding: '0.35rem 0.65rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem', backgroundColor: '#059669', borderColor: '#10b981' }}
+                                          onClick={() => handleResumePausedCampaign(camp)}
+                                          title="Directly start dialing remaining contacts"
+                                        >
+                                          <Play size={13} /> Resume
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="btn btn-secondary"
+                                          style={{ fontSize: '0.78rem', padding: '0.35rem 0.65rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem', borderColor: '#818cf8', color: '#4f46e5', backgroundColor: 'rgba(99, 102, 241, 0.06)' }}
+                                          onClick={() => handleAppendContactsToPausedCampaign(camp)}
+                                          title="Load remaining contacts into staging area to append more numbers"
+                                        >
+                                          <Plus size={13} /> Append
+                                        </button>
+                                      </>
+                                    )}
                                     <button
                                       type="button"
                                       className="btn btn-primary"
@@ -7285,6 +7782,11 @@ export default function App() {
                   )}
                   <span>🕒 Started: <strong style={{ color: '#334155' }}>{selectedCampaignDetail.startedAt ? new Date(selectedCampaignDetail.startedAt).toLocaleString() : '—'}</strong></span>
                   <span>👥 Total: <strong style={{ color: '#0f172a' }}>{selectedCampaignDetail.contacts?.length || 0} Contacts</strong></span>
+                  {tempContacts.length > 0 && (
+                    <span style={{ backgroundColor: 'rgba(16, 185, 129, 0.12)', color: '#047857', padding: '0.15rem 0.55rem', borderRadius: '4px', fontWeight: '700', border: '1px solid rgba(16, 185, 129, 0.35)', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                      📦 Staging Queue: {tempContacts.length} Added
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -7322,6 +7824,8 @@ export default function App() {
 
               const allFilteredChecked = filteredContacts.length > 0 && filteredContacts.every(c => campaignCheckedContacts.some(chk => (chk.phone || chk.formattedPhone) === (c.phone || c.formattedPhone)));
 
+              const stagedPhoneSet = new Set((tempContacts || []).map(c => String(c.phone || c.formattedPhone || '').replace(/\D/g, '').slice(-10)));
+
               const toggleSelectAll = () => {
                 if (allFilteredChecked) {
                   // Deselect all filtered
@@ -7349,9 +7853,56 @@ export default function App() {
                 });
               };
 
+              // Product-level Range Selection Processor (e.g. 1-10, 22-30, 40-60)
+              const handleApplyRangeSelection = (action = 'select', customFrom = null, customTo = null) => {
+                let fromVal = customFrom !== null ? customFrom : campaignRangeFrom;
+                let toVal = customTo !== null ? customTo : campaignRangeTo;
+
+                const fromNum = parseInt(fromVal, 10);
+                const toNum = parseInt(toVal, 10);
+
+                if (isNaN(fromNum) || isNaN(toNum)) {
+                  addToast('Please enter valid row numbers in From # and To # (e.g., 22 to 30)', 'warning');
+                  return;
+                }
+
+                const start = Math.max(1, Math.min(fromNum, toNum));
+                const end = Math.min(filteredContacts.length, Math.max(fromNum, toNum));
+
+                if (start > filteredContacts.length) {
+                  addToast(`Start row #${start} exceeds total list (${filteredContacts.length}).`, 'warning');
+                  return;
+                }
+
+                const rangeContacts = filteredContacts.slice(start - 1, end);
+
+                if (action === 'select') {
+                  const map = new Map();
+                  campaignCheckedContacts.forEach(c => {
+                    const key = c.phone || c.formattedPhone;
+                    if (key) map.set(key, c);
+                  });
+                  let newlySelectedCount = 0;
+                  rangeContacts.forEach(c => {
+                    const key = c.phone || c.formattedPhone;
+                    if (key) {
+                      if (!map.has(key)) newlySelectedCount++;
+                      map.set(key, c);
+                    }
+                  });
+                  setCampaignCheckedContacts(Array.from(map.values()));
+                  addToast(`Selected rows #${start} to #${end} (${rangeContacts.length} contacts). Total selected: ${map.size}`, 'success');
+                } else if (action === 'deselect') {
+                  const removeKeys = new Set(rangeContacts.map(c => c.phone || c.formattedPhone));
+                  setCampaignCheckedContacts(prev => prev.filter(c => !removeKeys.has(c.phone || c.formattedPhone)));
+                  addToast(`Deselected rows #${start} to #${end}.`, 'info');
+                }
+              };
+
               return (
                 <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem', backgroundColor: '#f8fafc', padding: '0.85rem 1rem', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                  {/* Row 1: Search, Status, Select All & Primary Action Buttons */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.65rem', backgroundColor: '#f8fafc', padding: '0.75rem 1rem', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
                     {/* Search & Status Filter */}
                     <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap', flex: 1 }}>
                       <div style={{ position: 'relative', minWidth: '180px', flex: '1 1 200px' }}>
@@ -7395,13 +7946,13 @@ export default function App() {
                       </button>
                     </div>
 
-                    {/* Action: Add to New Campaign & Download */}
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    {/* Action: Add to Staging (Keep Open) & Proceed */}
+                    <div style={{ display: 'flex', gap: '0.45rem', alignItems: 'center', flexWrap: 'wrap' }}>
                       <button
                         type="button"
                         style={{
                           fontSize: '0.82rem',
-                          padding: '0.45rem 0.85rem',
+                          padding: '0.45rem 0.75rem',
                           display: 'flex',
                           alignItems: 'center',
                           gap: '0.35rem',
@@ -7415,17 +7966,17 @@ export default function App() {
                         onClick={() => handleDownloadCampaignExcel(selectedCampaignDetail)}
                         title="Download formatted Excel report (.xlsx)"
                       >
-                        <Download size={14} /> Download Excel (.xlsx)
+                        <Download size={14} /> Download Excel
                       </button>
 
                       <button
                         type="button"
                         style={{
                           fontSize: '0.82rem',
-                          padding: '0.45rem 0.75rem',
+                          padding: '0.45rem 0.65rem',
                           display: 'flex',
                           alignItems: 'center',
-                          gap: '0.35rem',
+                          gap: '0.3rem',
                           backgroundColor: '#ffffff',
                           border: '1px solid #cbd5e1',
                           borderRadius: '8px',
@@ -7442,24 +7993,221 @@ export default function App() {
                       <button
                         type="button"
                         style={{
-                          fontSize: '0.85rem',
-                          padding: '0.5rem 1.15rem',
-                          display: 'flex',
+                          fontSize: '0.82rem',
+                          padding: '0.48rem 0.85rem',
+                          display: 'inline-flex',
                           alignItems: 'center',
-                          gap: '0.45rem',
-                          backgroundColor: campaignCheckedContacts.length > 0 ? '#F16522' : '#cbd5e1',
-                          border: 'none',
+                          gap: '0.35rem',
+                          backgroundColor: campaignCheckedContacts.length > 0 ? '#6366f1' : '#f1f5f9',
+                          border: '1px solid ' + (campaignCheckedContacts.length > 0 ? '#4f46e5' : '#cbd5e1'),
                           borderRadius: '8px',
-                          color: '#ffffff',
+                          color: campaignCheckedContacts.length > 0 ? '#ffffff' : '#94a3b8',
                           fontWeight: '700',
                           cursor: campaignCheckedContacts.length > 0 ? 'pointer' : 'not-allowed',
-                          boxShadow: campaignCheckedContacts.length > 0 ? '0 4px 12px rgba(241, 101, 34, 0.25)' : 'none'
+                          boxShadow: campaignCheckedContacts.length > 0 ? '0 2px 6px rgba(99, 102, 241, 0.25)' : 'none'
                         }}
                         disabled={campaignCheckedContacts.length === 0}
-                        onClick={() => handleLoadContactsToNewCampaign(campaignCheckedContacts)}
+                        onClick={() => handleLoadContactsToNewCampaign(campaignCheckedContacts, true)}
+                        title="Add selected contacts to staging queue and stay in this tab to select more ranges"
                       >
-                        <Plus size={15} /> Add Selected ({campaignCheckedContacts.length}) to New Campaign
+                        <Plus size={14} /> Add Selected ({campaignCheckedContacts.length}) (Stay Here)
                       </button>
+
+                      <button
+                        type="button"
+                        style={{
+                          fontSize: '0.82rem',
+                          padding: '0.48rem 0.95rem',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.35rem',
+                          backgroundColor: (campaignCheckedContacts.length > 0 || tempContacts.length > 0) ? '#F16522' : '#f1f5f9',
+                          border: 'none',
+                          borderRadius: '8px',
+                          color: (campaignCheckedContacts.length > 0 || tempContacts.length > 0) ? '#ffffff' : '#94a3b8',
+                          fontWeight: '700',
+                          cursor: (campaignCheckedContacts.length > 0 || tempContacts.length > 0) ? 'pointer' : 'not-allowed',
+                          boxShadow: (campaignCheckedContacts.length > 0 || tempContacts.length > 0) ? '0 4px 12px rgba(241, 101, 34, 0.25)' : 'none'
+                        }}
+                        disabled={campaignCheckedContacts.length === 0 && tempContacts.length === 0}
+                        onClick={() => handleLoadContactsToNewCampaign(campaignCheckedContacts, false)}
+                        title="Finalize staging and proceed to Step 2 in Dialer"
+                      >
+                        <ArrowRight size={14} /> Proceed to Dialer {tempContacts.length > 0 ? `(${tempContacts.length + campaignCheckedContacts.length})` : `(${campaignCheckedContacts.length})`}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Row 2: Product-Level Range Selector Toolbar */}
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '0.65rem',
+                    marginBottom: '0.85rem',
+                    backgroundColor: '#ffffff',
+                    padding: '0.6rem 0.95rem',
+                    borderRadius: '10px',
+                    border: '1.5px solid #cbd5e1',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.02)'
+                  }}>
+                    {/* Left: From & To inputs with Select & Deselect */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontWeight: '800', fontSize: '0.82rem', color: '#1e293b' }}>
+                        <Sliders size={15} style={{ color: '#F16522' }} />
+                        <span>Select by Range:</span>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <span style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: '700' }}>From #</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max={filteredContacts.length}
+                          placeholder="1"
+                          value={campaignRangeFrom}
+                          onChange={(e) => setCampaignRangeFrom(e.target.value)}
+                          style={{
+                            width: '65px',
+                            padding: '0.3rem 0.45rem',
+                            fontSize: '0.84rem',
+                            fontWeight: '700',
+                            border: '1px solid #cbd5e1',
+                            borderRadius: '6px',
+                            textAlign: 'center',
+                            backgroundColor: '#ffffff'
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleApplyRangeSelection('select');
+                          }}
+                        />
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <span style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: '700' }}>To #</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max={filteredContacts.length}
+                          placeholder={filteredContacts.length}
+                          value={campaignRangeTo}
+                          onChange={(e) => setCampaignRangeTo(e.target.value)}
+                          style={{
+                            width: '65px',
+                            padding: '0.3rem 0.45rem',
+                            fontSize: '0.84rem',
+                            fontWeight: '700',
+                            border: '1px solid #cbd5e1',
+                            borderRadius: '6px',
+                            textAlign: 'center',
+                            backgroundColor: '#ffffff'
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleApplyRangeSelection('select');
+                          }}
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        style={{
+                          fontSize: '0.78rem',
+                          padding: '0.35rem 0.75rem',
+                          backgroundColor: '#F16522',
+                          borderColor: '#d95315',
+                          fontWeight: '700',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.3rem',
+                          boxShadow: '0 2px 4px rgba(241, 101, 34, 0.2)'
+                        }}
+                        onClick={() => handleApplyRangeSelection('select')}
+                        title="Add this range to selection (e.g., 22 to 30)"
+                      >
+                        <Plus size={13} /> Select Range
+                      </button>
+
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        style={{
+                          fontSize: '0.78rem',
+                          padding: '0.35rem 0.65rem',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.25rem',
+                          backgroundColor: '#ffffff'
+                        }}
+                        onClick={() => handleApplyRangeSelection('deselect')}
+                        title="Deselect this range"
+                      >
+                        Deselect Range
+                      </button>
+                    </div>
+
+                    {/* Right: Quick Range Presets */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '0.75rem', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' }}>Quick:</span>
+                      <button
+                        type="button"
+                        style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: '#f8fafc', cursor: 'pointer', fontWeight: '600', color: '#1e293b' }}
+                        onClick={() => handleApplyRangeSelection('select', 1, Math.min(10, filteredContacts.length))}
+                        title="Select 1 to 10"
+                      >
+                        1–10
+                      </button>
+                      {filteredContacts.length >= 25 && (
+                        <button
+                          type="button"
+                          style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: '#f8fafc', cursor: 'pointer', fontWeight: '600', color: '#1e293b' }}
+                          onClick={() => handleApplyRangeSelection('select', 1, 25)}
+                          title="Select 1 to 25"
+                        >
+                          1–25
+                        </button>
+                      )}
+                      {filteredContacts.length >= 30 && (
+                        <button
+                          type="button"
+                          style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: '#f8fafc', cursor: 'pointer', fontWeight: '600', color: '#1e293b' }}
+                          onClick={() => handleApplyRangeSelection('select', 22, Math.min(30, filteredContacts.length))}
+                          title="Select 22 to 30"
+                        >
+                          22–30
+                        </button>
+                      )}
+                      {filteredContacts.length >= 50 && (
+                        <button
+                          type="button"
+                          style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: '#f8fafc', cursor: 'pointer', fontWeight: '600', color: '#1e293b' }}
+                          onClick={() => handleApplyRangeSelection('select', 1, 50)}
+                          title="Select 1 to 50"
+                        >
+                          1–50
+                        </button>
+                      )}
+                      {filteredContacts.length > 50 && (
+                        <button
+                          type="button"
+                          style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: '#f8fafc', cursor: 'pointer', fontWeight: '600', color: '#1e293b' }}
+                          onClick={() => handleApplyRangeSelection('select', 51, Math.min(100, filteredContacts.length))}
+                          title={`Select 51 to ${Math.min(100, filteredContacts.length)}`}
+                        >
+                          51–{Math.min(100, filteredContacts.length)}
+                        </button>
+                      )}
+                      {filteredContacts.length > 100 && (
+                        <button
+                          type="button"
+                          style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem', borderRadius: '6px', border: '1px solid #cbd5e1', backgroundColor: '#f8fafc', cursor: 'pointer', fontWeight: '600', color: '#1e293b' }}
+                          onClick={() => handleApplyRangeSelection('select', 1, 100)}
+                          title="Select 1 to 100"
+                        >
+                          1–100
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -7495,12 +8243,14 @@ export default function App() {
                         ) : (
                           filteredContacts.map((contact, idx) => {
                             const isChecked = campaignCheckedContacts.some(chk => (chk.phone || chk.formattedPhone) === (contact.phone || contact.formattedPhone));
+                            const cleanPhone = String(contact.phone || contact.formattedPhone || '').replace(/\D/g, '').slice(-10);
+                            const isAlreadyStaged = cleanPhone ? stagedPhoneSet.has(cleanPhone) : false;
 
                             return (
                               <tr
                                 key={contact.id || `${contact.phone}-${idx}`}
                                 style={{
-                                  backgroundColor: isChecked ? '#eff6ff' : (idx % 2 === 0 ? '#ffffff' : '#fcfcfd'),
+                                  backgroundColor: isChecked ? '#eff6ff' : (isAlreadyStaged ? 'rgba(16, 185, 129, 0.04)' : (idx % 2 === 0 ? '#ffffff' : '#fcfcfd')),
                                   borderBottom: '1px solid #f1f5f9',
                                   transition: 'background-color 0.15s ease'
                                 }}
@@ -7519,6 +8269,11 @@ export default function App() {
                                 </td>
                                 <td style={{ padding: '0.6rem 0.75rem', fontFamily: 'var(--mono)', color: '#2563eb', fontWeight: '700' }}>
                                   {contact.formattedPhone || contact.phone}
+                                  {isAlreadyStaged && (
+                                    <span style={{ fontSize: '0.68rem', padding: '0.1rem 0.4rem', borderRadius: '4px', backgroundColor: 'rgba(16, 185, 129, 0.12)', color: '#047857', fontWeight: '700', border: '1px solid rgba(16, 185, 129, 0.3)', marginLeft: '0.4rem' }}>
+                                      ✓ Staged
+                                    </span>
+                                  )}
                                 </td>
                                 <td style={{ padding: '0.6rem 0.75rem' }}>
                                   <span style={{ fontSize: '0.78rem', color: '#475569', fontWeight: '500' }}>
@@ -7553,15 +8308,15 @@ export default function App() {
                                       borderRadius: '6px',
                                       fontWeight: '700',
                                       cursor: 'pointer',
-                                      border: isChecked ? '1px solid #10b981' : '1px solid #cbd5e1',
-                                      backgroundColor: isChecked ? '#ecfdf5' : '#ffffff',
-                                      color: isChecked ? '#047857' : '#1e293b',
+                                      border: isChecked ? '1px solid #10b981' : (isAlreadyStaged ? '1px solid #a7f3d0' : '1px solid #cbd5e1'),
+                                      backgroundColor: isChecked ? '#ecfdf5' : (isAlreadyStaged ? 'rgba(16, 185, 129, 0.08)' : '#ffffff'),
+                                      color: isChecked ? '#047857' : (isAlreadyStaged ? '#047857' : '#1e293b'),
                                       transition: 'all 0.15s ease'
                                     }}
                                     onClick={() => toggleContactCheck(contact)}
                                     title={isChecked ? 'Click to deselect' : 'Click to select contact'}
                                   >
-                                    {isChecked ? '✓ Selected' : '+ Select'}
+                                    {isChecked ? '✓ Selected' : (isAlreadyStaged ? '✓ In Staging (+)' : '+ Select')}
                                   </button>
                                 </td>
                               </tr>
@@ -7574,9 +8329,9 @@ export default function App() {
 
                   {/* Modal Footer Bottom */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem', paddingTop: '0.85rem', borderTop: '1px solid #e2e8f0', flexWrap: 'wrap', gap: '0.75rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
                       <span style={{ fontSize: '0.85rem', color: '#475569' }}>
-                        Selected <strong style={{ color: '#F16522', fontSize: '1rem' }}>{campaignCheckedContacts.length}</strong> of {allContacts.length} recipients
+                        Selected <strong style={{ color: '#F16522', fontSize: '1rem' }}>{campaignCheckedContacts.length}</strong> of {filteredContacts.length} recipients
                       </span>
                       {campaignCheckedContacts.length > 0 && (
                         <button
@@ -7587,9 +8342,22 @@ export default function App() {
                           Clear Selection
                         </button>
                       )}
+                      {tempContacts.length > 0 && (
+                        <span style={{
+                          backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                          color: '#047857',
+                          border: '1px solid rgba(16, 185, 129, 0.3)',
+                          borderRadius: '6px',
+                          padding: '0.2rem 0.55rem',
+                          fontWeight: '700',
+                          fontSize: '0.78rem'
+                        }}>
+                          📦 In Staging Queue: {tempContacts.length} contacts
+                        </span>
+                      )}
                     </div>
 
-                    <div style={{ display: 'flex', gap: '0.6rem' }}>
+                    <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
                       <button
                         type="button"
                         style={{
@@ -7613,29 +8381,213 @@ export default function App() {
                       <button
                         type="button"
                         style={{
-                          padding: '0.55rem 1.4rem',
+                          padding: '0.55rem 1.15rem',
                           borderRadius: '8px',
-                          border: 'none',
-                          backgroundColor: campaignCheckedContacts.length > 0 ? '#F16522' : '#cbd5e1',
-                          color: '#ffffff',
+                          border: '1px solid ' + (campaignCheckedContacts.length > 0 ? '#4f46e5' : '#cbd5e1'),
+                          backgroundColor: campaignCheckedContacts.length > 0 ? '#6366f1' : '#f1f5f9',
+                          color: campaignCheckedContacts.length > 0 ? '#ffffff' : '#94a3b8',
                           fontWeight: '700',
-                          fontSize: '0.9rem',
+                          fontSize: '0.88rem',
                           cursor: campaignCheckedContacts.length > 0 ? 'pointer' : 'not-allowed',
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: '0.45rem',
-                          boxShadow: campaignCheckedContacts.length > 0 ? '0 4px 12px rgba(241, 101, 34, 0.25)' : 'none'
+                          boxShadow: campaignCheckedContacts.length > 0 ? '0 2px 8px rgba(99, 102, 241, 0.25)' : 'none'
                         }}
                         disabled={campaignCheckedContacts.length === 0}
-                        onClick={() => handleLoadContactsToNewCampaign(campaignCheckedContacts)}
+                        onClick={() => handleLoadContactsToNewCampaign(campaignCheckedContacts, true)}
+                        title="Add selected contacts to staging queue and keep this tab open so you can select more ranges"
                       >
-                        <ArrowRight size={16} /> Stage Selected ({campaignCheckedContacts.length}) to Step 2
+                        <Plus size={15} /> Add to Staging ({campaignCheckedContacts.length}) (Stay Here)
+                      </button>
+
+                      <button
+                        type="button"
+                        style={{
+                          padding: '0.55rem 1.4rem',
+                          borderRadius: '8px',
+                          border: 'none',
+                          backgroundColor: (campaignCheckedContacts.length > 0 || tempContacts.length > 0) ? '#F16522' : '#cbd5e1',
+                          color: '#ffffff',
+                          fontWeight: '700',
+                          fontSize: '0.9rem',
+                          cursor: (campaignCheckedContacts.length > 0 || tempContacts.length > 0) ? 'pointer' : 'not-allowed',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.45rem',
+                          boxShadow: (campaignCheckedContacts.length > 0 || tempContacts.length > 0) ? '0 4px 12px rgba(241, 101, 34, 0.25)' : 'none'
+                        }}
+                        disabled={campaignCheckedContacts.length === 0 && tempContacts.length === 0}
+                        onClick={() => handleLoadContactsToNewCampaign(campaignCheckedContacts, false)}
+                        title="Finalize staging and proceed to Step 2 in Dialer"
+                      >
+                        <ArrowRight size={16} /> Proceed to Dialer {tempContacts.length > 0 ? `(${tempContacts.length + campaignCheckedContacts.length} Staged)` : `(${campaignCheckedContacts.length} Staged)`}
                       </button>
                     </div>
                   </div>
                 </div>
               );
             })()}
+          </div>
+        </div>
+      )}
+
+      {/* OPTION A MODAL: PAUSE CAMPAIGN (SPLIT VS TEMPORARY) */}
+      {showPauseModal && (
+        <div
+          className="modal-overlay"
+          style={{ zIndex: 3000, backgroundColor: 'rgba(15, 23, 42, 0.65)', backdropFilter: 'blur(6px)' }}
+          onClick={() => setShowPauseModal(false)}
+        >
+          <div
+            className="modal-content"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: '620px',
+              width: '95%',
+              borderRadius: '16px',
+              border: '1px solid var(--border)',
+              backgroundColor: '#ffffff',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              overflow: 'hidden'
+            }}
+          >
+            {/* Modal Header */}
+            <div style={{ padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'linear-gradient(135deg, rgba(241, 101, 34, 0.04) 0%, rgba(99, 102, 241, 0.05) 100%)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <div style={{ width: '38px', height: '38px', borderRadius: '10px', backgroundColor: 'rgba(245, 158, 11, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Pause size={20} style={{ color: '#d97706' }} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: '800', color: 'var(--text-primary)' }}>
+                    Pause Calling Campaign
+                  </h3>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                    Choose how you want to manage this paused batch
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPauseModal(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: '0.25rem' }}
+              >
+                <XCircle size={20} />
+              </button>
+            </div>
+
+            {/* Progress Status Bar */}
+            <div style={{ padding: '0.9rem 1.5rem', backgroundColor: 'var(--bg-primary)', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <div>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block', textTransform: 'uppercase', fontWeight: '700' }}>Current Campaign</span>
+                <b style={{ fontSize: '0.9rem', color: 'var(--text-primary)' }}>{campaignState.campaignName || 'Active Campaign'}</b>
+              </div>
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <span style={{ fontSize: '0.8rem', padding: '0.25rem 0.6rem', borderRadius: '6px', backgroundColor: 'rgba(16, 185, 129, 0.1)', color: '#059669', fontWeight: '700' }}>
+                  ✅ {campaignState.completedCount} Completed
+                </span>
+                <span style={{ fontSize: '0.8rem', padding: '0.25rem 0.6rem', borderRadius: '6px', backgroundColor: 'rgba(99, 102, 241, 0.1)', color: '#4f46e5', fontWeight: '700' }}>
+                  ⏳ {Math.max(0, (campaignState.totalCount || 0) - (campaignState.completedCount || 0))} Remaining
+                </span>
+              </div>
+            </div>
+
+            {/* Modal Options */}
+            <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+              {/* OPTION 1: RECOMMENDED SPLIT */}
+              <div
+                style={{
+                  border: '2px solid #6366f1',
+                  borderRadius: '12px',
+                  padding: '1.25rem',
+                  backgroundColor: 'rgba(99, 102, 241, 0.03)',
+                  position: 'relative',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+                onClick={handleConfirmSplitCampaign}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <span style={{ fontSize: '0.68rem', fontWeight: '800', letterSpacing: '0.05em', textTransform: 'uppercase', backgroundColor: '#6366f1', color: '#ffffff', padding: '0.2rem 0.55rem', borderRadius: '4px' }}>
+                    RECOMMENDED (OPTION A)
+                  </span>
+                  <span style={{ fontSize: '0.8rem', color: '#4f46e5', fontWeight: '700' }}>
+                    Cleanest Reporting & Accurate
+                  </span>
+                </div>
+
+                <h4 style={{ margin: '0 0 0.4rem', fontSize: '1.02rem', fontWeight: '800', color: 'var(--text-primary)' }}>
+                  ✂️ Split into Part 1 (Completed) & Part 2 (Paused)
+                </h4>
+
+                <ul style={{ margin: '0 0 1rem', paddingLeft: '1.2rem', fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: '1.5' }}>
+                  <li>
+                    <b>Part 1:</b> Finalizes the <b>{campaignState.completedCount} completed calls</b> into a completed campaign record. You can immediately download its verified Excel report.
+                  </li>
+                  <li>
+                    <b>Part 2:</b> Detaches the remaining <b>{Math.max(0, (campaignState.totalCount || 0) - (campaignState.completedCount || 0))} uncalled contacts</b> into a separate paused campaign. You can resume calling anytime or append more contacts.
+                  </li>
+                </ul>
+
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ width: '100%', justifyContent: 'center', padding: '0.65rem 1rem', fontSize: '0.9rem', fontWeight: '700', backgroundColor: '#6366f1', borderColor: '#4f46e5' }}
+                  disabled={isSplittingCampaign}
+                  onClick={(e) => { e.stopPropagation(); handleConfirmSplitCampaign(); }}
+                >
+                  {isSplittingCampaign ? (
+                    <span>Splitting Campaign...</span>
+                  ) : (
+                    <span>✂️ Split Campaign ({campaignState.completedCount} in Part 1 • {Math.max(0, (campaignState.totalCount || 0) - (campaignState.completedCount || 0))} in Part 2)</span>
+                  )}
+                </button>
+              </div>
+
+              {/* OPTION 2: TEMPORARY PAUSE */}
+              <div
+                style={{
+                  border: '1px solid var(--border)',
+                  borderRadius: '12px',
+                  padding: '1.15rem',
+                  backgroundColor: '#ffffff',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+                onClick={handlePauseTemporarily}
+              >
+                <h4 style={{ margin: '0 0 0.35rem', fontSize: '0.96rem', fontWeight: '700', color: 'var(--text-primary)' }}>
+                  ⏸️ Just Pause Temporarily (In-Place)
+                </h4>
+                <p style={{ margin: '0 0 0.85rem', fontSize: '0.82rem', color: 'var(--text-muted)', lineHeight: '1.4' }}>
+                  Holds the current calling queue in place without splitting. You can click "Resume Campaign" to continue calling the remaining numbers at any time.
+                </p>
+
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ width: '100%', justifyContent: 'center', padding: '0.55rem 1rem', fontSize: '0.85rem', fontWeight: '600' }}
+                  onClick={(e) => { e.stopPropagation(); handlePauseTemporarily(); }}
+                >
+                  ⏸️ Just Pause Temporarily
+                </button>
+              </div>
+
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{ padding: '0.85rem 1.5rem', borderTop: '1px solid var(--border)', backgroundColor: 'var(--bg-primary)', display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ fontSize: '0.82rem', padding: '0.4rem 0.9rem' }}
+                onClick={() => setShowPauseModal(false)}
+              >
+                Cancel (Keep Calling)
+              </button>
+            </div>
+
           </div>
         </div>
       )}
