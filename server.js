@@ -8,6 +8,8 @@ import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { google } from 'googleapis';
 import db, { query, isDbConnected } from './db.js';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 
 dotenv.config();
 
@@ -56,10 +58,122 @@ app.use(cors({
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
+// ==========================================================
+// User Authentication & Granular RBAC Configuration
+// ==========================================================
+const JWT_SECRET = process.env.JWT_SECRET || 'vidyavision-secure-jwt-key-2026';
+const DATA_DIR = path.join(process.cwd(), 'data');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
+
+const DEFAULT_ADMIN_PERMISSIONS = {
+  canViewReports: true,
+  canViewTranscripts: true,
+  canAddNotes: true,
+  canStartStopCampaigns: true,
+  canUploadLeads: true,
+  canManageColleges: true,
+  canExportData: true
+};
+
+const DEFAULT_COUNSELOR_PERMISSIONS = {
+  canViewReports: true,
+  canViewTranscripts: true,
+  canAddNotes: true,
+  canStartStopCampaigns: false,
+  canUploadLeads: false,
+  canManageColleges: false,
+  canExportData: false
+};
+
+// Safe User Sanitizer: Strips sensitive password hash before returning over API
+function sanitizeUser(user) {
+  if (!user) return null;
+  const { passwordHash, ...safe } = user;
+  return safe;
+}
+
+// User File Storage Helpers
+async function loadUsers() {
+  try {
+    const raw = await fs.readFile(USERS_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    return [];
+  }
+}
+
+async function saveUsers(users) {
+  try {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.writeFile(USERS_FILE, JSON.stringify(users, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Error saving users file:', err.message);
+  }
+}
+
+// Seed Super Admin if data/users.json is missing or lacks default super admin
+async function ensureSuperAdmin() {
+  try {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    const users = await loadUsers();
+    let superAdmin = users.find(u => u.email.toLowerCase() === 'admin@vidyavision.com');
+    if (!superAdmin) {
+      const passwordHash = bcrypt.hashSync('VidyaVision@2026', 10);
+      superAdmin = {
+        id: 'admin_super_01',
+        email: 'admin@vidyavision.com',
+        name: 'System Admin',
+        role: 'admin',
+        passwordHash,
+        permissions: { ...DEFAULT_ADMIN_PERMISSIONS },
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      users.unshift(superAdmin);
+      await saveUsers(users);
+      console.log('✅ Auto-seeded Default Super Admin: admin@vidyavision.com');
+    }
+  } catch (err) {
+    console.error('Error ensuring super admin seed:', err.message);
+  }
+}
+
+// Helper to extract cookies safely
+function getCookie(req, name) {
+  const cookieHeader = req.headers?.cookie;
+  if (!cookieHeader) return null;
+  for (const c of cookieHeader.split(';')) {
+    const parts = c.trim().split('=');
+    if (parts[0] === name) {
+      return decodeURIComponent(parts.slice(1).join('='));
+    }
+  }
+  return null;
+}
+
+// Helper to extract JWT token from request (Bearer header, cookie, or query)
+function extractToken(req) {
+  const authHeader = req.headers?.authorization;
+  if (authHeader && typeof authHeader === 'string') {
+    const parts = authHeader.split(' ');
+    if (parts.length === 2 && parts[0].toLowerCase() === 'bearer') {
+      return parts[1];
+    }
+  }
+  const cookieToken = getCookie(req, 'vidyavision_token');
+  if (cookieToken) return cookieToken;
+
+  if (req.query && req.query.token) {
+    return req.query.token;
+  }
+  return null;
+}
+
 // API Authentication Middleware (SEC-01, SEC-05, SEC-08)
-const requireAuth = (req, res, next) => {
+const requireAuth = async (req, res, next) => {
   // Allow external webhook ingestion (OmniDimension, Google Apps Script)
-  if (req.path.startsWith('/webhook')) {
+  if (req.path.startsWith('/webhook') || req.originalUrl.startsWith('/api/webhook')) {
     const webhookSecret = process.env.WEBHOOK_SECRET;
     if (webhookSecret) {
       const providedSecret = req.headers['x-webhook-secret'];
@@ -70,16 +184,35 @@ const requireAuth = (req, res, next) => {
     return next();
   }
 
-  const configuredKey = process.env.APP_API_KEY;
-  if (!configuredKey) {
-    if (process.env.NODE_ENV === 'production') {
-      return res.status(500).json({ success: false, error: 'Server misconfiguration: APP_API_KEY is required in production environment' });
-    }
-    // In local development mode without APP_API_KEY, allow local calls
+  // Allow login endpoint without prior authentication
+  if (req.path === '/auth/login' || req.originalUrl === '/api/auth/login') {
     return next();
   }
 
-  // SEC-05: Enforce header-based authentication only. Reject query-based API keys.
+  // Allow logout endpoint without prior authentication (to clear cookies)
+  if (req.path === '/auth/logout' || req.originalUrl === '/api/auth/logout') {
+    return next();
+  }
+
+  // 1. Try JWT Token from Bearer header or vidyavision_token cookie
+  const token = extractToken(req);
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET);
+      const users = await loadUsers();
+      const user = users.find(u => u.id === decoded.id || u.email.toLowerCase() === String(decoded.email || '').toLowerCase());
+      if (user) {
+        req.user = user;
+        return next();
+      }
+      return res.status(401).json({ success: false, error: 'Unauthorized: User account no longer exists' });
+    } catch (err) {
+      return res.status(401).json({ success: false, error: 'Unauthorized: Invalid or expired session token' });
+    }
+  }
+
+  // 2. Allow API Key authentication (for external automation scripts / backward compatibility)
+  const configuredKey = process.env.APP_API_KEY;
   let providedKey = req.headers['x-api-key'];
   if (!providedKey && req.headers['authorization']) {
     const parts = req.headers['authorization'].split(' ');
@@ -88,13 +221,293 @@ const requireAuth = (req, res, next) => {
     }
   }
 
-  // SEC-08: Constant-time comparison to prevent timing attacks
-  if (!providedKey || !timingSafeCompare(providedKey, configuredKey)) {
-    return res.status(401).json({ success: false, error: 'Unauthorized: Invalid or missing API key' });
+  if (configuredKey && providedKey && timingSafeCompare(providedKey, configuredKey)) {
+    req.user = {
+      id: 'api_super_admin',
+      name: 'System Admin (API Key)',
+      email: 'admin@vidyavision.com',
+      role: 'admin',
+      permissions: { ...DEFAULT_ADMIN_PERMISSIONS }
+    };
+    return next();
+  }
+
+  return res.status(401).json({ success: false, error: 'Unauthorized: Authentication required. Please log in.' });
+};
+
+// Permission Guard Middleware
+const checkPermission = (permissionKey) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ success: false, error: 'Unauthorized: Please log in.' });
+    }
+    if (req.user.role === 'admin') {
+      return next();
+    }
+    if (req.user.permissions && req.user.permissions[permissionKey] === true) {
+      return next();
+    }
+    return res.status(403).json({
+      success: false,
+      error: `Forbidden: You do not have permission to perform this action (${permissionKey}). Contact your VidyaVision Administrator.`
+    });
+  };
+};
+
+// Admin-Only Route Guard Middleware
+const requireAdmin = (req, res, next) => {
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({
+      success: false,
+      error: 'Forbidden: Administrator privileges required.'
+    });
   }
   next();
 };
+
 app.use('/api', requireAuth);
+
+// ==========================================================
+// Authentication REST API Endpoints
+// ==========================================================
+
+// 1. POST /api/auth/login
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) {
+      return res.status(400).json({ success: false, error: 'Email and password are required' });
+    }
+
+    const cleanEmail = String(email).trim().toLowerCase();
+    const users = await loadUsers();
+    const user = users.find(u => u.email.toLowerCase() === cleanEmail);
+
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Invalid email or password' });
+    }
+
+    const isMatch = await bcrypt.compare(String(password), user.passwordHash);
+    if (!isMatch) {
+      return res.status(401).json({ success: false, error: 'Invalid email or password' });
+    }
+
+    const token = jwt.sign(
+      {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        name: user.name
+      },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.cookie('vidyavision_token', token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: '/'
+    });
+
+    return res.json({
+      success: true,
+      token,
+      user: sanitizeUser(user)
+    });
+  } catch (err) {
+    console.error('Login error:', err);
+    return res.status(500).json({ success: false, error: 'Internal login error' });
+  }
+});
+
+// 2. GET /api/auth/me
+app.get('/api/auth/me', (req, res) => {
+  if (!req.user) {
+    return res.status(401).json({ success: false, error: 'Unauthorized: Session expired or invalid' });
+  }
+  return res.json({
+    success: true,
+    user: sanitizeUser(req.user)
+  });
+});
+
+// 3. POST /api/auth/logout
+app.post('/api/auth/logout', (req, res) => {
+  res.clearCookie('vidyavision_token', {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    path: '/'
+  });
+  return res.json({ success: true, message: 'Logged out successfully' });
+});
+
+// ==========================================================
+// Team Management API Endpoints (Admin Only)
+// ==========================================================
+
+// 1. GET /api/admin/users: List all team accounts
+app.get('/api/admin/users', requireAdmin, async (req, res) => {
+  try {
+    const users = await loadUsers();
+    res.json({
+      success: true,
+      users: users.map(sanitizeUser)
+    });
+  } catch (err) {
+    console.error('Error fetching team users:', err);
+    res.status(500).json({ success: false, error: 'Failed to fetch team members' });
+  }
+});
+
+// 2. POST /api/admin/users: Create new counselor account
+app.post('/api/admin/users', requireAdmin, async (req, res) => {
+  try {
+    const { name, email, password, role, permissions } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, error: 'Full Name is required' });
+    }
+    if (!email || !email.trim()) {
+      return res.status(400).json({ success: false, error: 'Work Email is required' });
+    }
+    const cleanEmail = email.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      return res.status(400).json({ success: false, error: 'Please enter a valid email address' });
+    }
+    if (!password || String(password).length < 6) {
+      return res.status(400).json({ success: false, error: 'Temporary password must be at least 6 characters' });
+    }
+
+    const users = await loadUsers();
+    if (users.some(u => u.email.toLowerCase() === cleanEmail)) {
+      return res.status(400).json({ success: false, error: 'An account with this email already exists' });
+    }
+
+    const userRole = role === 'admin' ? 'admin' : 'counselor';
+    const userPermissions = userRole === 'admin'
+      ? { ...DEFAULT_ADMIN_PERMISSIONS }
+      : { ...DEFAULT_COUNSELOR_PERMISSIONS, ...(permissions || {}) };
+
+    const passwordHash = bcrypt.hashSync(String(password), 10);
+    const newUser = {
+      id: `user_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      name: name.trim(),
+      email: cleanEmail,
+      role: userRole,
+      passwordHash,
+      permissions: userPermissions,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    users.push(newUser);
+    await saveUsers(users);
+
+    res.status(201).json({
+      success: true,
+      user: sanitizeUser(newUser)
+    });
+  } catch (err) {
+    console.error('Error creating counselor account:', err);
+    res.status(500).json({ success: false, error: 'Failed to create counselor account' });
+  }
+});
+
+// 3. PUT /api/admin/users/:id: Update counselor account / permissions / password
+app.put('/api/admin/users/:id', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, email, password, role, permissions } = req.body;
+
+    const users = await loadUsers();
+    const user = users.find(u => u.id === id);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const isSuperAdmin = user.email.toLowerCase() === 'admin@vidyavision.com' || user.id === 'admin_super_01';
+
+    if (name && name.trim()) {
+      user.name = name.trim();
+    }
+
+    if (email && email.trim()) {
+      const cleanEmail = email.trim().toLowerCase();
+      if (cleanEmail !== user.email.toLowerCase()) {
+        if (isSuperAdmin) {
+          return res.status(400).json({ success: false, error: 'Cannot change primary email of default System Admin' });
+        }
+        if (users.some(u => u.id !== id && u.email.toLowerCase() === cleanEmail)) {
+          return res.status(400).json({ success: false, error: 'Email is already taken by another account' });
+        }
+        user.email = cleanEmail;
+      }
+    }
+
+    if (password && String(password).trim().length >= 6) {
+      user.passwordHash = bcrypt.hashSync(String(password).trim(), 10);
+    }
+
+    if (role && !isSuperAdmin) {
+      user.role = role === 'admin' ? 'admin' : 'counselor';
+    }
+
+    if (isSuperAdmin) {
+      user.role = 'admin';
+      user.permissions = { ...DEFAULT_ADMIN_PERMISSIONS };
+    } else if (user.role === 'admin') {
+      user.permissions = { ...DEFAULT_ADMIN_PERMISSIONS };
+    } else if (permissions && typeof permissions === 'object') {
+      user.permissions = {
+        ...DEFAULT_COUNSELOR_PERMISSIONS,
+        ...(user.permissions || {}),
+        ...permissions
+      };
+    }
+
+    user.updatedAt = new Date().toISOString();
+    await saveUsers(users);
+
+    res.json({
+      success: true,
+      user: sanitizeUser(user)
+    });
+  } catch (err) {
+    console.error('Error updating user:', err);
+    res.status(500).json({ success: false, error: 'Failed to update user' });
+  }
+});
+
+// 4. DELETE /api/admin/users/:id: Remove counselor account
+app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const users = await loadUsers();
+    const user = users.find(u => u.id === id);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    if (user.email.toLowerCase() === 'admin@vidyavision.com' || user.id === 'admin_super_01') {
+      return res.status(400).json({ success: false, error: 'The default System Admin account cannot be deleted' });
+    }
+
+    if (req.user && req.user.id === user.id) {
+      return res.status(400).json({ success: false, error: 'You cannot delete your own active account' });
+    }
+
+    const updatedUsers = users.filter(u => u.id !== id);
+    await saveUsers(updatedUsers);
+
+    res.json({ success: true, message: 'Counselor account deleted successfully' });
+  } catch (err) {
+    console.error('Error deleting user account:', err);
+    res.status(500).json({ success: false, error: 'Failed to delete user' });
+  }
+});
 
 const PORT = process.env.PORT || 5000;
 
@@ -147,7 +560,7 @@ function resolveAgentIdForCourse(courseName, fallbackAgentId) {
   return fallbackAgentId ? Number(fallbackAgentId) : getAgentId();
 }
 
-const DATA_DIR = path.join(process.cwd(), 'data');
+// DATA_DIR is defined above with authentication configuration
 const REGISTRATIONS_FILE = path.join(DATA_DIR, 'registrations.json');
 const INTERESTS_FILE = path.join(DATA_DIR, 'call_interests.json');
 const COLLEGES_FILE = path.join(DATA_DIR, 'colleges.json');
@@ -2580,26 +2993,42 @@ server.on('upgrade', (req, socket, head) => {
   }
   const url = new URL(req.url, `http://${req.headers.host}`);
   if (url.pathname === '/api/stream') {
-    // SEC-02: Enforce WebSocket Authentication handshake
-    const configuredKey = process.env.APP_API_KEY;
-    if (configuredKey) {
-      let token = req.headers['x-api-key'];
-      if (!token && req.headers['authorization']) {
-        const parts = req.headers['authorization'].split(' ');
-        if (parts.length === 2 && parts[0].toLowerCase() === 'bearer') token = parts[1];
-      }
-      if (!token && req.headers['sec-websocket-protocol']) {
-        token = req.headers['sec-websocket-protocol'].split(',')[0].trim();
-      }
-      if (!token) {
-        token = url.searchParams.get('token');
-      }
+    // SEC-02: Enforce WebSocket Authentication handshake with JWT token
+    let token = null;
+    const authHeader = req.headers['authorization'];
+    if (authHeader) {
+      const parts = authHeader.split(' ');
+      if (parts.length === 2 && parts[0].toLowerCase() === 'bearer') token = parts[1];
+    }
+    if (!token) {
+      token = getCookie(req, 'vidyavision_token');
+    }
+    if (!token && req.headers['sec-websocket-protocol']) {
+      token = req.headers['sec-websocket-protocol'].split(',')[0].trim();
+    }
+    if (!token) {
+      token = url.searchParams.get('token');
+    }
 
-      if (!token || !timingSafeCompare(token, configuredKey)) {
-        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-        socket.destroy();
-        return;
+    let authenticated = false;
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (decoded && (decoded.id || decoded.email)) {
+          authenticated = true;
+        }
+      } catch (e) {
+        const configuredKey = process.env.APP_API_KEY;
+        if (configuredKey && timingSafeCompare(token, configuredKey)) {
+          authenticated = true;
+        }
       }
+    }
+
+    if (!authenticated) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
     }
 
     wss.handleUpgrade(req, socket, head, (ws) => {
@@ -2657,7 +3086,7 @@ app.get('/api/colleges', async (req, res) => {
   }
 });
 
-app.post('/api/colleges', async (req, res) => {
+app.post('/api/colleges', checkPermission('canManageColleges'), async (req, res) => {
   try {
     const { name, place, websiteUrl, description, agentId, languages, courses, id } = req.body;
     if (!name || !name.trim()) {
@@ -2719,7 +3148,7 @@ app.post('/api/colleges', async (req, res) => {
   }
 });
 
-app.delete('/api/colleges/:id', async (req, res) => {
+app.delete('/api/colleges/:id', checkPermission('canManageColleges'), async (req, res) => {
   try {
     const { id } = req.params;
     const currentList = await loadColleges();
@@ -2753,7 +3182,7 @@ app.delete('/api/colleges/:id', async (req, res) => {
 });
 
 // 1. Batch & Sequential Calling API
-app.post('/api/queue/start', async (req, res) => {
+app.post('/api/queue/start', checkPermission('canStartStopCampaigns'), async (req, res) => {
   try {
     const {
       contacts,
@@ -3143,7 +3572,7 @@ app.put('/api/campaigns/:id', async (req, res) => {
   }
 });
 
-app.delete('/api/campaigns/:id', async (req, res) => {
+app.delete('/api/campaigns/:id', checkPermission('canStartStopCampaigns'), async (req, res) => {
   try {
     clearScheduledTimer(req.params.id);
     const all = await loadCampaigns();
@@ -3156,7 +3585,7 @@ app.delete('/api/campaigns/:id', async (req, res) => {
   }
 });
 
-app.get('/api/campaigns/:id/export', async (req, res) => {
+app.get('/api/campaigns/:id/export', checkPermission('canExportData'), async (req, res) => {
   try {
     const all = await loadCampaigns();
     const camp = all.find(c => c.id === req.params.id);
@@ -3373,7 +3802,7 @@ app.get('/api/campaigns/:id/export', async (req, res) => {
 });
 
 // 2. Pause Sequential Queue (Temporary In-Place Pause)
-app.post('/api/queue/pause', (req, res) => {
+app.post('/api/queue/pause', checkPermission('canStartStopCampaigns'), (req, res) => {
   if (!CAMPAIGN_STATE.isRunning) {
     return res.status(400).json({ error: 'No campaign is currently running.' });
   }
@@ -3401,7 +3830,7 @@ app.post('/api/queue/pause', (req, res) => {
 });
 
 // 2b. Split Campaign: Part 1 (Completed) & Part 2 (Paused Remaining)
-app.post('/api/queue/split', async (req, res) => {
+app.post('/api/queue/split', checkPermission('canStartStopCampaigns'), async (req, res) => {
   try {
     const activeCampId = req.body?.campaignId || CAMPAIGN_STATE.campaignId;
     if (queueNextTimer) {
@@ -3550,7 +3979,7 @@ app.post('/api/queue/split', async (req, res) => {
 });
 
 // 3. Resume Sequential Queue (supports in-memory resume and post-restart recovery)
-app.post('/api/queue/resume', async (req, res) => {
+app.post('/api/queue/resume', checkPermission('canStartStopCampaigns'), async (req, res) => {
   const reqCampId = req.body?.campaignId || CAMPAIGN_STATE?.campaignId;
 
   // Case 1: Campaign is already loaded in memory and paused
@@ -3641,7 +4070,7 @@ app.post('/api/queue/resume', async (req, res) => {
 });
 
 // 4. Cancel/Stop Sequential Queue
-app.post('/api/queue/cancel', async (req, res) => {
+app.post('/api/queue/cancel', checkPermission('canStartStopCampaigns'), async (req, res) => {
   const activeCampId = req.body?.campaignId || CAMPAIGN_STATE.campaignId;
   if (queueNextTimer) {
     clearTimeout(queueNextTimer);
@@ -3696,7 +4125,7 @@ app.post('/api/queue/cancel', async (req, res) => {
 });
 
 // 4b. Schedule Controls: Cancel Scheduled Campaign
-app.post('/api/queue/schedule/cancel', async (req, res) => {
+app.post('/api/queue/schedule/cancel', checkPermission('canStartStopCampaigns'), async (req, res) => {
   const scheduledCampId = req.body?.campaignId || CAMPAIGN_STATE.campaignId;
   clearScheduledTimer(scheduledCampId);
 
@@ -3731,7 +4160,7 @@ app.post('/api/queue/schedule/cancel', async (req, res) => {
 });
 
 // 4c. Schedule Controls: Start Now (Force start a scheduled campaign immediately)
-app.post('/api/queue/schedule/start-now', (req, res) => {
+app.post('/api/queue/schedule/start-now', checkPermission('canStartStopCampaigns'), (req, res) => {
   if (!CAMPAIGN_STATE.isScheduled) {
     return res.status(400).json({ error: 'No scheduled campaign waiting to start.' });
   }
@@ -3786,7 +4215,7 @@ app.get('/api/calls/interests', (req, res) => {
 });
 
 // 10. Update or manually set call interest and preferences
-app.post('/api/calls/interest', async (req, res) => {
+app.post('/api/calls/interest', checkPermission('canAddNotes'), async (req, res) => {
   const { phone, callId, interestStatus, college, course, notes, studentName } = req.body;
   if (!phone && !callId) {
     return res.status(400).json({ error: 'Phone number or call ID is required.' });
@@ -3830,7 +4259,7 @@ app.post('/api/calls/interest', async (req, res) => {
 });
 
 // 10b. Manually send WhatsApp admission link (retry button / post-call action)
-app.post('/api/calls/send-whatsapp', async (req, res) => {
+app.post('/api/calls/send-whatsapp', checkPermission('canAddNotes'), async (req, res) => {
   try {
     const { phone, studentName, collegeName, universityId, applicationUrl } = req.body;
     const digits = String(phone || '').replace(/\D/g, '');
@@ -4211,6 +4640,9 @@ server.listen(PORT, async () => {
   console.log(`OmniDimension Backend running on port ${PORT}`);
   console.log(`WebSocket endpoint: ws://localhost:${PORT}/api/stream`);
   console.log(`========================================`);
+
+  // Auto-seed Super Admin if data/users.json is missing or empty
+  await ensureSuperAdmin();
 
   // Recover any interrupted or scheduled campaigns from disk on reboot (Defect BUG-05)
   await recoverServerState();

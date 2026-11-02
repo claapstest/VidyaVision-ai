@@ -1,3 +1,6 @@
+import LoginPage from './components/LoginPage';
+import TeamManagementModal from './components/TeamManagementModal';
+import { LogOut, Shield, Lock } from 'lucide-react';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   PhoneCall,
@@ -69,6 +72,81 @@ const isUgCourse = (courseName) => {
 };
 
 export default function App() {
+  // ==========================================
+  // Authentication & Granular RBAC State
+  // ==========================================
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('vv_user_profile');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
+  const [showTeamModal, setShowTeamModal] = useState(false);
+  const [teamCount, setTeamCount] = useState(1);
+
+  // Permission helper: Admins permanently possess all permissions; counselors checked by custom toggle
+  const hasPermission = (permKey) => {
+    if (!currentUser) return false;
+    if (currentUser.role === 'admin') return true;
+    return !!(currentUser.permissions && currentUser.permissions[permKey] === true);
+  };
+
+  // Verify auth session on mount
+  useEffect(() => {
+    const verifyAuth = async () => {
+      try {
+        const token = localStorage.getItem('vv_auth_token');
+        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+        const res = await fetch('/api/auth/me', {
+          headers,
+          credentials: 'include'
+        });
+        const data = await res.json();
+        if (res.ok && data.success && data.user) {
+          setCurrentUser(data.user);
+          localStorage.setItem('vv_user_profile', JSON.stringify(data.user));
+
+          // Fetch team count if admin
+          if (data.user.role === 'admin') {
+            fetch('/api/admin/users', { headers, credentials: 'include' })
+              .then(r => r.json())
+              .then(d => {
+                if (d.success && Array.isArray(d.users)) setTeamCount(d.users.length);
+              })
+              .catch(() => {});
+          }
+        } else {
+          setCurrentUser(null);
+          localStorage.removeItem('vv_auth_token');
+          localStorage.removeItem('vv_user_profile');
+        }
+      } catch (err) {
+        console.error('Auth verification failed:', err);
+      } finally {
+        setIsAuthChecking(false);
+      }
+    };
+
+    verifyAuth();
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch (e) {}
+    localStorage.removeItem('vv_auth_token');
+    localStorage.removeItem('vv_user_profile');
+    setCurrentUser(null);
+    if (wsRef.current) {
+      try { wsRef.current.close(); } catch (e) {}
+      wsRef.current = null;
+    }
+    setWsConnected(false);
+  };
+
   const [activeTab, setActiveTab] = useState('dashboard'); // 'dispatch' | 'dashboard' | 'calls'
   const [wsConnected, setWsConnected] = useState(false);
 
@@ -805,7 +883,10 @@ export default function App() {
   useEffect(() => {
     const connectWs = () => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/api/stream`;
+      const token = localStorage.getItem('vv_auth_token');
+      const wsUrl = token
+        ? `${protocol}//${window.location.host}/api/stream?token=${encodeURIComponent(token)}`
+        : `${protocol}//${window.location.host}/api/stream`;
 
       const socket = new WebSocket(wsUrl);
       wsRef.current = socket;
@@ -3494,6 +3575,61 @@ export default function App() {
       .filter(status => status && status !== '—' && status !== 'NA')
   ));
 
+  if (isAuthChecking) {
+    return (
+      <div style={{
+        minHeight: '100dvh',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#f1f5f9',
+        fontFamily: "'Inter', sans-serif"
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            fontSize: '2.5rem',
+            color: '#F16522',
+            marginBottom: '0.5rem',
+            animation: 'pulse 1.5s infinite'
+          }}>
+            ◈
+          </div>
+          <h2 style={{
+            fontFamily: "'Outfit', sans-serif",
+            fontSize: '1.5rem',
+            fontWeight: '800',
+            color: '#1b3b6f',
+            margin: '0 0 0.5rem 0'
+          }}>
+            VIDYA <span style={{ color: '#F16522' }}>VISION</span>
+          </h2>
+          <p style={{ fontSize: '0.88rem', color: '#64748b', margin: '0 0 1.5rem 0' }}>
+            AI Admission Telephony & Lead Intelligence
+          </p>
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            color: '#1b3b6f',
+            fontSize: '0.85rem',
+            fontWeight: '600'
+          }}>
+            <RefreshCw size={16} className="animate-spin" />
+            <span>Verifying session credentials...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return <LoginPage onLoginSuccess={(user) => {
+      setCurrentUser(user);
+      setIsAuthChecking(false);
+    }} />;
+  }
+
   return (
     <div className="app-container">
       {/* Header */}
@@ -3554,6 +3690,99 @@ export default function App() {
             Recent Calls
           </button>
         </div>
+
+        {/* User Badge, Admin Team Button & Logout */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginLeft: 'auto' }}>
+          {/* Admin Team Management Button */}
+          {currentUser?.role === 'admin' && (
+            <button
+              className="btn btn-secondary"
+              onClick={() => setShowTeamModal(true)}
+              style={{
+                fontSize: '0.82rem',
+                padding: '0.45rem 0.85rem',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                border: '1.5px solid rgba(27, 59, 111, 0.15)',
+                backgroundColor: '#ffffff',
+                color: '#1b3b6f',
+                fontWeight: '700',
+                borderRadius: '8px',
+                cursor: 'pointer'
+              }}
+              title="Manage counselor accounts and customize granular RBAC permissions"
+            >
+              <Users size={15} style={{ color: '#F16522' }} />
+              <span>Team ({teamCount})</span>
+            </button>
+          )}
+
+          {/* User Profile Pill */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.55rem',
+            padding: '0.35rem 0.75rem',
+            backgroundColor: '#ffffff',
+            borderRadius: '9999px',
+            border: '1px solid rgba(27, 59, 111, 0.12)',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+          }}>
+            <div style={{
+              width: '28px',
+              height: '28px',
+              borderRadius: '50%',
+              backgroundColor: currentUser?.role === 'admin' ? 'rgba(27, 59, 111, 0.1)' : 'rgba(241, 101, 34, 0.1)',
+              color: currentUser?.role === 'admin' ? '#1b3b6f' : '#F16522',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: '800',
+              fontSize: '0.75rem'
+            }}>
+              {currentUser?.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15 }}>
+              <span style={{ fontSize: '0.82rem', fontWeight: '700', color: '#1b3b6f' }}>
+                {currentUser?.name || 'Counselor'}
+              </span>
+              <span style={{
+                fontSize: '0.65rem',
+                fontWeight: '700',
+                color: currentUser?.role === 'admin' ? '#1b3b6f' : '#F16522',
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em'
+              }}>
+                {currentUser?.role === 'admin' ? 'Admin' : 'Counselor'}
+              </span>
+            </div>
+          </div>
+
+          {/* Logout Button */}
+          <button
+            onClick={handleLogout}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+              padding: '0.45rem 0.75rem',
+              borderRadius: '8px',
+              border: '1px solid rgba(244, 63, 94, 0.3)',
+              backgroundColor: '#fff1f2',
+              color: '#e11d48',
+              fontSize: '0.8rem',
+              fontWeight: '700',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease'
+            }}
+            title="Sign out of VidyaVision"
+          >
+            <LogOut size={14} />
+            <span>Logout</span>
+          </button>
+        </div>
       </header>
 
       {/* Main Container */}
@@ -3593,9 +3822,11 @@ export default function App() {
                     {showManageColleges ? 'Hide Colleges' : `Show Colleges (${universities.length})`}
                   </button>
 
-                  <button className="btn btn-primary" style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }} onClick={() => { resetCollegeForm(); setShowCollegeModal(true); }}>
-                    <Plus size={15} /> Add New College
-                  </button>
+                  {hasPermission('canManageColleges') && (
+                    <button className="btn btn-primary" style={{ fontSize: '0.85rem', padding: '0.5rem 1rem' }} onClick={() => { resetCollegeForm(); setShowCollegeModal(true); }}>
+                      <Plus size={15} /> Add New College
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -3664,33 +3895,36 @@ export default function App() {
 
                           <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: '0.85rem', paddingTop: '0.65rem', borderTop: '1px solid var(--border)', gap: '0.4rem', flexWrap: 'wrap' }}>
                             <div style={{ display: 'flex', gap: '0.35rem' }}>
-                              <button
-                                type="button"
-                                className="btn btn-secondary"
-                                style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem', fontWeight: '700' }}
-                                onClick={() => handleEditCollege(uni)}
-                                title={`Edit ${uni.name} details and link`}
-                              >
-                                ✏️ Edit
-                              </button>
-
-                              <button
-                                type="button"
-                                className="btn btn-danger-outline"
-                                style={{
-                                  fontSize: '0.75rem',
-                                  padding: '0.3rem 0.65rem',
-                                  color: '#ef4444',
-                                  borderColor: 'rgba(239, 68, 68, 0.5)',
-                                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                                  fontWeight: '700'
-                                }}
-                                disabled={deletingCollegeId === uni.id}
-                                onClick={() => handleDeleteCollege(uni)}
-                                title={`Delete ${uni.name}`}
-                              >
-                                <Trash2 size={13} /> {deletingCollegeId === uni.id ? 'Deleting...' : 'Delete'}
-                              </button>
+                              {hasPermission('canManageColleges') && (
+                              <div style={{ display: 'flex', gap: '0.4rem' }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary"
+                                  style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem', fontWeight: '700' }}
+                                  onClick={() => handleEditCollege(uni)}
+                                  title={`Edit ${uni.name} details and link`}
+                                >
+                                  ✏️ Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-danger-outline"
+                                  style={{
+                                    fontSize: '0.75rem',
+                                    padding: '0.3rem 0.65rem',
+                                    color: '#ef4444',
+                                    borderColor: 'rgba(239, 68, 68, 0.5)',
+                                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                                    fontWeight: '700'
+                                  }}
+                                  disabled={deletingCollegeId === uni.id}
+                                  onClick={() => handleDeleteCollege(uni)}
+                                  title={`Delete ${uni.name}`}
+                                >
+                                  <Trash2 size={13} /> {deletingCollegeId === uni.id ? 'Deleting...' : 'Delete'}
+                                </button>
+                              </div>
+                            )}
                             </div>
                           </div>
                         </div>
@@ -3905,7 +4139,25 @@ export default function App() {
                   {/* Mode 1: Excel Upload */}
                   {inputMode === 'excel' && (
                     <div>
-                      {uploadedFileInfo || tempContacts.length > 0 ? (
+                      {!hasPermission('canUploadLeads') ? (
+                        <div style={{
+                          padding: '2.5rem 1.5rem',
+                          textAlign: 'center',
+                          backgroundColor: '#fff1f2',
+                          border: '1.5px dashed #fecdd3',
+                          borderRadius: '12px'
+                        }}>
+                          <FileSpreadsheet size={38} style={{ color: '#f43f5e', margin: '0 auto 0.75rem auto' }} />
+                          <h4 style={{ fontSize: '1rem', fontWeight: '700', color: '#991b1b', margin: '0 0 0.35rem 0' }}>
+                            Lead Excel / CSV File Upload Restricted
+                          </h4>
+                          <p style={{ fontSize: '0.82rem', color: '#64748b', margin: 0, maxWidth: '440px', marginLeft: 'auto', marginRight: 'auto' }}>
+                            Your counselor account does not have permission to upload student lead spreadsheets. Please contact your VidyaVision Administrator to enable lead uploading.
+                          </p>
+                        </div>
+                      ) : (
+                        <>
+                          {uploadedFileInfo || tempContacts.length > 0 ? (
                         <div className="uploaded-file-card">
                           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
                             <div className="file-icon-badge">
@@ -3997,10 +4249,11 @@ export default function App() {
                         </button>
                         <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                           Name is optional. Phone requires 10-digits.
-                        </span>
-                      </div>
-
-                      {recentFiles.length > 0 && (
+                            </span>
+                          </div>
+                        </>
+                      )}
+                      {hasPermission('canUploadLeads') && recentFiles.length > 0 && (
                         <div style={{ marginTop: '1.25rem', padding: '0.85rem 1rem', borderRadius: '10px', backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
                             <span style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
@@ -4959,25 +5212,42 @@ export default function App() {
                         {campaignStartMode === 'scheduled' ? (
                           <button
                             className="btn btn-primary"
+                            disabled={!hasPermission('canStartStopCampaigns')}
                             style={{
                               padding: '0.75rem 2rem',
                               fontSize: '1rem',
-                              backgroundColor: '#4f46e5',
-                              borderColor: '#6366f1',
-                              boxShadow: '0 4px 12px rgba(79, 70, 229, 0.25)'
+                              backgroundColor: hasPermission('canStartStopCampaigns') ? '#4f46e5' : '#94a3b8',
+                              borderColor: hasPermission('canStartStopCampaigns') ? '#6366f1' : '#cbd5e1',
+                              boxShadow: hasPermission('canStartStopCampaigns') ? '0 4px 12px rgba(79, 70, 229, 0.25)' : 'none',
+                              cursor: hasPermission('canStartStopCampaigns') ? 'pointer' : 'not-allowed'
                             }}
-                            onClick={handleStartCampaign}
+                            onClick={hasPermission('canStartStopCampaigns') ? handleStartCampaign : undefined}
+                            title={hasPermission('canStartStopCampaigns') ? 'Schedule Campaign' : 'Starting campaigns is restricted for your account'}
                           >
                             <Calendar size={18} /> Schedule Campaign ({stagedContacts.length} Contacts)
                           </button>
                         ) : (
                           <button
                             className="btn btn-primary"
-                            style={{ padding: '0.75rem 2rem', fontSize: '1rem' }}
-                            onClick={handleStartCampaign}
+                            disabled={!hasPermission('canStartStopCampaigns')}
+                            style={{
+                              padding: '0.75rem 2rem',
+                              fontSize: '1rem',
+                              backgroundColor: hasPermission('canStartStopCampaigns') ? undefined : '#94a3b8',
+                              borderColor: hasPermission('canStartStopCampaigns') ? undefined : '#cbd5e1',
+                              cursor: hasPermission('canStartStopCampaigns') ? 'pointer' : 'not-allowed'
+                            }}
+                            onClick={hasPermission('canStartStopCampaigns') ? handleStartCampaign : undefined}
+                            title={hasPermission('canStartStopCampaigns') ? 'Start Sequential Calling Campaign' : 'Starting campaigns is restricted for your account'}
                           >
                             <Play size={18} /> Start Sequential Calling Campaign ({stagedContacts.length})
                           </button>
+                        )}
+                        {!hasPermission('canStartStopCampaigns') && (
+                          <div style={{ marginTop: '0.75rem', padding: '0.65rem 1rem', borderRadius: '8px', backgroundColor: '#fee2e2', border: '1px solid #fecdd3', color: '#991b1b', fontSize: '0.82rem', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <AlertCircle size={16} />
+                            Initiating calling campaigns is restricted for your counselor profile.
+                          </div>
                         )}
                       </div>
 
@@ -5679,6 +5949,7 @@ export default function App() {
                 </div>
 
                 {/* Scoped Download Button */}
+                {hasPermission('canExportData') && (
                 <button
                   onClick={handleExportFilteredCsv}
                   className="btn btn-primary"
@@ -5697,6 +5968,7 @@ export default function App() {
                 >
                   <Download size={15} /> Download {isAllUniScope ? 'All Universities' : uniScopeLabel} Excel Report (.xlsx)
                 </button>
+              )}
               </div>
             </div>
 
@@ -7447,30 +7719,36 @@ export default function App() {
                   </div>
 
                   {/* Call Audio Recording & Call Meta */}
-                  {recordingUrl && recordingUrl !== '—' && (
-                    <div className="card" style={{ padding: '1.25rem', background: 'rgba(59, 130, 246, 0.05)', border: '1px solid rgba(59, 130, 246, 0.2)', display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
-                      <h3 style={{ fontSize: '0.92rem', fontWeight: '700', margin: 0, color: '#3b82f6', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <Volume2 size={16} /> 🎙️ Call Audio Recording & Outcomes
-                      </h3>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', alignItems: 'center' }}>
-                        <div>
-                          <audio
-                            controls
-                            src={recordingUrl}
-                            style={{ width: '100%', borderRadius: '8px' }}
-                          />
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', fontSize: '0.82rem' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <span style={{ color: 'var(--text-muted)' }}>Call Transferred to Counselor:</span>
-                            <span style={{ fontWeight: '600', color: String(transferStatus).toLowerCase().includes('yes') ? '#22c55e' : 'var(--text-primary)' }}>{transferStatus}</span>
+                  {hasPermission('canViewTranscripts') ? (
+                    recordingUrl && recordingUrl !== '—' && (
+                      <div className="card" style={{ padding: '1.25rem', background: 'rgba(59, 130, 246, 0.05)', border: '1px solid rgba(59, 130, 246, 0.2)', display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '0.5rem' }}>
+                        <h3 style={{ fontSize: '0.92rem', fontWeight: '700', margin: 0, color: '#3b82f6', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <Volume2 size={16} /> 🎙️ Call Audio Recording & Outcomes
+                        </h3>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', alignItems: 'center' }}>
+                          <div>
+                            <audio
+                              controls
+                              src={recordingUrl}
+                              style={{ width: '100%', borderRadius: '8px' }}
+                            />
                           </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                            <span style={{ color: 'var(--text-muted)' }}>AI Call Sentiment:</span>
-                            <span style={{ fontWeight: '600', color: String(sentiment).toLowerCase().includes('positive') ? '#22c55e' : String(sentiment).toLowerCase().includes('negative') ? '#ef4444' : 'var(--text-primary)' }}>{sentiment}</span>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', fontSize: '0.82rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: 'var(--text-muted)' }}>Call Transferred to Counselor:</span>
+                              <span style={{ fontWeight: '600', color: String(transferStatus).toLowerCase().includes('yes') ? '#22c55e' : 'var(--text-primary)' }}>{transferStatus}</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span style={{ color: 'var(--text-muted)' }}>AI Call Sentiment:</span>
+                              <span style={{ fontWeight: '600', color: String(sentiment).toLowerCase().includes('positive') ? '#22c55e' : String(sentiment).toLowerCase().includes('negative') ? '#ef4444' : 'var(--text-primary)' }}>{sentiment}</span>
+                            </div>
                           </div>
                         </div>
                       </div>
+                    )
+                  ) : (
+                    <div style={{ padding: '0.75rem 1rem', backgroundColor: '#f1f5f9', borderRadius: '8px', border: '1px solid #e2e8f0', color: '#64748b', fontSize: '0.82rem', marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Lock size={15} /> Audio recording playback restricted for your account.
                     </div>
                   )}
 
@@ -7488,7 +7766,15 @@ export default function App() {
                 <div className="card" style={{ padding: '1.25rem', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border)', marginTop: '1.5rem' }}>
                   <h3 style={{ fontSize: '0.92rem', fontWeight: '700', marginBottom: '0.75rem', color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.5px' }}>💬 Conversation Transcript Dialogue</h3>
                   <div style={{ maxHeight: '350px', overflowY: 'auto', borderRadius: '8px' }}>
-                    {renderTranscript(getTranscriptText(selectedCall))}
+                    {hasPermission('canViewTranscripts') ? (
+                    renderTranscript(getTranscriptText(selectedCall))
+                  ) : (
+                    <div style={{ padding: '1.5rem', textAlign: 'center', color: '#64748b', fontSize: '0.84rem', backgroundColor: '#f8fafc', borderRadius: '8px', border: '1px dashed #cbd5e1' }}>
+                      <Lock size={20} style={{ color: '#94a3b8', margin: '0 auto 0.4rem auto' }} />
+                      <p style={{ margin: 0, fontWeight: '600', color: '#1b3b6f' }}>Transcript Access Restricted</p>
+                      <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.78rem', color: '#64748b' }}>Your account does not have permission to view full call conversation transcripts.</p>
+                    </div>
+                  )}
                   </div>
                 </div>
 
