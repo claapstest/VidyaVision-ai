@@ -1,4 +1,5 @@
 import pg from 'pg';
+import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -66,6 +67,32 @@ async function setupDatabase() {
       CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
     `);
     console.log("✔ Table 'users' verified");
+
+    // Seed default super admin
+    const adminHash = bcrypt.hashSync('VidyaVision@2026', 10);
+    const adminPermissions = {
+      canStartStopCampaigns: true,
+      canUploadLeads: true,
+      canManageColleges: true,
+      canExportData: true,
+      canViewReports: true,
+      canViewTranscripts: true,
+      canAddNotes: true
+    };
+    await client.query(`
+      INSERT INTO users (id, email, password_hash, name, role, permissions, status)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      ON CONFLICT (email) DO NOTHING;
+    `, [
+      'admin_super_01',
+      'admin@vidyavision.com',
+      adminHash,
+      'System Admin',
+      'admin',
+      JSON.stringify(adminPermissions),
+      'active'
+    ]);
+    console.log("✔ Super Admin 'admin@vidyavision.com' seeded in PostgreSQL");
 
     // Table 2: colleges (Universities, Bots, Courses)
     await client.query(`

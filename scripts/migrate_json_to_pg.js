@@ -211,6 +211,42 @@ async function migrateData() {
     }
   }
 
+  // 4. Migrate Users
+  const usersPath = path.join(dataDir, 'users.json');
+  if (fs.existsSync(usersPath)) {
+    try {
+      const users = JSON.parse(fs.readFileSync(usersPath, 'utf8'));
+      if (Array.isArray(users)) {
+        let userCount = 0;
+        for (const u of users) {
+          await query(`
+            INSERT INTO users (id, email, password_hash, name, role, permissions, status, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+            ON CONFLICT (email) DO UPDATE SET
+              name = EXCLUDED.name,
+              role = EXCLUDED.role,
+              password_hash = EXCLUDED.password_hash,
+              permissions = EXCLUDED.permissions,
+              status = EXCLUDED.status,
+              updated_at = NOW();
+          `, [
+            u.id,
+            u.email,
+            u.passwordHash,
+            u.name,
+            u.role || 'counselor',
+            u.permissions || {},
+            u.status || 'active'
+          ]);
+          userCount++;
+        }
+        console.log(`✔ Migrated ${userCount} users into PostgreSQL.`);
+      }
+    } catch (err) {
+      console.warn('Users migration error:', err.message);
+    }
+  }
+
   console.log('\n===========================================');
   console.log('ALL JSON DATA SUCCESSFULLY MIGRATED TO PG!');
   console.log('===========================================');

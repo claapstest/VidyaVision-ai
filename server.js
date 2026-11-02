@@ -540,6 +540,12 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
       return res.status(400).json({ success: false, error: 'You cannot delete your own active account' });
     }
 
+    try {
+      await query('DELETE FROM users WHERE id = $1', [id]);
+    } catch (dbErr) {
+      console.warn('[DB] Error deleting user from PostgreSQL:', dbErr.message);
+    }
+
     const updatedUsers = users.filter(u => u.id !== id);
     await saveUsers(updatedUsers);
 
