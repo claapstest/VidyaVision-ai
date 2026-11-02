@@ -171,6 +171,15 @@ export default function App() {
   const [campaignDurationMinutes, setCampaignDurationMinutes] = useState('60');
   const [campaignCutoffTime, setCampaignCutoffTime] = useState('18:30');
   const [showTimingPanel, setShowTimingPanel] = useState(false);
+
+  // Live Counselor Call Transfer States (OmniDimension Call Configuration)
+  const [transferEnabled, setTransferEnabled] = useState(true);
+  const [counselorPhone, setCounselorPhone] = useState('+91 95730 97810');
+  const [transferMode, setTransferMode] = useState('static'); // 'static' | 'dynamic'
+  const [transferCondition, setTransferCondition] = useState('Transfer when the user asks to speak with a counsellor/officer, OR agrees to be transferred (for example: saying yes when asked about fees, scholarships, or senior counsellor assistance).');
+  const [transferMessage, setTransferMessage] = useState("I'm transferring your call to our counselor. Please hold while I connect you.");
+  const [showTransferPanel, setShowTransferPanel] = useState(true);
+
   const [showLiveDownloadMenu, setShowLiveDownloadMenu] = useState(false);
   const liveDownloadMenuRef = useRef(null);
 
@@ -662,7 +671,8 @@ export default function App() {
     description: '',
     agentId: '270604',
     languages: 'English, Hindi, Telugu',
-    courses: ''
+    courses: '',
+    counselorPhone: '+91 95730 97810'
   });
 
   const getInitialColleges = () => {
@@ -685,6 +695,16 @@ export default function App() {
       setSelectedCourse('');
     }
   }, [universities, selectedUniversity]);
+
+  // Sync default counselor transfer phone with selected college
+  useEffect(() => {
+    if (selectedUniversity && universities.length > 0) {
+      const current = universities.find(u => u.id === selectedUniversity);
+      if (current && current.counselorPhone) {
+        setCounselorPhone(current.counselorPhone);
+      }
+    }
+  }, [selectedUniversity, universities]);
 
   // Dashboard multi-select scope helpers (after universities is defined)
   const selectedDashboardCamp = dashboardCampaignFilter !== 'ALL' ? campaigns.find(c => c.id === dashboardCampaignFilter) : null;
@@ -730,7 +750,8 @@ export default function App() {
       description: '',
       agentId: '270604',
       languages: 'English, Hindi, Telugu',
-      courses: ''
+      courses: '',
+      counselorPhone: '+91 95730 97810'
     });
     setEditingCollegeId('');
   };
@@ -744,7 +765,8 @@ export default function App() {
       description: college.description || '',
       agentId: String(college.agentId || 270604),
       languages: college.languages || 'English, Hindi, Telugu',
-      courses: Array.isArray(college.courses) ? college.courses.join(', ') : (college.courses || '')
+      courses: Array.isArray(college.courses) ? college.courses.join(', ') : (college.courses || ''),
+      counselorPhone: college.counselorPhone || '+91 95730 97810'
     });
     setEditingCollegeId(college.id);
     setShowCollegeModal(true);
@@ -775,7 +797,8 @@ export default function App() {
           description: collegeForm.description.trim(),
           agentId: Number(collegeForm.agentId) || 270604,
           languages: (collegeForm.languages || '').trim() || 'English, Hindi, Telugu',
-          courses: String(collegeForm.courses || '').split(',').map(s => s.trim()).filter(Boolean)
+          courses: String(collegeForm.courses || '').split(',').map(s => s.trim()).filter(Boolean),
+          counselorPhone: (collegeForm.counselorPhone || '').trim() || '+91 95730 97810'
         })
       });
 
@@ -1576,7 +1599,11 @@ export default function App() {
           scheduledStartTime: resolvedScheduledStartTime,
           endMode: campaignEndMode,
           maxDurationMinutes: campaignEndMode === 'duration' && campaignDurationMinutes ? Number(campaignDurationMinutes) : null,
-          cutoffTime: campaignEndMode === 'cutoff' ? campaignCutoffTime : null
+          cutoffTime: campaignEndMode === 'cutoff' ? campaignCutoffTime : null,
+          transferEnabled: Boolean(transferEnabled),
+          counselorPhone: (counselorPhone || '').trim() || '+91 95730 97810',
+          transferCondition: (transferCondition || '').trim(),
+          transferMessage: (transferMessage || '').trim()
         })
       });
 
@@ -5190,6 +5217,248 @@ export default function App() {
                         )}
                       </div>
 
+                      {/* Live Counselor Call Transfer Panel (OmniDimension Call Configuration Integration) */}
+                      <div style={{
+                        borderRadius: '12px',
+                        border: '1px solid #e2e8f0',
+                        overflow: 'hidden',
+                        backgroundColor: '#ffffff',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                      }}>
+                        {/* Header with OmniDimension style toggle */}
+                        <div style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          padding: '1rem 1.25rem',
+                          backgroundColor: transferEnabled ? 'rgba(241, 101, 34, 0.04)' : '#f8fafc',
+                          borderBottom: showTransferPanel && transferEnabled ? '1px solid #f1f5f9' : 'none'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                            <div style={{
+                              width: '36px',
+                              height: '36px',
+                              borderRadius: '8px',
+                              backgroundColor: transferEnabled ? '#F16522' : '#cbd5e1',
+                              color: '#ffffff',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              boxShadow: transferEnabled ? '0 2px 6px rgba(241, 101, 34, 0.3)' : 'none'
+                            }}>
+                              <PhoneForwarded size={18} />
+                            </div>
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <span style={{ fontSize: '0.98rem', fontWeight: '700', color: '#1b3b6f' }}>
+                                  Enable Call Transfer
+                                </span>
+                                <span style={{
+                                  fontSize: '0.72rem',
+                                  fontWeight: '700',
+                                  padding: '0.15rem 0.5rem',
+                                  borderRadius: '20px',
+                                  backgroundColor: transferEnabled ? 'rgba(16, 185, 129, 0.15)' : 'rgba(148, 163, 184, 0.2)',
+                                  color: transferEnabled ? '#059669' : '#64748b'
+                                }}>
+                                  {transferEnabled ? 'Enabled in OmniDimension' : 'Disabled'}
+                                </span>
+                              </div>
+                              <p style={{ margin: '0.15rem 0 0', fontSize: '0.78rem', color: '#64748b' }}>
+                                Allow your AI agent to transfer calls to human admission counselors when requested
+                              </p>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', userSelect: 'none' }}>
+                              <input
+                                type="checkbox"
+                                checked={transferEnabled}
+                                onChange={(e) => setTransferEnabled(e.target.checked)}
+                                style={{ display: 'none' }}
+                              />
+                              <div style={{
+                                width: '44px',
+                                height: '24px',
+                                borderRadius: '12px',
+                                backgroundColor: transferEnabled ? '#10b981' : '#cbd5e1',
+                                position: 'relative',
+                                transition: 'background-color 0.2s ease',
+                                cursor: 'pointer'
+                              }}>
+                                <div style={{
+                                  width: '20px',
+                                  height: '20px',
+                                  borderRadius: '50%',
+                                  backgroundColor: '#ffffff',
+                                  position: 'absolute',
+                                  top: '2px',
+                                  left: transferEnabled ? '22px' : '2px',
+                                  transition: 'left 0.2s ease',
+                                  boxShadow: '0 1px 3px rgba(0,0,0,0.2)'
+                                }} />
+                              </div>
+                            </label>
+                          </div>
+                        </div>
+
+                        {/* Transfer Options Details */}
+                        {transferEnabled && (
+                          <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.25rem', backgroundColor: '#ffffff' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize: '0.86rem', fontWeight: '700', color: '#1b3b6f' }}>
+                                Transfer Options (1)
+                              </span>
+                              <span style={{ fontSize: '0.74rem', color: '#64748b' }}>
+                                Direct OmniDimension Voice Bridge
+                              </span>
+                            </div>
+
+                            {/* Option 1 Card */}
+                            <div style={{
+                              border: '1px solid #e2e8f0',
+                              borderRadius: '10px',
+                              padding: '1.25rem',
+                              backgroundColor: '#fafbfc',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '1rem'
+                            }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #edf2f7', paddingBottom: '0.5rem' }}>
+                                <span style={{ fontSize: '0.84rem', fontWeight: '700', color: '#334155' }}>
+                                  ^ Transfer Option 1
+                                </span>
+                              </div>
+
+                              {/* Transfer Numbers */}
+                              <div>
+                                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: '700', color: '#1b3b6f', marginBottom: '0.4rem' }}>
+                                  Transfer Numbers *
+                                </label>
+
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                                  {/* Static / Dynamic Tabs */}
+                                  <div style={{
+                                    display: 'inline-flex',
+                                    borderRadius: '8px',
+                                    padding: '2px',
+                                    backgroundColor: '#e2e8f0',
+                                    border: '1px solid #cbd5e1'
+                                  }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => setTransferMode('static')}
+                                      style={{
+                                        border: 'none',
+                                        backgroundColor: transferMode === 'static' ? '#ffffff' : 'transparent',
+                                        color: transferMode === 'static' ? '#1b3b6f' : '#64748b',
+                                        fontWeight: '700',
+                                        fontSize: '0.78rem',
+                                        padding: '0.35rem 0.9rem',
+                                        borderRadius: '6px',
+                                        cursor: 'pointer',
+                                        boxShadow: transferMode === 'static' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none'
+                                      }}
+                                    >
+                                      Static
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setTransferMode('dynamic')}
+                                      style={{
+                                        border: 'none',
+                                        backgroundColor: transferMode === 'dynamic' ? '#ffffff' : 'transparent',
+                                        color: transferMode === 'dynamic' ? '#1b3b6f' : '#64748b',
+                                        fontWeight: '700',
+                                        fontSize: '0.78rem',
+                                        padding: '0.35rem 0.9rem',
+                                        borderRadius: '6px',
+                                        cursor: 'pointer',
+                                        boxShadow: transferMode === 'dynamic' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none'
+                                      }}
+                                    >
+                                      Dynamic
+                                    </button>
+                                  </div>
+
+                                  {/* Number Input with Flag */}
+                                  <div style={{ flex: '1 1 240px', position: 'relative', display: 'flex', alignItems: 'center' }}>
+                                    <div style={{
+                                      position: 'absolute',
+                                      left: '0.65rem',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: '0.3rem',
+                                      padding: '0.15rem 0.4rem',
+                                      backgroundColor: '#f1f5f9',
+                                      borderRadius: '4px',
+                                      fontSize: '0.82rem',
+                                      fontWeight: '700',
+                                      color: '#1b3b6f'
+                                    }}>
+                                      <span>🇮🇳</span>
+                                    </div>
+                                    <input
+                                      type="text"
+                                      className="form-input"
+                                      value={counselorPhone}
+                                      onChange={(e) => setCounselorPhone(e.target.value)}
+                                      placeholder="+91 95730 97810"
+                                      style={{
+                                        paddingLeft: '3rem',
+                                        fontWeight: '600',
+                                        fontSize: '0.9rem',
+                                        letterSpacing: '0.02em'
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                                <span style={{ fontSize: '0.74rem', color: '#64748b', marginTop: '0.35rem', display: 'block' }}>
+                                  Multiple numbers will be tried in order if previous ones fail
+                                </span>
+                              </div>
+
+                              {/* Transfer Condition */}
+                              <div>
+                                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: '700', color: '#1b3b6f', marginBottom: '0.2rem' }}>
+                                  Transfer Condition
+                                </label>
+                                <textarea
+                                  className="form-input"
+                                  rows={2}
+                                  value={transferCondition}
+                                  onChange={(e) => setTransferCondition(e.target.value)}
+                                  placeholder="Transfer when the user asks to speak with a counsellor/officer..."
+                                  style={{ fontSize: '0.84rem' }}
+                                />
+                                <span style={{ fontSize: '0.74rem', color: '#64748b', marginTop: '0.25rem', display: 'block' }}>
+                                  Describe when this transfer option should be used
+                                </span>
+                              </div>
+
+                              {/* Transfer Message */}
+                              <div>
+                                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: '700', color: '#1b3b6f', marginBottom: '0.2rem' }}>
+                                  Transfer Message
+                                </label>
+                                <textarea
+                                  className="form-input"
+                                  rows={2}
+                                  value={transferMessage}
+                                  onChange={(e) => setTransferMessage(e.target.value)}
+                                  placeholder="I'm transferring your call to our counselor. Please hold while I connect you."
+                                  style={{ fontSize: '0.84rem' }}
+                                />
+                                <span style={{ fontSize: '0.74rem', color: '#64748b', marginTop: '0.25rem', display: 'block' }}>
+                                  This message will be played to the caller before the transfer
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
                       {/* Start Campaign Bar */}
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(27, 59, 111, 0.03)', padding: '1rem 1.5rem', borderRadius: '12px', border: '1px solid var(--border)' }}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
@@ -5202,6 +5471,11 @@ export default function App() {
                           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                             Assigned Voice Bot: <b style={{ color: isUgCourse(selectedCourse || stagedContacts[0]?.course) ? '#059669' : '#6366f1' }}>
                               {isUgCourse(selectedCourse || stagedContacts[0]?.course) ? '🤖 UG Admission Bot (#270740)' : '🤖 PG Admission Bot (#270604)'}
+                            </b>
+                          </span>
+                          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                            Live Call Transfer: <b style={{ color: transferEnabled ? '#059669' : '#64748b' }}>
+                              {transferEnabled ? `Enabled (${counselorPhone || '+91 95730 97810'})` : 'Disabled'}
                             </b>
                           </span>
                           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
@@ -7889,6 +8163,26 @@ export default function App() {
                     onChange={(e) => setCollegeForm(prev => ({ ...prev, websiteUrl: e.target.value }))}
                     placeholder="https://college.edu/admissions"
                   />
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <PhoneForwarded size={14} style={{ color: '#F16522' }} />
+                    Default Admission Counselor Phone (Live Call Transfer)
+                  </label>
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                    <span style={{ position: 'absolute', left: '0.75rem', fontSize: '0.85rem' }}>🇮🇳</span>
+                    <input
+                      className="form-input"
+                      style={{ paddingLeft: '2.5rem' }}
+                      value={collegeForm.counselorPhone || ''}
+                      onChange={(e) => setCollegeForm(prev => ({ ...prev, counselorPhone: e.target.value }))}
+                      placeholder="+91 95730 97810"
+                    />
+                  </div>
+                  <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                    Synced with OmniDimension: When live transfer triggers for this college, calls connect to this counselor.
+                  </span>
                 </div>
 
                 <div className="form-group">

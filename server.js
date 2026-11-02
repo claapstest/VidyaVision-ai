@@ -668,6 +668,10 @@ async function loadCampaigns() {
         completedAt: r.completed_at ? new Date(r.completed_at).toISOString() : null,
         canceledAt: r.canceled_at ? new Date(r.canceled_at).toISOString() : null,
         stoppedReason: r.stopped_reason,
+        transferEnabled: !!r.transfer_enabled,
+        counselorPhone: r.counselor_phone || '+91 95730 97810',
+        transferCondition: r.transfer_condition || '',
+        transferMessage: r.transfer_message || '',
         contacts: contactsByCamp.get(r.id) || []
       }));
     }
@@ -692,9 +696,9 @@ async function saveCampaigns(campaigns) {
         INSERT INTO campaigns (
           id, name, university_id, university_name, college_place, course, agent_id,
           status, total_count, completed_count, answered_count, unanswered_count, dispatch_error_count,
-          delay_seconds, end_mode, max_duration_minutes, scheduled_start_time, started_at, completed_at,
-          canceled_at, stopped_reason, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NOW())
+          delay_seconds, end_mode, max_duration_minutes, transfer_enabled, counselor_phone, transfer_condition, transfer_message,
+          scheduled_start_time, started_at, completed_at, canceled_at, stopped_reason, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, NOW())
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name,
           university_id = EXCLUDED.university_id,
@@ -711,6 +715,10 @@ async function saveCampaigns(campaigns) {
           delay_seconds = EXCLUDED.delay_seconds,
           end_mode = EXCLUDED.end_mode,
           max_duration_minutes = EXCLUDED.max_duration_minutes,
+          transfer_enabled = EXCLUDED.transfer_enabled,
+          counselor_phone = EXCLUDED.counselor_phone,
+          transfer_condition = EXCLUDED.transfer_condition,
+          transfer_message = EXCLUDED.transfer_message,
           scheduled_start_time = EXCLUDED.scheduled_start_time,
           started_at = EXCLUDED.started_at,
           completed_at = EXCLUDED.completed_at,
@@ -723,6 +731,8 @@ async function saveCampaigns(campaigns) {
         c.totalCount || (c.contacts ? c.contacts.length : 0), c.completedCount || 0,
         c.answeredCount || 0, c.unansweredCount || 0, c.dispatchErrorCount || 0,
         c.delaySeconds || 2, c.endMode || 'none', c.maxDurationMinutes || null,
+        Boolean(c.transferEnabled), c.counselorPhone || '+91 95730 97810',
+        c.transferCondition || '', c.transferMessage || '',
         c.scheduledStartTime ? new Date(c.scheduledStartTime) : null,
         c.startedAt ? new Date(c.startedAt) : null,
         c.completedAt ? new Date(c.completedAt) : null,
@@ -991,7 +1001,8 @@ async function loadColleges() {
         courses: r.courses || [],
         status: r.status,
         websiteUrl: r.website_url,
-        description: r.description
+        description: r.description,
+        counselorPhone: r.counselor_phone || '+91 95730 97810'
       }));
     }
   } catch (err) {
@@ -1011,8 +1022,8 @@ async function saveColleges(colleges) {
   try {
     for (const c of colleges) {
       await query(`
-        INSERT INTO colleges (id, name, place, agent_id, languages, courses, status, website_url, description, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+        INSERT INTO colleges (id, name, place, agent_id, languages, courses, status, website_url, description, counselor_phone, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name,
           place = EXCLUDED.place,
@@ -1022,11 +1033,13 @@ async function saveColleges(colleges) {
           status = EXCLUDED.status,
           website_url = EXCLUDED.website_url,
           description = EXCLUDED.description,
+          counselor_phone = EXCLUDED.counselor_phone,
           updated_at = NOW();
       `, [
         c.id, c.name, c.place || 'India', c.agentId ? Number(c.agentId) : null,
         c.languages || 'English, Hindi', Array.isArray(c.courses) ? c.courses : [],
-        c.status || 'active', c.websiteUrl || '', c.description || ''
+        c.status || 'active', c.websiteUrl || '', c.description || '',
+        c.counselorPhone || '+91 95730 97810'
       ]);
     }
   } catch (err) {
@@ -2884,9 +2897,21 @@ async function processNextInQueue() {
     const applicationUrl = CAMPAIGN_STATE.applicationUrl || '';
     const targetCourse = contact.course || CAMPAIGN_STATE.course || '';
     const studentName = contact.name || 'Student';
+
+    // Live Counselor Call Transfer (OmniDimension Integration)
+    const transferEnabled = Boolean(CAMPAIGN_STATE.transferEnabled || contact.transferEnabled);
+    const counselorPhone = CAMPAIGN_STATE.counselorPhone || contact.counselorPhone || '+91 95730 97810';
+    const transferCondition = CAMPAIGN_STATE.transferCondition || contact.transferCondition || 'Transfer when the user asks to speak with a counsellor/officer, OR agrees to be transferred (for example: saying yes when asked about fees, scholarships, or senior counsellor assistance).';
+    const transferMessage = CAMPAIGN_STATE.transferMessage || contact.transferMessage || "I'm transferring your call to our counselor. Please hold while I connect you.";
+
     // Explicit self-introduction line so the agent always says the selected
     // college name and place/city first, even if its dashboard prompt is generic.
-    const agentIntro = `You are calling from ${collegeName}${collegePlace ? `, ${collegePlace}` : ''}${targetCourse ? ` about ${targetCourse} admissions` : ''}. Introduce yourself as calling from ${collegeName} and answer only about ${collegeName} admissions unless the caller asks about other colleges.`;
+    let agentIntro = `You are calling from ${collegeName}${collegePlace ? `, ${collegePlace}` : ''}${targetCourse ? ` about ${targetCourse} admissions` : ''}. Introduce yourself as calling from ${collegeName} and answer only about ${collegeName} admissions unless the caller asks about other colleges.`;
+
+    if (transferEnabled && counselorPhone) {
+      agentIntro += ` Call Transfer Protocol: ${transferCondition}. If caller asks to speak to human counselor/officer or requests fee/admission assistance, initiate live call transfer to counselor phone ${counselorPhone}. Spoken transfer announcement: "${transferMessage}".`;
+    }
+
     const dispatchPayload = {
       agent_id: activeAgentId,
       to_number: contact.formattedPhone,
@@ -2909,7 +2934,17 @@ async function processNextInQueue() {
         admission_link: applicationUrl,
         whatsapp_link: applicationUrl,
         agent_intro: agentIntro,
-        agent_identity: agentIntro
+        agent_identity: agentIntro,
+        transfer_enabled: transferEnabled ? 'true' : 'false',
+        counselor_phone: counselorPhone,
+        counselor_number: counselorPhone,
+        transfer_number: counselorPhone,
+        transfer_phone: counselorPhone,
+        transfer_phone_number: counselorPhone,
+        transfer_condition: transferCondition,
+        transfer_message: transferMessage,
+        __omni_transfer_number: counselorPhone,
+        __omni_transfer_message: transferMessage
       },
       dynamic_variables: {
         student_name: studentName,
@@ -2928,7 +2963,17 @@ async function processNextInQueue() {
         admission_link: applicationUrl,
         whatsapp_link: applicationUrl,
         agent_intro: agentIntro,
-        agent_identity: agentIntro
+        agent_identity: agentIntro,
+        transfer_enabled: transferEnabled ? 'true' : 'false',
+        counselor_phone: counselorPhone,
+        counselor_number: counselorPhone,
+        transfer_number: counselorPhone,
+        transfer_phone: counselorPhone,
+        transfer_phone_number: counselorPhone,
+        transfer_condition: transferCondition,
+        transfer_message: transferMessage,
+        __omni_transfer_number: counselorPhone,
+        __omni_transfer_message: transferMessage
       }
     };
 
@@ -3135,7 +3180,7 @@ app.get('/api/colleges', async (req, res) => {
 
 app.post('/api/colleges', checkPermission('canManageColleges'), async (req, res) => {
   try {
-    const { name, place, websiteUrl, description, agentId, languages, courses, id } = req.body;
+    const { name, place, websiteUrl, description, agentId, languages, courses, id, counselorPhone } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ success: false, error: 'College name is required.' });
     }
@@ -3161,6 +3206,7 @@ app.post('/api/colleges', checkPermission('canManageColleges'), async (req, res)
         courses: courses !== undefined ? normCourses(courses) : (existing.courses || []),
         websiteUrl: websiteUrl !== undefined ? String(websiteUrl).trim() : existing.websiteUrl,
         description: description !== undefined ? String(description).trim() : existing.description,
+        counselorPhone: counselorPhone !== undefined ? String(counselorPhone).trim() : (existing.counselorPhone || '+91 95730 97810'),
         updatedAt: new Date().toISOString()
       };
       await saveColleges(currentList);
@@ -3181,6 +3227,7 @@ app.post('/api/colleges', checkPermission('canManageColleges'), async (req, res)
       status: 'active',
       websiteUrl: websiteUrl ? websiteUrl.trim() : '',
       description: description ? description.trim() : '',
+      counselorPhone: counselorPhone && String(counselorPhone).trim() ? String(counselorPhone).trim() : '+91 95730 97810',
       createdAt: new Date().toISOString()
     };
 
@@ -3245,7 +3292,11 @@ app.post('/api/queue/start', checkPermission('canStartStopCampaigns'), async (re
       scheduledStartTime = null,
       endMode = 'none',
       maxDurationMinutes = null,
-      cutoffTime = null
+      cutoffTime = null,
+      transferEnabled = false,
+      counselorPhone = '+91 95730 97810',
+      transferCondition = 'Transfer when the user asks to speak with a counsellor/officer, OR agrees to be transferred (for example: saying yes when asked about fees, scholarships, or senior counsellor assistance).',
+      transferMessage = "I'm transferring your call to our counselor. Please hold while I connect you."
     } = req.body;
 
     if (!contacts || !Array.isArray(contacts) || contacts.length === 0) {
@@ -3385,7 +3436,11 @@ app.post('/api/queue/start', checkPermission('canStartStopCampaigns'), async (re
         universityName: universityName ? String(universityName) : 'Vidyavision AI Admission Assistant',
         collegePlace: collegePlace ? String(collegePlace) : '',
         applicationUrl: applicationUrl ? String(applicationUrl) : '',
-        course: course ? String(course).trim() : ''
+        course: course ? String(course).trim() : '',
+        transferEnabled: Boolean(transferEnabled),
+        counselorPhone: counselorPhone ? String(counselorPhone).trim() : '+91 95730 97810',
+        transferCondition: transferCondition ? String(transferCondition).trim() : '',
+        transferMessage: transferMessage ? String(transferMessage).trim() : ''
       };
 
       scheduleCampaignExecution(newCampaignId, targetStartTime, finalCampaignName);
@@ -3406,6 +3461,10 @@ app.post('/api/queue/start', checkPermission('canStartStopCampaigns'), async (re
         agentId: CAMPAIGN_STATE.agentId,
         startedAt: null,
         scheduledStartTime: CAMPAIGN_STATE.scheduledStartTime,
+        transferEnabled: CAMPAIGN_STATE.transferEnabled,
+        counselorPhone: CAMPAIGN_STATE.counselorPhone,
+        transferCondition: CAMPAIGN_STATE.transferCondition,
+        transferMessage: CAMPAIGN_STATE.transferMessage,
         totalCount: parsedQueue.length,
         completedCount: 0,
         answeredCount: 0,
@@ -3487,7 +3546,11 @@ app.post('/api/queue/start', checkPermission('canStartStopCampaigns'), async (re
       universityName: universityName ? String(universityName) : 'Vidyavision AI Admission Assistant',
       collegePlace: collegePlace ? String(collegePlace) : '',
       applicationUrl: applicationUrl ? String(applicationUrl) : '',
-      course: course ? String(course).trim() : ''
+      course: course ? String(course).trim() : '',
+      transferEnabled: Boolean(transferEnabled),
+      counselorPhone: counselorPhone ? String(counselorPhone).trim() : '+91 95730 97810',
+      transferCondition: transferCondition ? String(transferCondition).trim() : '',
+      transferMessage: transferMessage ? String(transferMessage).trim() : ''
     };
 
     // Set timeout watcher if duration or cutoff limit exists
@@ -3507,7 +3570,7 @@ app.post('/api/queue/start', checkPermission('canStartStopCampaigns'), async (re
     const initialBotLabel = isUgCourse(CAMPAIGN_STATE.course || parsedQueue[0]?.course)
       ? `UG Bot (#${initialAgentId || 'default'})`
       : `PG Bot (#${initialAgentId || 'default'})`;
-    addLog('info', `Campaign "${finalCampaignName}" initialized with ${initialBotLabel} for course "${CAMPAIGN_STATE.course || 'General'}".`);
+    addLog('info', `Campaign "${finalCampaignName}" initialized with ${initialBotLabel} for course "${CAMPAIGN_STATE.course || 'General'}".${CAMPAIGN_STATE.transferEnabled ? ` [Call Transfer: Enabled -> ${CAMPAIGN_STATE.counselorPhone}]` : ''}`);
 
     // Persist new campaign into campaigns.json synchronously before starting dialing (BUG-01)
     const campaignRecord = {
@@ -3519,6 +3582,10 @@ app.post('/api/queue/start', checkPermission('canStartStopCampaigns'), async (re
       course: course || '',
       agentId: CAMPAIGN_STATE.agentId,
       startedAt: new Date().toISOString(),
+      transferEnabled: CAMPAIGN_STATE.transferEnabled,
+      counselorPhone: CAMPAIGN_STATE.counselorPhone,
+      transferCondition: CAMPAIGN_STATE.transferCondition,
+      transferMessage: CAMPAIGN_STATE.transferMessage,
       totalCount: parsedQueue.length,
       completedCount: 0,
       answeredCount: 0,
