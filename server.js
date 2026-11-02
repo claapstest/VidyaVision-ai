@@ -4,10 +4,23 @@ import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import { promises as fs } from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { google } from 'googleapis';
 
 dotenv.config();
+
+// Constant-time string comparison to prevent timing attacks (SEC-08)
+function timingSafeCompare(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) {
+    crypto.timingSafeEqual(bufA, bufA);
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
+}
 
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
@@ -34,22 +47,48 @@ app.use(cors({
     if (isOriginAllowed(origin)) {
       return callback(null, true);
     }
-    return callback(new Error(`CORS blocked for origin: ${origin}`));
+    // SEC-06: Reject disallowed origins cleanly without leaking internal stack traces or paths
+    return callback(null, false);
   },
   credentials: true
 }));
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
-// API Authentication Middleware (SEC-01)
+// API Authentication Middleware (SEC-01, SEC-05, SEC-08)
 const requireAuth = (req, res, next) => {
-  const configuredKey = process.env.APP_API_KEY;
-  if (!configuredKey) {
-    // If no APP_API_KEY is configured in .env, permit requests (development/internal mode)
+  // Allow external webhook ingestion (OmniDimension, Google Apps Script)
+  if (req.path.startsWith('/webhook')) {
+    const webhookSecret = process.env.WEBHOOK_SECRET;
+    if (webhookSecret) {
+      const providedSecret = req.headers['x-webhook-secret'];
+      if (!providedSecret || !timingSafeCompare(providedSecret, webhookSecret)) {
+        return res.status(401).json({ success: false, error: 'Unauthorized: Invalid webhook secret' });
+      }
+    }
     return next();
   }
-  const providedKey = req.headers['x-api-key'] || req.query.apiKey;
-  if (!providedKey || providedKey !== configuredKey) {
+
+  const configuredKey = process.env.APP_API_KEY;
+  if (!configuredKey) {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(500).json({ success: false, error: 'Server misconfiguration: APP_API_KEY is required in production environment' });
+    }
+    // In local development mode without APP_API_KEY, allow local calls
+    return next();
+  }
+
+  // SEC-05: Enforce header-based authentication only. Reject query-based API keys.
+  let providedKey = req.headers['x-api-key'];
+  if (!providedKey && req.headers['authorization']) {
+    const parts = req.headers['authorization'].split(' ');
+    if (parts.length === 2 && parts[0].toLowerCase() === 'bearer') {
+      providedKey = parts[1];
+    }
+  }
+
+  // SEC-08: Constant-time comparison to prevent timing attacks
+  if (!providedKey || !timingSafeCompare(providedKey, configuredKey)) {
     return res.status(401).json({ success: false, error: 'Unauthorized: Invalid or missing API key' });
   }
   next();
@@ -67,19 +106,19 @@ function getApiKey() {
 function getAgentId() {
   dotenv.config();
   const id = Number(process.env.AGENT_ID);
-  return !isNaN(id) && id > 0 ? id : 270604;
+  return !isNaN(id) && id > 0 ? id : null;
 }
 
 function getUgAgentId() {
   dotenv.config();
   const id = Number(process.env.UG_AGENT_ID);
-  return !isNaN(id) && id > 0 ? id : 270740;
+  return !isNaN(id) && id > 0 ? id : getAgentId();
 }
 
 function getPgAgentId() {
   dotenv.config();
   const id = Number(process.env.PG_AGENT_ID || process.env.AGENT_ID);
-  return !isNaN(id) && id > 0 ? id : 270604;
+  return !isNaN(id) && id > 0 ? id : getAgentId();
 }
 
 function isUgCourse(courseName) {
@@ -94,6 +133,9 @@ function isUgCourse(courseName) {
 }
 
 function resolveAgentIdForCourse(courseName, fallbackAgentId) {
+  if (fallbackAgentId && !isNaN(Number(fallbackAgentId)) && Number(fallbackAgentId) > 0) {
+    return Number(fallbackAgentId);
+  }
   if (isUgCourse(courseName)) {
     return getUgAgentId();
   }
@@ -267,74 +309,77 @@ function enrichCampaignContact(c, omniCalls, sheetsCalls) {
   };
 }
 
-const DEFAULT_COLLEGES = [
-  {
-    id: 'vidyavision',
-    name: 'Vidyavision AI Assistant',
-    place: 'Hyderabad, Telangana',
-    agentId: 270604,
-    languages: 'Telugu, English, Hindi, Tamil, Malayalam',
-    courses: ['B.Tech CSE', 'B.Tech ECE', 'B.Tech IT', 'MBA'],
-    status: 'active',
-    websiteUrl: 'https://vidyavision.com/admissions',
-    description: 'Multilingual south-region admission outreach.'
-  },
-  {
-    id: 'gitam',
-    name: 'GITAM University',
-    place: 'Visakhapatnam & Hyderabad',
-    agentId: 270604,
-    languages: 'English, Hindi',
-    courses: ['B.Tech CSE', 'B.Tech ECE', 'MBA'],
-    status: 'active',
-    websiteUrl: 'https://applications.gitam.edu',
-    description: 'GITAM admission queries and course catalog details.'
-  },
-  {
-    id: 'kl',
-    name: 'KL University',
-    place: 'Vijayawada & Hyderabad',
-    agentId: 270604,
-    languages: 'English, Hindi',
-    courses: ['B.Tech CSE', 'B.Tech ECE', 'MBA'],
-    status: 'active',
-    websiteUrl: 'https://kluniversity.in/admissions',
-    description: 'KL University admission inquiries and course selection.'
-  },
-  {
-    id: 'icfai',
-    name: 'ICFAI Foundation for Higher Education',
-    place: 'Hyderabad, Telangana',
-    agentId: 270604,
-    languages: 'English, Hindi',
-    courses: ['MBA', 'BBA', 'B.Tech CSE'],
-    status: 'active',
-    websiteUrl: 'https://ifheindia.org/admissions',
-    description: 'ICFAI IFHE Hyderabad admissions wing.'
-  },
-  {
-    id: 'mnr',
-    name: 'MNR University',
-    place: 'Sangareddy, Telangana',
-    agentId: 270604,
-    languages: 'Telugu, English, Hindi',
-    courses: ['B.Tech CSE', 'B.Tech ECE', 'MBA'],
-    status: 'active',
-    websiteUrl: 'https://mnrindia.org/admissions',
-    description: 'MNR University medical, engineering & general admissions.'
-  },
-  {
-    id: 'mitwpu',
-    name: 'MIT WPU',
-    place: 'Pune, Maharashtra',
-    agentId: 270604,
-    languages: 'English, Hindi',
-    courses: ['MBA', 'B.Tech CSE', 'B.Tech ECE', 'BBA'],
-    status: 'active',
-    websiteUrl: 'https://mitwpu.edu.in/admissions',
-    description: 'MIT World Peace University admissions outreach.'
-  }
-];
+function getDefaultColleges() {
+  const defaultAgent = getAgentId();
+  return [
+    {
+      id: 'vidyavision',
+      name: 'Vidyavision AI Assistant',
+      place: 'Hyderabad, Telangana',
+      agentId: defaultAgent,
+      languages: 'Telugu, English, Hindi, Tamil, Malayalam',
+      courses: ['B.Tech CSE', 'B.Tech ECE', 'B.Tech IT', 'MBA'],
+      status: 'active',
+      websiteUrl: 'https://vidyavision.com/admissions',
+      description: 'Multilingual south-region admission outreach.'
+    },
+    {
+      id: 'gitam',
+      name: 'GITAM University',
+      place: 'Visakhapatnam & Hyderabad',
+      agentId: defaultAgent,
+      languages: 'English, Hindi',
+      courses: ['B.Tech CSE', 'B.Tech ECE', 'MBA'],
+      status: 'active',
+      websiteUrl: 'https://applications.gitam.edu',
+      description: 'GITAM admission queries and course catalog details.'
+    },
+    {
+      id: 'kl',
+      name: 'KL University',
+      place: 'Vijayawada & Hyderabad',
+      agentId: defaultAgent,
+      languages: 'English, Hindi',
+      courses: ['B.Tech CSE', 'B.Tech ECE', 'MBA'],
+      status: 'active',
+      websiteUrl: 'https://kluniversity.in/admissions',
+      description: 'KL University admission inquiries and course selection.'
+    },
+    {
+      id: 'icfai',
+      name: 'ICFAI Foundation for Higher Education',
+      place: 'Hyderabad, Telangana',
+      agentId: defaultAgent,
+      languages: 'English, Hindi',
+      courses: ['MBA', 'BBA', 'B.Tech CSE'],
+      status: 'active',
+      websiteUrl: 'https://ifheindia.org/admissions',
+      description: 'ICFAI IFHE Hyderabad admissions wing.'
+    },
+    {
+      id: 'mnr',
+      name: 'MNR University',
+      place: 'Sangareddy, Telangana',
+      agentId: defaultAgent,
+      languages: 'Telugu, English, Hindi',
+      courses: ['B.Tech CSE', 'B.Tech ECE', 'MBA'],
+      status: 'active',
+      websiteUrl: 'https://mnrindia.org/admissions',
+      description: 'MNR University medical, engineering & general admissions.'
+    },
+    {
+      id: 'mitwpu',
+      name: 'MIT WPU',
+      place: 'Pune, Maharashtra',
+      agentId: defaultAgent,
+      languages: 'English, Hindi',
+      courses: ['MBA', 'B.Tech CSE', 'B.Tech ECE', 'BBA'],
+      status: 'active',
+      websiteUrl: 'https://mitwpu.edu.in/admissions',
+      description: 'MIT World Peace University admissions outreach.'
+    }
+  ];
+}
 
 async function loadColleges() {
   try {
@@ -342,7 +387,7 @@ async function loadColleges() {
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) return parsed;
   } catch { }
-  return DEFAULT_COLLEGES;
+  return getDefaultColleges();
 }
 
 async function saveColleges(colleges) {
@@ -438,8 +483,40 @@ let CAMPAIGN_STATE = {
 let CALL_QUEUE = []; // Array of { id, phone, formattedPhone, name, status: 'queued'|'in-progress'|'completed'|'no-answer'|'canceled', duration, reason, dispatchTime }
 let CURRENT_CALL = null;
 let queueNextTimer = null;
-let campaignScheduleTimer = null;
 let campaignEndTimer = null;
+const SCHEDULED_TIMERS = new Map(); // campaignId -> timer reference
+
+function scheduleCampaignExecution(campaignId, targetTimestamp, campaignName) {
+  if (!campaignId) return;
+  if (SCHEDULED_TIMERS.has(campaignId)) {
+    clearTimeout(SCHEDULED_TIMERS.get(campaignId));
+    SCHEDULED_TIMERS.delete(campaignId);
+  }
+  const msUntilStart = targetTimestamp - Date.now();
+  if (msUntilStart <= 0) {
+    startScheduledCampaign(campaignId);
+    return;
+  }
+  const timer = setTimeout(() => {
+    SCHEDULED_TIMERS.delete(campaignId);
+    startScheduledCampaign(campaignId);
+  }, msUntilStart);
+  SCHEDULED_TIMERS.set(campaignId, timer);
+}
+
+function clearScheduledTimer(campaignId) {
+  if (campaignId && SCHEDULED_TIMERS.has(campaignId)) {
+    clearTimeout(SCHEDULED_TIMERS.get(campaignId));
+    SCHEDULED_TIMERS.delete(campaignId);
+  }
+}
+
+function clearAllScheduledTimers() {
+  for (const timer of SCHEDULED_TIMERS.values()) {
+    clearTimeout(timer);
+  }
+  SCHEDULED_TIMERS.clear();
+}
 
 // Helper to format duration to a readable MM:SS layout for logs
 function formatDuration(durationStr) {
@@ -470,7 +547,8 @@ function addLog(type, message) {
   LOGS.push(logEntry);
   if (LOGS.length > 150) LOGS.shift(); // Keep logs memory clean
   console.log(`[${type.toUpperCase()}] ${sanitizedMessage}`);
-  broadcast({ type: 'logs', data: LOGS });
+  // PERF-02: Broadcast single log delta rather than entire 150-element array on every event
+  broadcast({ type: 'log', data: logEntry });
 }
 
 function broadcastQueueUpdate() {
@@ -598,7 +676,8 @@ async function fetchPublicGoogleSheet(spreadsheetId) {
 async function fetchSheetRawData() {
   const spreadsheetId = process.env.GOOGLE_SPREADSHEET_ID;
   if (!spreadsheetId) {
-    throw new Error('GOOGLE_SPREADSHEET_ID is missing.');
+    console.warn('GOOGLE_SPREADSHEET_ID is not configured in .env. Skipping Google Sheets fetch.');
+    return [];
   }
 
   // 1. Try private API
@@ -664,7 +743,11 @@ function resolveFinalCallStatus(item) {
   const lowerCallStatus = String(item.call_status || item.status || '').toLowerCase().trim();
   const lowerOutcome = outcome.toLowerCase();
   const unansweredSet = new Set(['failed', 'canceled', 'cancelled', 'busy', 'no-answer', 'no_answer', 'timeout', 'timedout', 'unreachable', 'missed', 'not answered', 'unanswered']);
+  const callAnswered = String(item.call_answered || item.rawFields?.call_answered || '').toLowerCase().trim();
+
   if (
+    callAnswered === 'no' || callAnswered === 'false' ||
+    leadStatus.includes('NOT ANSWERED') || leadStatus.includes('NO ANSWER') || leadStatus.includes('UNANSWERED') ||
     unansweredSet.has(lowerCallStatus) || unansweredSet.has(lowerOutcome) ||
     outcome.includes('NO ANSWER') || outcome.includes('NO-ANSWER') || outcome.includes('MISSED') ||
     outcome.includes('FAILED') || outcome.includes('BUSY') || outcome.includes('UNREACHABLE') ||
@@ -729,7 +812,12 @@ function resolveFinalCallStatus(item) {
   }
   const __userText = __userParts.join(' ').toLowerCase();
   const __interestText = __userText || fullText;
-  if (leadStatus === 'INTERESTED' || leadStatus === 'HOT LEAD' || leadStatus === 'QUALIFIED' || leadStatus.includes('HOT') || interestLevel === 'HIGH' || interestLevel === 'INTERESTED' || interestedKeywords.some(kw => __interestText.includes(kw))) {
+  if (
+    leadStatus === 'INTERESTED' || leadStatus === 'HOT LEAD' || leadStatus === 'QUALIFIED' ||
+    leadStatus.includes('HOT') || leadStatus.includes('COUNSELLOR') || leadStatus.includes('COUNSELOR') ||
+    interestLevel === 'HIGH' || interestLevel === 'INTERESTED' ||
+    interestedKeywords.some(kw => __interestText.includes(kw))
+  ) {
     return CALL_OUTCOME_STATUS.INTERESTED;
   }
 
@@ -798,6 +886,8 @@ function normalizeRow(row, headers) {
   const sentiment = findValue(['sentiment']);
   const botName = findValue(['bot name', 'bot_name']);
   const fullConversation = findValue(['full conversation', 'full_conversation', 'conversation']);
+  const callDuration = findValue(['call duration in seconds', 'call_duration_in_seconds', 'duration', 'call duration', 'call_duration']) || '—';
+  const callAnsweredVal = findValue(['call answered', 'call_answered']);
   // No name column in these sheets — recover the student's name from the greeting.
   const recoveredName = extractStudentName({ call_conversation: fullConversation, summary });
 
@@ -818,7 +908,8 @@ function normalizeRow(row, headers) {
     summary,
     notes,
     sentiment,
-    call_status: callOutcome
+    call_status: callOutcome,
+    call_answered: callAnsweredVal
   });
 
   let effectiveLeadStatus = leadStatus;
@@ -836,7 +927,7 @@ function normalizeRow(row, headers) {
           flagYes(['application sent', 'application_sent']) ? CALL_OUTCOME_STATUS.APPLICATION_SENT :
             flagYes(['callback']) ? CALL_OUTCOME_STATUS.CALLBACK :
               flagYes(['not interested', 'not_interested']) ? CALL_OUTCOME_STATUS.NOT_INTERESTED :
-                flagYes(['interested']) ? CALL_OUTCOME_STATUS.INTERESTED : '';
+                flagYes(['interested', 'student interest', 'student_interest', 'student interested']) ? CALL_OUTCOME_STATUS.INTERESTED : '';
   if (flagStatus) {
     final_status = flagStatus;
     effectiveLeadStatus = flagStatus;
@@ -844,8 +935,8 @@ function normalizeRow(row, headers) {
 
   // Manual overrides (e.g. APPLICATION_SENT after WhatsApp) so dashboard calculus updates
   const cleanPhone = contactNumber.replace(/\D/g, '').slice(-10);
-  const manual = (cleanPhone && CALL_INTERESTS[cleanPhone]) || (id && CALL_INTERESTS[id]);
-  if (manual && manual.interestStatus) {
+  const manual = (id && CALL_INTERESTS[id]) || (cleanPhone && CALL_INTERESTS[cleanPhone]);
+  if (manual && manual.interestStatus && final_status !== CALL_OUTCOME_STATUS.NOT_ANSWERED) {
     final_status = manual.interestStatus;
     effectiveLeadStatus = manual.interestStatus;
   }
@@ -906,6 +997,8 @@ function normalizeRow(row, headers) {
     counselorRequired,
     callbackRequired,
     callDate,
+    callDuration,
+    duration: callDuration,
     callOutcome,
     questionsAsked,
     universitiesDiscussed: effectiveDiscussed,
@@ -934,17 +1027,8 @@ async function loadCache() {
 
 async function saveCache(data) {
   try {
-    // Guard: never let a partial/failed fetch wipe a healthy cache. If the new
-    // payload is less than half the cached size (and cache is non-trivial),
-    // keep the old cache — a Sheet cleanup this drastic needs a human look.
-    let prevLen = 0;
-    try {
-      const raw = await fs.readFile(GOOGLE_SHEETS_CACHE_FILE, 'utf8');
-      const prev = JSON.parse(raw);
-      prevLen = Array.isArray(prev) ? prev.length : 0;
-    } catch { }
-    if (prevLen > 5 && Array.isArray(data) && data.length < prevLen * 0.5) {
-      console.warn(`Sheets cache guard: fresh fetch has ${data.length} rows vs cached ${prevLen} — keeping cache.`);
+    if (!Array.isArray(data) || data.length === 0) {
+      console.warn('Sheets saveCache: received empty data, skipping save.');
       return false;
     }
     await fs.writeFile(GOOGLE_SHEETS_CACHE_FILE, JSON.stringify(data, null, 2), 'utf8');
@@ -1596,22 +1680,38 @@ async function fetchCallsFromOmni(pages = 1) {
 }
 
 // Handle completion of a call in queue and trigger next contact
-function handleQueueContactFinished(contact, isAnswered, statusText, durationStr) {
+function handleQueueContactFinished(contact, isAnswered, statusText, durationStr, errorType = null) {
   if (!contact) return;
 
   contact.duration = durationStr || '0:00';
+  const isDispatchError = errorType === 'dispatch_error' ||
+    Boolean(statusText && (
+      statusText === 'api_key_missing' ||
+      statusText === 'agent_id_missing' ||
+      statusText === 'network_error' ||
+      String(statusText).startsWith('dispatch_failed')
+    ));
+
   if (isAnswered) {
     contact.status = 'completed';
-    CAMPAIGN_STATE.answeredCount++;
+    contact.callOutcome = 'Completed';
+    CAMPAIGN_STATE.answeredCount = (CAMPAIGN_STATE.answeredCount || 0) + 1;
     addLog('success', `Sequential Call [${contact.index + 1}/${CAMPAIGN_STATE.totalCount}] to "${contact.name || contact.formattedPhone}" (${contact.formattedPhone}) COMPLETED. Result: ANSWERED. Duration: ${contact.duration}.`);
+  } else if (isDispatchError) {
+    contact.status = 'failed';
+    contact.reason = statusText;
+    contact.callOutcome = 'Dispatch Error';
+    CAMPAIGN_STATE.dispatchErrorCount = (CAMPAIGN_STATE.dispatchErrorCount || 0) + 1;
+    addLog('error', `Sequential Call [${contact.index + 1}/${CAMPAIGN_STATE.totalCount}] to "${contact.name || contact.formattedPhone}" (${contact.formattedPhone}) FAILED TO DISPATCH (${statusText}).`);
   } else {
     contact.status = 'no-answer';
     contact.reason = statusText;
-    CAMPAIGN_STATE.unansweredCount++;
+    contact.callOutcome = statusText || 'No Answer';
+    CAMPAIGN_STATE.unansweredCount = (CAMPAIGN_STATE.unansweredCount || 0) + 1;
     addLog('error', `Sequential Call [${contact.index + 1}/${CAMPAIGN_STATE.totalCount}] to "${contact.name || contact.formattedPhone}" (${contact.formattedPhone}) ENDED. Result: NOT ANSWERED (${statusText}).`);
   }
 
-  CAMPAIGN_STATE.completedCount++;
+  CAMPAIGN_STATE.completedCount = (CAMPAIGN_STATE.completedCount || 0) + 1;
   CURRENT_CALL = null;
   broadcastQueueUpdate();
 
@@ -1621,13 +1721,15 @@ function handleQueueContactFinished(contact, isAnswered, statusText, durationStr
       const camp = all.find(c => c.id === CAMPAIGN_STATE.campaignId);
       if (camp) {
         if (isAnswered) camp.answeredCount = (camp.answeredCount || 0) + 1;
+        else if (isDispatchError) camp.dispatchErrorCount = (camp.dispatchErrorCount || 0) + 1;
         else camp.unansweredCount = (camp.unansweredCount || 0) + 1;
+
         camp.completedCount = (camp.completedCount || 0) + 1;
         if (Array.isArray(camp.contacts)) {
           const cMatch = camp.contacts.find(c => (contact.id && c.id === contact.id) || (!contact.id && (c.phone === contact.phone || c.formattedPhone === contact.formattedPhone)));
           if (cMatch) {
-            cMatch.status = isAnswered ? 'completed' : 'no-answer';
-            cMatch.callOutcome = isAnswered ? 'Completed' : (statusText || 'No Answer');
+            cMatch.status = isAnswered ? 'completed' : (isDispatchError ? 'failed' : 'no-answer');
+            cMatch.callOutcome = isAnswered ? 'Completed' : (isDispatchError ? `Dispatch Error (${statusText})` : (statusText || 'No Answer'));
             cMatch.callDuration = durationStr || '0:00';
           }
         }
@@ -1804,17 +1906,76 @@ function updateWsPolling() {
 }
 
 // Scheduled Campaign Auto-Start Processor
-function startScheduledCampaign() {
-  if (!CAMPAIGN_STATE.isScheduled) return;
-  if (campaignScheduleTimer) {
-    clearTimeout(campaignScheduleTimer);
-    campaignScheduleTimer = null;
+async function startScheduledCampaign(targetCampaignId) {
+  const campId = targetCampaignId || CAMPAIGN_STATE.campaignId;
+  clearScheduledTimer(campId);
+
+  // If another campaign is actively running, defer this campaign by 60s
+  if (CAMPAIGN_STATE && CAMPAIGN_STATE.isRunning && CAMPAIGN_STATE.campaignId !== campId) {
+    addLog('warning', `⏰ Scheduled campaign "${campId}" reached start time, but campaign "${CAMPAIGN_STATE.campaignName || 'Active Campaign'}" is currently dialing. Deferring start by 60 seconds.`);
+    scheduleCampaignExecution(campId, Date.now() + 60000);
+    return;
   }
 
-  CAMPAIGN_STATE.isScheduled = false;
-  CAMPAIGN_STATE.isRunning = true;
-  CAMPAIGN_STATE.isPaused = false;
-  CAMPAIGN_STATE.startedAt = new Date().toISOString();
+  const allCampaigns = await loadCampaigns();
+  const camp = allCampaigns.find(c => c.id === campId);
+  if (!camp) {
+    addLog('error', `Scheduled campaign "${campId}" not found in persistent records.`);
+    return;
+  }
+
+  // Re-hydrate queue and in-memory campaign state
+  const queuedContacts = Array.isArray(camp.contacts)
+    ? camp.contacts.map((ct, idx) => ({
+      id: ct.id || `contact-${Date.now()}-${idx}`,
+      phone: ct.phone,
+      formattedPhone: ct.formattedPhone || (ct.phone ? `+91${ct.phone}` : ''),
+      name: ct.name || '',
+      universityId: ct.universityId || camp.universityId || '',
+      universityName: ct.universityName || camp.universityName || '',
+      course: ct.course || camp.course || '',
+      status: ct.status || 'queued',
+      duration: ct.callDuration || ct.duration || '—',
+      reason: ct.callOutcome || ct.reason || '',
+      email: ct.email || '',
+      state: ct.state || '',
+      district: ct.district || '',
+      program: ct.program || ct.course || camp.course || '',
+      extraFields: ct.extraFields || {}
+    }))
+    : [];
+
+  CALL_QUEUE = queuedContacts;
+  CURRENT_CALL = null;
+
+  CAMPAIGN_STATE = {
+    isRunning: true,
+    isPaused: false,
+    isScheduled: false,
+    scheduledStartTime: null,
+    endMode: camp.endMode || 'none',
+    maxDurationMinutes: camp.maxDurationMinutes ? Number(camp.maxDurationMinutes) : null,
+    timeLimitExpiresAt: null,
+    cutoffTimestamp: camp.cutoffTimestamp || null,
+    cutoffTimeDisplay: camp.cutoffTimeDisplay || null,
+    stoppedReason: null,
+    startedAt: new Date().toISOString(),
+    campaignId: camp.id,
+    campaignName: camp.name,
+    totalCount: queuedContacts.length,
+    completedCount: camp.completedCount || 0,
+    answeredCount: camp.answeredCount || 0,
+    unansweredCount: camp.unansweredCount || 0,
+    dispatchErrorCount: camp.dispatchErrorCount || 0,
+    delayMs: (Number(camp.delaySeconds) || 2) * 1000,
+    currentContactIndex: -1,
+    agentId: camp.agentId || resolveAgentIdForCourse(camp.course),
+    universityId: camp.universityId || '',
+    universityName: camp.universityName || 'Vidyavision AI Admission Assistant',
+    collegePlace: camp.collegePlace || '',
+    applicationUrl: camp.applicationUrl || '',
+    course: camp.course || ''
+  };
 
   // If duration limit was set, calculate timeLimitExpiresAt from current start
   if (CAMPAIGN_STATE.endMode === 'duration' && CAMPAIGN_STATE.maxDurationMinutes > 0) {
@@ -1839,6 +2000,11 @@ function startScheduledCampaign() {
       }, msUntilEnd);
     }
   }
+
+  camp.status = 'in-progress';
+  camp.startedAt = CAMPAIGN_STATE.startedAt;
+  await saveCampaigns(allCampaigns);
+  broadcast({ type: 'campaigns', data: allCampaigns });
 
   const universityDisplay = CAMPAIGN_STATE.universityName || 'Vidyavision AI';
   const activeAgentId = CAMPAIGN_STATE.agentId || getAgentId();
@@ -1940,13 +2106,20 @@ async function processNextInQueue() {
   const universityDisplay = CAMPAIGN_STATE.universityName || 'Vidyavision AI Admission Assistant';
   const targetCourse = contact.course || CAMPAIGN_STATE.course || '';
   const activeAgentId = resolveAgentIdForCourse(targetCourse, CAMPAIGN_STATE.agentId);
-  const botLabel = isUgCourse(targetCourse) ? 'UG Bot (#270740)' : 'PG Bot (#270604)';
+
+  if (!activeAgentId) {
+    addLog('error', 'Agent ID is not configured (AGENT_ID/UG_AGENT_ID/PG_AGENT_ID)! Call dispatch aborted.');
+    handleQueueContactFinished(contact, false, 'agent_id_missing', '0:00', 'dispatch_error');
+    return;
+  }
+
+  const botLabel = isUgCourse(targetCourse) ? `UG Bot (#${activeAgentId})` : `PG Bot (#${activeAgentId})`;
   const apiKey = getApiKey();
   addLog('info', `Sequential Dialing [${nextIndex + 1}/${CAMPAIGN_STATE.totalCount}] using ${universityDisplay} [${botLabel}]: Initiating call to ${contact.formattedPhone} (Name: ${nameDisplay}, Course: ${targetCourse || 'General'})...`);
 
   if (!apiKey) {
     addLog('error', 'OMNIDIM_API_KEY is missing! Call dispatch aborted.');
-    handleQueueContactFinished(contact, false, 'api_key_missing', '0:00');
+    handleQueueContactFinished(contact, false, 'api_key_missing', '0:00', 'dispatch_error');
     return;
   }
 
@@ -2057,11 +2230,11 @@ async function processNextInQueue() {
       }
 
       addLog('error', `OmniDimension Dispatch API failed for ${contact.formattedPhone}: ${errorMsg}`);
-      handleQueueContactFinished(contact, false, `dispatch_failed: ${errorMsg}`, '0:00');
+      handleQueueContactFinished(contact, false, `dispatch_failed: ${errorMsg}`, '0:00', 'dispatch_error');
     }
   } catch (err) {
     addLog('error', `Network failure during dispatch to ${contact.formattedPhone}: ${err.message}`);
-    handleQueueContactFinished(contact, false, 'network_error', '0:00');
+    handleQueueContactFinished(contact, false, 'network_error', '0:00', 'dispatch_error');
   }
 }
 
@@ -2122,6 +2295,28 @@ server.on('upgrade', (req, socket, head) => {
   }
   const url = new URL(req.url, `http://${req.headers.host}`);
   if (url.pathname === '/api/stream') {
+    // SEC-02: Enforce WebSocket Authentication handshake
+    const configuredKey = process.env.APP_API_KEY;
+    if (configuredKey) {
+      let token = req.headers['x-api-key'];
+      if (!token && req.headers['authorization']) {
+        const parts = req.headers['authorization'].split(' ');
+        if (parts.length === 2 && parts[0].toLowerCase() === 'bearer') token = parts[1];
+      }
+      if (!token && req.headers['sec-websocket-protocol']) {
+        token = req.headers['sec-websocket-protocol'].split(',')[0].trim();
+      }
+      if (!token) {
+        token = url.searchParams.get('token');
+      }
+
+      if (!token || !timingSafeCompare(token, configuredKey)) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+    }
+
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit('connection', ws, req);
     });
@@ -2151,7 +2346,7 @@ function validateAndFormatMobile(mobile) {
 }
 
 // Initial status logs
-console.log(`[INFO] OmniDimension Server Ready. Agent ID: ${getAgentId()}`);
+console.log(`[INFO] OmniDimension Server Ready. Agent ID: ${getAgentId() || 'Not Configured'}`);
 if (!getApiKey()) {
   console.error('[ERROR] OMNIDIM_API_KEY is not defined in .env! Call dispatches will fail.');
 } else {
@@ -2266,7 +2461,7 @@ app.delete('/api/colleges/:id', async (req, res) => {
 });
 
 // 1. Batch & Sequential Calling API
-app.post('/api/queue/start', (req, res) => {
+app.post('/api/queue/start', async (req, res) => {
   try {
     const {
       contacts,
@@ -2333,11 +2528,8 @@ app.post('/api/queue/start', (req, res) => {
     const finalCampaignName = campaignName && campaignName.trim() ? campaignName.trim() : defaultCampaignName;
     const newCampaignId = req.body?.campaignId || req.body?.existingCampaignId || `camp-${Date.now()}`;
 
-    // Clear any existing timers
-    if (campaignScheduleTimer) {
-      clearTimeout(campaignScheduleTimer);
-      campaignScheduleTimer = null;
-    }
+    // Clear any existing timers for this specific campaign
+    clearScheduledTimer(newCampaignId);
     if (campaignEndTimer) {
       clearTimeout(campaignEndTimer);
       campaignEndTimer = null;
@@ -2417,6 +2609,7 @@ app.post('/api/queue/start', (req, res) => {
         completedCount: 0,
         answeredCount: 0,
         unansweredCount: 0,
+        dispatchErrorCount: 0,
         delayMs: (Number(delaySeconds) || 2) * 1000,
         currentContactIndex: -1,
         agentId: resolveAgentIdForCourse(course || parsedQueue[0]?.course, agentId),
@@ -2427,9 +2620,7 @@ app.post('/api/queue/start', (req, res) => {
         course: course ? String(course).trim() : ''
       };
 
-      campaignScheduleTimer = setTimeout(() => {
-        startScheduledCampaign();
-      }, msUntilStart);
+      scheduleCampaignExecution(newCampaignId, targetStartTime, finalCampaignName);
 
       const scheduledDateStr = new Date(targetStartTime).toLocaleString('en-US', {
         weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
@@ -2451,6 +2642,7 @@ app.post('/api/queue/start', (req, res) => {
         completedCount: 0,
         answeredCount: 0,
         unansweredCount: 0,
+        dispatchErrorCount: 0,
         status: 'scheduled',
         contacts: parsedQueue.map(c => ({
           id: c.id,
@@ -2471,19 +2663,17 @@ app.post('/api/queue/start', (req, res) => {
         }))
       };
 
-      loadCampaigns().then(async (all) => {
-        const existingIdx = all.findIndex(c => c.id === newCampaignId);
-        let updated;
-        if (existingIdx !== -1) {
-          all[existingIdx] = { ...all[existingIdx], ...campaignRecord };
-          updated = all;
-        } else {
-          updated = [campaignRecord, ...all];
-        }
-        await saveCampaigns(updated);
-        broadcast({ type: 'campaigns', data: updated });
-      }).catch(() => { });
-
+      const all = await loadCampaigns();
+      const existingIdx = all.findIndex(c => c.id === newCampaignId);
+      let updated;
+      if (existingIdx !== -1) {
+        all[existingIdx] = { ...all[existingIdx], ...campaignRecord };
+        updated = all;
+      } else {
+        updated = [campaignRecord, ...all];
+      }
+      await saveCampaigns(updated);
+      broadcast({ type: 'campaigns', data: updated });
       broadcastQueueUpdate();
 
       return res.json({
@@ -2521,6 +2711,7 @@ app.post('/api/queue/start', (req, res) => {
       completedCount: 0,
       answeredCount: 0,
       unansweredCount: 0,
+      dispatchErrorCount: 0,
       delayMs: (Number(delaySeconds) || 2) * 1000,
       currentContactIndex: -1,
       agentId: resolveAgentIdForCourse(course || parsedQueue[0]?.course, agentId),
@@ -2544,10 +2735,13 @@ app.post('/api/queue/start', (req, res) => {
       }
     }
 
-    const initialBotLabel = isUgCourse(CAMPAIGN_STATE.course || parsedQueue[0]?.course) ? 'UG Bot (#270740)' : 'PG Bot (#270604)';
+    const initialAgentId = CAMPAIGN_STATE.agentId || getAgentId();
+    const initialBotLabel = isUgCourse(CAMPAIGN_STATE.course || parsedQueue[0]?.course)
+      ? `UG Bot (#${initialAgentId || 'default'})`
+      : `PG Bot (#${initialAgentId || 'default'})`;
     addLog('info', `Campaign "${finalCampaignName}" initialized with ${initialBotLabel} for course "${CAMPAIGN_STATE.course || 'General'}".`);
 
-    // Persist new campaign into campaigns.json
+    // Persist new campaign into campaigns.json synchronously before starting dialing (BUG-01)
     const campaignRecord = {
       id: newCampaignId,
       name: finalCampaignName,
@@ -2561,6 +2755,7 @@ app.post('/api/queue/start', (req, res) => {
       completedCount: 0,
       answeredCount: 0,
       unansweredCount: 0,
+      dispatchErrorCount: 0,
       status: 'in-progress',
       contacts: parsedQueue.map(c => ({
         id: c.id,
@@ -2581,18 +2776,17 @@ app.post('/api/queue/start', (req, res) => {
       }))
     };
 
-    loadCampaigns().then(async (all) => {
-      const existingIdx = all.findIndex(c => c.id === newCampaignId);
-      let updated;
-      if (existingIdx !== -1) {
-        all[existingIdx] = { ...all[existingIdx], ...campaignRecord };
-        updated = all;
-      } else {
-        updated = [campaignRecord, ...all];
-      }
-      await saveCampaigns(updated);
-      broadcast({ type: 'campaigns', data: updated });
-    }).catch(() => { });
+    const all = await loadCampaigns();
+    const existingIdx = all.findIndex(c => c.id === newCampaignId);
+    let updated;
+    if (existingIdx !== -1) {
+      all[existingIdx] = { ...all[existingIdx], ...campaignRecord };
+      updated = all;
+    } else {
+      updated = [campaignRecord, ...all];
+    }
+    await saveCampaigns(updated);
+    broadcast({ type: 'campaigns', data: updated });
 
     const universityDisplay = CAMPAIGN_STATE.universityName;
     const activeAgentId = CAMPAIGN_STATE.agentId || getAgentId();
@@ -2659,6 +2853,7 @@ app.put('/api/campaigns/:id', async (req, res) => {
 
 app.delete('/api/campaigns/:id', async (req, res) => {
   try {
+    clearScheduledTimer(req.params.id);
     const all = await loadCampaigns();
     const updated = all.filter(c => c.id !== req.params.id);
     await saveCampaigns(updated);
@@ -2916,21 +3111,18 @@ app.post('/api/queue/pause', (req, res) => {
 // 2b. Split Campaign: Part 1 (Completed) & Part 2 (Paused Remaining)
 app.post('/api/queue/split', async (req, res) => {
   try {
+    const activeCampId = req.body?.campaignId || CAMPAIGN_STATE.campaignId;
     if (queueNextTimer) {
       clearTimeout(queueNextTimer);
       queueNextTimer = null;
     }
-    if (campaignScheduleTimer) {
-      clearTimeout(campaignScheduleTimer);
-      campaignScheduleTimer = null;
-    }
+    clearScheduledTimer(activeCampId);
     if (campaignEndTimer) {
       clearTimeout(campaignEndTimer);
       campaignEndTimer = null;
     }
 
     const allCampaigns = await loadCampaigns();
-    const activeCampId = req.body?.campaignId || CAMPAIGN_STATE.campaignId;
     let camp = null;
     if (activeCampId) {
       camp = allCampaigns.find(c => c.id === activeCampId);
@@ -3015,7 +3207,7 @@ app.post('/api/queue/split', async (req, res) => {
       universityName: camp.universityName || 'Vidyavision AI',
       collegePlace: camp.collegePlace || '',
       course: camp.course || '',
-      agentId: camp.agentId || CAMPAIGN_STATE.agentId || 270740,
+      agentId: camp.agentId || CAMPAIGN_STATE.agentId || getAgentId(),
       startedAt: new Date().toISOString(),
       totalCount: remainingContacts.length,
       completedCount: 0,
@@ -3158,20 +3350,16 @@ app.post('/api/queue/resume', async (req, res) => {
 
 // 4. Cancel/Stop Sequential Queue
 app.post('/api/queue/cancel', async (req, res) => {
+  const activeCampId = req.body?.campaignId || CAMPAIGN_STATE.campaignId;
   if (queueNextTimer) {
     clearTimeout(queueNextTimer);
     queueNextTimer = null;
   }
-  if (campaignScheduleTimer) {
-    clearTimeout(campaignScheduleTimer);
-    campaignScheduleTimer = null;
-  }
+  clearScheduledTimer(activeCampId);
   if (campaignEndTimer) {
     clearTimeout(campaignEndTimer);
     campaignEndTimer = null;
   }
-
-  const activeCampId = CAMPAIGN_STATE.campaignId;
 
   CAMPAIGN_STATE.isRunning = false;
   CAMPAIGN_STATE.isPaused = false;
@@ -3217,20 +3405,18 @@ app.post('/api/queue/cancel', async (req, res) => {
 
 // 4b. Schedule Controls: Cancel Scheduled Campaign
 app.post('/api/queue/schedule/cancel', async (req, res) => {
-  if (campaignScheduleTimer) {
-    clearTimeout(campaignScheduleTimer);
-    campaignScheduleTimer = null;
+  const scheduledCampId = req.body?.campaignId || CAMPAIGN_STATE.campaignId;
+  clearScheduledTimer(scheduledCampId);
+
+  if (CAMPAIGN_STATE.campaignId === scheduledCampId) {
+    CAMPAIGN_STATE.isScheduled = false;
+    CAMPAIGN_STATE.isRunning = false;
+    CAMPAIGN_STATE.scheduledStartTime = null;
+    CALL_QUEUE = [];
+    CURRENT_CALL = null;
   }
-  const scheduledCampId = CAMPAIGN_STATE.campaignId;
 
-  CAMPAIGN_STATE.isScheduled = false;
-  CAMPAIGN_STATE.isRunning = false;
-  CAMPAIGN_STATE.scheduledStartTime = null;
-
-  CALL_QUEUE = [];
-  CURRENT_CALL = null;
-
-  addLog('warning', 'Scheduled campaign has been cancelled.');
+  addLog('warning', `Scheduled campaign "${scheduledCampId || 'Active'}" has been cancelled.`);
   broadcastQueueUpdate();
 
   // Persist scheduled cancellation to campaigns.json
@@ -3401,9 +3587,146 @@ app.post('/api/calls/send-whatsapp', async (req, res) => {
   }
 });
 
+// Real-Time Post-Call Webhook Ingestion (OmniDimension AI & Google Sheets)
+async function handlePostCallWebhook(payload, source = 'omni') {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Invalid payload: expected JSON object');
+  }
+
+  // Handle nested payload wrapper e.g. { event, data } or { row }
+  const data = payload.data || payload.call || payload.row || payload;
+  const rawFields = data.rawFields || data.extracted_variables || data.variables || {};
+
+  const callId = String(data.call_id || data.id || data.callId || rawFields.call_id || Date.now());
+  const rawPhone = String(data.to_number || data.phone_number || data.to || data.phone || rawFields.to_number || rawFields.phone_number || '');
+  const cleanPhone = rawPhone.replace(/\D/g, '').slice(-10);
+
+  const duration = data.call_duration || data.duration || rawFields.call_duration_in_seconds || rawFields.call_duration || '—';
+  const callStatus = String(data.call_status || data.status || rawFields.call_status || 'completed').toLowerCase();
+  const summary = data.summary || data.call_summary || data.interest_details || rawFields.summary || rawFields.call_summary || '';
+  const conversation = data.call_conversation || data.transcript || data.full_conversation || rawFields.full_conversation || '';
+  const recordingUrl = data.recording_url || data.recordingUrl || rawFields.recording_url || '';
+  const sentiment = data.sentiment || data.sentiment_score || rawFields.sentiment || 'Neutral';
+  const botName = data.bot_name || data.botName || rawFields.bot_name || 'College Admission Counsellor';
+
+  // Target / Staged student metadata lookup
+  const target = cleanPhone ? getCallTarget(cleanPhone) : null;
+  const extractedName = extractStudentName({ call_conversation: conversation, summary });
+  const studentName = data.student_name || data.studentName || data.name || target?.name || extractedName || 'Student';
+  const collegeName = data.college_name || data.college || data.target_college || data.preferred_university || target?.collegeName || 'MIT WPU';
+  const course = data.course || data.program || target?.course || target?.program || '—';
+
+  // Resolve outcome using the exact product status rules
+  const finalStatus = resolveFinalCallStatus({
+    callOutcome: callStatus,
+    call_status: callStatus,
+    leadStatus: data.lead_status || data.leadStatus || rawFields.lead_status || '',
+    interestLevel: data.interest_level || data.interestLevel || rawFields.interest_level || '',
+    callbackRequired: data.callback || rawFields.callback || '',
+    summary,
+    notes: data.notes || '',
+    call_conversation: conversation,
+    call_answered: data.call_answered || rawFields.call_answered || '',
+    sentiment,
+    rawFields
+  });
+
+  const record = {
+    id: callId,
+    studentName,
+    contactNumber: rawPhone ? (rawPhone.startsWith('+') ? rawPhone : `+91${cleanPhone}`) : `+91${cleanPhone}`,
+    email: data.email || target?.email || '—',
+    program: target?.program || course,
+    course,
+    preferredState: data.state || target?.state || '—',
+    preferredCity: data.city || target?.district || '—',
+    extraFields: target?.extraFields || {},
+    leadStatus: finalStatus,
+    interestLevel: finalStatus === CALL_OUTCOME_STATUS.INTERESTED ? 'Interested' : 'Not Interested',
+    final_status: finalStatus,
+    finalStatus: finalStatus,
+    counselorRequired: (rawFields.counsellor_follow_up === 'Yes' || rawFields.counselor_follow_up === 'Yes' || rawFields.transfer_to_counsellor === 'Yes') ? 'Yes' : 'No',
+    callbackRequired: (rawFields.callback === 'Yes' || data.callback === 'Yes') ? 'Yes' : 'No',
+    callDate: data.call_date || data.callDate || data.timestamp || new Date().toISOString().replace('T', ' ').slice(0, 19),
+    callDuration: duration,
+    duration,
+    callOutcome: callStatus === 'completed' ? 'Completed' : (callStatus === 'no-answer' ? 'No Answer' : callStatus),
+    questionsAsked: '—',
+    universitiesDiscussed: collegeName,
+    summary,
+    notes: summary || '—',
+    entranceExam: rawFields.entrance_exam || '—',
+    educationStatus: rawFields.graduation_status || '—',
+    recordingUrl,
+    transferStatus: rawFields.call_transfered_status || rawFields.transfer_to_counsellor || 'No',
+    preferredUniversity: collegeName,
+    sentiment,
+    botName,
+    call_conversation: conversation,
+    rawFields: {
+      ...rawFields,
+      student_name: studentName,
+      lead_status: finalStatus,
+      to_number: rawPhone || `+91${cleanPhone}`,
+      recording_url: recordingUrl,
+      summary,
+      full_conversation: conversation
+    }
+  };
+
+  // 1. Upsert into Google Sheets cache
+  let cached = await loadCache();
+  if (!Array.isArray(cached)) cached = [];
+  const existingIdx = cached.findIndex(r => String(r.id) === String(callId) || (cleanPhone && String(r.contactNumber || '').replace(/\D/g, '').slice(-10) === cleanPhone));
+  if (existingIdx !== -1) {
+    cached[existingIdx] = { ...cached[existingIdx], ...record };
+  } else {
+    cached.unshift(record);
+  }
+  await saveCache(cached);
+  lastSheetsDataJson = JSON.stringify(cached);
+
+  // 2. Broadcast via WebSocket immediately
+  broadcast({ type: 'sheets_update', data: cached });
+  broadcast({ type: 'webhook_call_received', data: record });
+
+  // 3. Add to system log
+  addLog('success', `⚡ [Webhook Push] Call #${callId} for ${studentName} (${cleanPhone || 'Unknown'}): ${finalStatus}`);
+
+  return { record, totalRecords: cached.length };
+}
+
+app.post(['/api/webhook/call-completed', '/api/webhook/omni', '/api/webhook/sheets'], async (req, res) => {
+  try {
+    const result = await handlePostCallWebhook(req.body, req.path.includes('sheets') ? 'sheets' : 'omni');
+    res.json({
+      success: true,
+      message: 'Post-call webhook processed and broadcast successfully',
+      callId: result.record.id,
+      finalStatus: result.record.finalStatus,
+      totalRecords: result.totalRecords
+    });
+  } catch (err) {
+    console.error('Webhook processing error:', err);
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
 // Get call analytics from Google Sheets (Primary Source of Truth)
 app.get('/api/call-analytics', async (req, res) => {
   const force = req.query.force === 'true';
+  const spreadsheetId = process.env.GOOGLE_SPREADSHEET_ID;
+
+  if (!spreadsheetId) {
+    const cached = await loadCache();
+    return res.json({
+      success: true,
+      source: cached.length > 0 ? 'cache' : 'unconfigured',
+      message: 'Google Sheets integration is unconfigured (missing GOOGLE_SPREADSHEET_ID).',
+      data: cached
+    });
+  }
+
   try {
     let records = [];
     if (force) {
@@ -3429,16 +3752,7 @@ app.get('/api/call-analytics', async (req, res) => {
         });
         records = normalizedList;
       }
-      const saved = await saveCache(records);
-      if (saved === false) {
-        const cached = await loadCache();
-        console.warn(`Sheets cache guard: kept existing cache (${cached.length} records). Fresh fetch had ${records.length} rows.`);
-        return res.json({
-          success: true,
-          source: 'cache_kept',
-          data: cached.length > 0 ? cached : records
-        });
-      }
+      await saveCache(records);
       lastSheetsDataJson = JSON.stringify(records);
     } else {
       records = await loadCache();
@@ -3522,16 +3836,21 @@ async function recoverServerState() {
       addLog('warning', `[RECOVERY] Scheduled time for "${camp.name}" passed while server was offline. Marked as paused.`);
     }
 
-    // Find the next upcoming scheduled campaign in the future
-    const upcoming = scheduled
+    // Find all upcoming scheduled campaigns in the future and register their timers (BUG-05)
+    const upcomingList = scheduled
       .filter(c => new Date(c.scheduledStartTime).getTime() > now)
-      .sort((a, b) => new Date(a.scheduledStartTime).getTime() - new Date(b.scheduledStartTime).getTime())[0];
+      .sort((a, b) => new Date(a.scheduledStartTime).getTime() - new Date(b.scheduledStartTime).getTime());
 
-    if (upcoming && !campaignScheduleTimer) {
+    for (const upcoming of upcomingList) {
       const targetTime = new Date(upcoming.scheduledStartTime).getTime();
-      const msUntilStart = targetTime - now;
+      scheduleCampaignExecution(upcoming.id, targetTime, upcoming.name);
+      const sDate = new Date(targetTime).toLocaleString('en-IN');
+      addLog('info', `[RECOVERY] Re-scheduled campaign "${upcoming.name}" to auto-start on ${sDate}.`);
+    }
 
-      // Re-hydrate queue and in-memory campaign state
+    if (upcomingList.length > 0) {
+      const upcoming = upcomingList[0];
+      // Re-hydrate queue and in-memory campaign state with earliest scheduled campaign
       const queuedContacts = Array.isArray(upcoming.contacts)
         ? upcoming.contacts.map(ct => ({
           ...ct,
@@ -3554,6 +3873,7 @@ async function recoverServerState() {
         completedCount: upcoming.completedCount || 0,
         answeredCount: upcoming.answeredCount || 0,
         unansweredCount: upcoming.unansweredCount || 0,
+        dispatchErrorCount: upcoming.dispatchErrorCount || 0,
         delayMs: (Number(upcoming.delaySeconds) || 2) * 1000,
         agentId: upcoming.agentId || getAgentId(),
         universityId: upcoming.universityId || '',
@@ -3562,12 +3882,6 @@ async function recoverServerState() {
         course: upcoming.course || ''
       };
 
-      campaignScheduleTimer = setTimeout(() => {
-        startScheduledCampaign();
-      }, msUntilStart);
-
-      const sDate = new Date(targetTime).toLocaleString('en-IN');
-      addLog('info', `[RECOVERY] Re-scheduled campaign "${upcoming.name}" to auto-start on ${sDate} with ${queuedContacts.length} contacts.`);
       broadcastQueueUpdate();
     }
 
@@ -3579,6 +3893,15 @@ async function recoverServerState() {
     console.error('Error during server restart recovery:', err);
   }
 }
+
+// Global Error Handler Middleware (SEC-06: Suppress stack traces / internal path disclosure)
+app.use((err, req, res, next) => {
+  console.error('[SERVER ERROR]', err.message);
+  res.status(err.status || 500).json({
+    success: false,
+    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message
+  });
+});
 
 // Start Server
 server.listen(PORT, async () => {

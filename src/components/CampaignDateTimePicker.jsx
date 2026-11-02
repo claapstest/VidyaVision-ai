@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Sparkles } from 'lucide-react';
+import { Calendar, Clock } from 'lucide-react';
 
 /**
  * Safely parse a datetime string (ISO or local format) into constituent parts
@@ -71,7 +71,7 @@ export default function CampaignDateTimePicker({
       const defaultIso = buildIsoString(parts.dateStr, parts.hours24, parts.minutes, parts.seconds);
       onChange(defaultIso);
     }
-  }, [value]);
+  }, [value, onChange, parts.dateStr, parts.hours24, parts.minutes, parts.seconds]);
 
   // Get today's date formatted as YYYY-MM-DD for the date input minimum
   const now = new Date();
@@ -133,7 +133,7 @@ export default function CampaignDateTimePicker({
       month: 'short',
       year: 'numeric'
     }) + `, ${parts.hours12}:${parts.minutes}:${parts.seconds} ${parts.ampm} (${String(parts.hours24).padStart(2, '0')}:${parts.minutes} hrs)`;
-  } catch (e) {
+  } catch {
     formattedDisplay = `${parts.dateStr} ${parts.hours12}:${parts.minutes}:${parts.seconds} ${parts.ampm}`;
   }
 

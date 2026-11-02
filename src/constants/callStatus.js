@@ -201,16 +201,21 @@ export function resolveCallFinalStatus(item) {
   const userText = userParts.join(' ').toLowerCase();
   const interestText = userText || fullText;
 
-  // 1b. Answered but the caller said NOTHING (hung up mid-greeting) = Not Interested
-  const lowerCallStatusPre = String(item.call_status || item.status || '').toLowerCase().trim();
-  if (!userText && (lowerCallStatusPre === 'completed' || fullText.length > 0) && !directStatus) {
-    return CALL_OUTCOME_STATUS.NOT_INTERESTED;
-  }
+  const rf = item.rawFields || item.extracted_variables || {};
+  const isFlagYes = (v) => {
+    if (v === true) return true;
+    if (!v) return false;
+    const s = String(v).trim().toLowerCase();
+    return s === 'yes' || s === 'true' || s === '1' || s === 'required';
+  };
+  const callAnswered = String(item.call_answered || rf.call_answered || '').trim().toLowerCase();
 
-  // 2. Calls Not Answered
+  // 1. Calls Not Answered (Must precede any fallback)
   const lowerOutcome = outcome.toLowerCase();
   const lowerCallStatus = String(item.call_status || item.status || '').toLowerCase().trim();
   if (
+    callAnswered === 'no' || callAnswered === 'false' ||
+    leadStatus.includes('NOT ANSWERED') || leadStatus.includes('NO ANSWER') || leadStatus.includes('UNANSWERED') ||
     UNANSWERED_STATUSES.has(lowerCallStatus) ||
     UNANSWERED_STATUSES.has(lowerOutcome) ||
     outcome.includes('NO ANSWER') || outcome.includes('NO-ANSWER') || outcome.includes('MISSED') ||
@@ -222,6 +227,17 @@ export function resolveCallFinalStatus(item) {
   ) {
     return CALL_OUTCOME_STATUS.NOT_ANSWERED;
   }
+
+  // 2. Curated Sheets Verdict Flags
+  if (isFlagYes(rf.wrong_invalid || rf['wrong invalid'] || item.wrong_invalid)) return CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID;
+  if (isFlagYes(rf.already_joined || rf['already joined'] || item.already_joined)) return CALL_OUTCOME_STATUS.ALREADY_JOINED;
+  if (isFlagYes(rf.already_applied || rf['already applied'] || item.already_applied)) return CALL_OUTCOME_STATUS.ALREADY_APPLIED;
+  if (isFlagYes(rf.application_sent || rf['application sent'] || item.application_sent)) return CALL_OUTCOME_STATUS.APPLICATION_SENT;
+  if (isFlagYes(rf.callback || item.callback)) return CALL_OUTCOME_STATUS.CALLBACK;
+  if (isFlagYes(rf.not_interested || rf['not interested'] || item.not_interested)) return CALL_OUTCOME_STATUS.NOT_INTERESTED;
+  if (isFlagYes(rf.student_interest || rf['student interest'] || rf.interested || item.student_interest || item.interested)) return CALL_OUTCOME_STATUS.INTERESTED;
+  if (leadStatus.includes('COUNSELLOR') || leadStatus.includes('COUNSELOR') || isFlagYes(rf.counsellor_follow_up || rf.counselor_follow_up || rf.transfer_to_counsellor || item.counsellor_follow_up || item.transfer_to_counsellor)) return CALL_OUTCOME_STATUS.INTERESTED;
+
 
   // 3. Wrong Number / Invalid
   if (

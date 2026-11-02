@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { CALL_OUTCOME_STATUS, STATUS_DISPLAY_CONFIG } from '../constants/callStatus';
-import { PieChart as PieIcon, CheckCircle2 } from 'lucide-react';
+import { PieChart as PieIcon } from 'lucide-react';
 
 export default function CallOutcomePieChart({
   statusCounts = {},

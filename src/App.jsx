@@ -43,7 +43,7 @@ import {
   RotateCcw,
   Sliders
 } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import { readSpreadsheetFile, downloadExcelWorkbook, downloadCsvFile } from './utils/excelHelper';
 import {
   CALL_OUTCOME_STATUS,
   STATUS_DISPLAY_CONFIG,
@@ -57,7 +57,7 @@ import TablePagination from './components/TablePagination';
 import CampaignDateTimePicker, { CampaignTimePicker } from './components/CampaignDateTimePicker';
 
 
-export const isUgCourse = (courseName) => {
+const isUgCourse = (courseName) => {
   if (!courseName) return false;
   const c = String(courseName).toLowerCase().trim();
   if (c.includes('b.tech') || c.includes('btech') || c.includes('b.e') || c.includes('be ') || c.startsWith('be-') || c.includes('engineering')) return true;
@@ -606,7 +606,7 @@ export default function App() {
       setSelectedUniversity(universities[0].id);
       setSelectedCourse('');
     }
-  }, [universities]);
+  }, [universities, selectedUniversity]);
 
   // Dashboard multi-select scope helpers (after universities is defined)
   const selectedDashboardCamp = dashboardCampaignFilter !== 'ALL' ? campaigns.find(c => c.id === dashboardCampaignFilter) : null;
@@ -818,7 +818,12 @@ export default function App() {
         try {
           const msg = JSON.parse(event.data);
           if (msg.type === 'logs') {
-            setLogs(msg.data);
+            setLogs(Array.isArray(msg.data) ? msg.data : []);
+          } else if (msg.type === 'log' && msg.data) {
+            setLogs(prev => {
+              const updated = [...prev, msg.data];
+              return updated.length > 150 ? updated.slice(updated.length - 150) : updated;
+            });
           } else if (msg.type === 'calls') {
             setCalls(msg.data);
           } else if (msg.type === 'sheets_update') {
@@ -916,20 +921,17 @@ export default function App() {
     }
   };
 
-  // Auto-sync Google Sheets when Dashboard active or on 45s interval
+  // Auto-sync Google Sheets: loads from fast cache, listens to real-time WebSocket updates
   useEffect(() => {
-    if (activeTab === 'dashboard') {
-      fetchCallAnalytics(true).catch(err => console.error('Auto-sync error:', err));
-    } else {
-      fetchCallAnalytics().catch(err => console.error('Silent sync error:', err));
-    }
+    fetchCallAnalytics(false).catch(err => console.error('Initial analytics fetch error:', err));
 
+    // Periodic silent refresh from server cache (does not force-scrape Google)
     const interval = setInterval(() => {
-      fetchCallAnalytics(activeTab === 'dashboard').catch(err => console.error('Interval sync error:', err));
-    }, 45000);
+      fetchCallAnalytics(false).catch(err => console.error('Silent cache sync error:', err));
+    }, 60000);
 
     return () => clearInterval(interval);
-  }, [activeTab]);
+  }, []);
 
   // Auto-scroll logs feed
   useEffect(() => {
@@ -1026,25 +1028,19 @@ export default function App() {
   };
 
   // Handle Excel / CSV File Upload
-  const handleFileUpload = (e) => {
+  const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const bstr = evt.target.result;
-        const workbook = XLSX.read(bstr, { type: 'binary' });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+    try {
+      const jsonData = await readSpreadsheetFile(file);
 
-        if (jsonData.length < 1) {
-          addToast('Selected Excel/CSV file is empty.', 'error');
-          return;
-        }
+      if (jsonData.length < 1) {
+        addToast('Selected Excel/CSV file is empty.', 'error');
+        return;
+      }
 
-        const rawHeaders = jsonData[0].map(h => String(h || '').trim());
+      const rawHeaders = jsonData[0].map(h => String(h || '').trim());
         const headers = rawHeaders.map(h => h.toLowerCase());
 
         let phoneIdx = headers.findIndex(h => h.includes('phone') || h.includes('mobile') || h.includes('number') || h.includes('contact'));
@@ -1168,33 +1164,25 @@ export default function App() {
       } catch (err) {
         console.error(err);
         addToast('Failed to parse Excel file format.', 'error');
+      } finally {
+        e.target.value = null;
       }
     };
 
-    reader.readAsBinaryString(file);
-    e.target.value = null;
-  };
-
   // Upload and APPEND more numbers from Excel / CSV to current tempContacts
-  const handleAddMoreFileUpload = (e) => {
+  const handleAddMoreFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const bstr = evt.target.result;
-        const workbook = XLSX.read(bstr, { type: 'binary' });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+    try {
+      const jsonData = await readSpreadsheetFile(file);
 
-        if (jsonData.length < 1) {
-          addToast('Selected Excel/CSV file is empty.', 'error');
-          return;
-        }
+      if (jsonData.length < 1) {
+        addToast('Selected Excel/CSV file is empty.', 'error');
+        return;
+      }
 
-        const rawHeaders = jsonData[0].map(h => String(h || '').trim());
+      const rawHeaders = jsonData[0].map(h => String(h || '').trim());
         const headers = rawHeaders.map(h => h.toLowerCase());
 
         let phoneIdx = headers.findIndex(h => h.includes('phone') || h.includes('mobile') || h.includes('number') || h.includes('contact'));
@@ -1299,11 +1287,10 @@ export default function App() {
       } catch (err) {
         console.error(err);
         addToast('Error reading Excel file.', 'error');
+      } finally {
+        e.target.value = null;
       }
     };
-    reader.readAsBinaryString(file);
-    e.target.value = null;
-  };
 
   // Remove Uploaded Excel File
   const handleRemoveUploadedFile = () => {
@@ -2575,94 +2562,93 @@ export default function App() {
   };
 
   // Export Filtered Records to Excel (respects active university scope and dashboard filters)
-  const handleExportFilteredCsv = () => {
-    const workbook = XLSX.utils.book_new();
-    const activeScopeName = uniScopeLabel;
+  const handleExportFilteredCsv = async () => {
+    try {
+      const activeScopeName = uniScopeLabel;
+      const scopedCalls = dateFilteredCalls;
+      const activeData = finalDashboardList.map((c, i) => formatCallForExcel(c, i));
 
-    // Scoped calls based on university and date filter
-    const scopedCalls = dateFilteredCalls;
+      const sheets = [
+        {
+          title: "Call Analytics Report",
+          rows: activeData
+        }
+      ];
 
-    // 1. Main Call Analytics Report Sheet (populated with exact required columns and dashboard-recovered names)
-    const activeData = finalDashboardList.map((c, i) => formatCallForExcel(c, i));
-    const wsActive = XLSX.utils.json_to_sheet(activeData.length > 0 ? activeData : [{ 'Status': 'No call records match the active filters.' }]);
-    if (activeData.length > 0) wsActive['!cols'] = calculateColWidths(activeData);
-    XLSX.utils.book_append_sheet(workbook, wsActive, "Call Analytics Report");
+      const getUniSummaryRow = (name, list) => {
+        const tot = list.length;
+        const ans = list.filter(isAnswered).length;
+        const int = list.filter(isInterested).length;
+        const appSent = list.filter(isApplicationSent).length;
+        const cb = list.filter(isCallback).length;
+        const aa = list.filter(isAlreadyApplied).length;
+        const aj = list.filter(isAlreadyJoined).length;
+        const ni = list.filter(isNotInterested).length;
+        const wn = list.filter(isWrongNumber).length;
+        const una = list.filter(isUnanswered).length;
+        const cf = list.filter(isCounselorFollowupRequired).length;
+        const conv = tot > 0 ? `${Math.round((int / tot) * 100)}%` : '0%';
 
-    // 2. Executive Metrics Summary Sheet
-    const getUniSummaryRow = (name, list) => {
-      const tot = list.length;
-      const ans = list.filter(isAnswered).length;
-      const int = list.filter(isInterested).length;
-      const appSent = list.filter(isApplicationSent).length;
-      const cb = list.filter(isCallback).length;
-      const aa = list.filter(isAlreadyApplied).length;
-      const aj = list.filter(isAlreadyJoined).length;
-      const ni = list.filter(isNotInterested).length;
-      const wn = list.filter(isWrongNumber).length;
-      const una = list.filter(isUnanswered).length;
-      const cf = list.filter(isCounselorFollowupRequired).length;
-      const conv = tot > 0 ? `${Math.round((int / tot) * 100)}%` : '0%';
-
-      return {
-        'University / Scope': name,
-        'Total Dispatched': tot,
-        'Calls Answered': ans,
-        'Calls Not Answered': una,
-        'Interested': int,
-        'Application Sent': appSent,
-        'Callback': cb,
-        'Already Applied': aa,
-        'Already Joined': aj,
-        'Not Interested': ni,
-        'Wrong / Invalid': wn,
-        'Counsellor Follow-up': cf,
-        'Lead Conversion Rate': conv
+        return {
+          'University / Scope': name,
+          'Total Dispatched': tot,
+          'Calls Answered': ans,
+          'Calls Not Answered': una,
+          'Interested': int,
+          'Application Sent': appSent,
+          'Callback': cb,
+          'Already Applied': aa,
+          'Already Joined': aj,
+          'Not Interested': ni,
+          'Wrong / Invalid': wn,
+          'Counsellor Follow-up': cf,
+          'Lead Conversion Rate': conv
+        };
       };
-    };
 
-    const summaryRows = [
-      getUniSummaryRow(`Active Scope (${activeScopeName})`, scopedCalls)
-    ];
+      const summaryRows = [
+        getUniSummaryRow(`Active Scope (${activeScopeName})`, scopedCalls)
+      ];
 
-    if (isAllUniScope) {
-      universities.forEach(u => {
-        summaryRows.push(getUniSummaryRow(u.name, scopedCalls.filter(c => getCallUniversityId(c) === u.id)));
-      });
-    } else {
-      dashboardUniversityFilter.forEach(id => {
-        const u = universities.find(x => x.id === id);
-        if (u) summaryRows.push(getUniSummaryRow(u.name, scopedCalls.filter(c => getCallUniversityId(c) === u.id)));
-      });
-    }
-
-    const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
-    wsSummary['!cols'] = calculateColWidths(summaryRows);
-    XLSX.utils.book_append_sheet(workbook, wsSummary, "Outcome Summary");
-
-    // Helper to safely append an outcome sheet with dynamic widths
-    const appendOutcomeSheet = (sheetTitle, callsList, emptyMessage) => {
-      const data = callsList.map((c, i) => formatCallForExcel(c, i));
-      const ws = XLSX.utils.json_to_sheet(data.length > 0 ? data : [{ 'Status': emptyMessage }]);
-      if (data.length > 0) {
-        ws['!cols'] = calculateColWidths(data);
+      if (isAllUniScope) {
+        universities.forEach(u => {
+          summaryRows.push(getUniSummaryRow(u.name, scopedCalls.filter(c => getCallUniversityId(c) === u.id)));
+        });
+      } else {
+        dashboardUniversityFilter.forEach(id => {
+          const u = universities.find(x => x.id === id);
+          if (u) summaryRows.push(getUniSummaryRow(u.name, scopedCalls.filter(c => getCallUniversityId(c) === u.id)));
+        });
       }
-      XLSX.utils.book_append_sheet(workbook, ws, sheetTitle);
-    };
 
-    // 3. Final Status Categories Sheets (strictly mutually exclusive)
-    appendOutcomeSheet("Interested", scopedCalls.filter(isInterested), "No interested leads recorded.");
-    appendOutcomeSheet("Application Sent", scopedCalls.filter(isApplicationSent), "No WhatsApp application links sent yet.");
-    appendOutcomeSheet("Callback", scopedCalls.filter(isCallback), "No callback requests recorded.");
-    appendOutcomeSheet("Already Applied", scopedCalls.filter(isAlreadyApplied), "No already-applied records.");
-    appendOutcomeSheet("Already Joined", scopedCalls.filter(isAlreadyJoined), "No already-joined records.");
-    appendOutcomeSheet("Not Interested", scopedCalls.filter(isNotInterested), "No not-interested records.");
-    appendOutcomeSheet("Wrong or Invalid", scopedCalls.filter(isWrongNumber), "No wrong-number records.");
-    appendOutcomeSheet("Calls Not Answered", scopedCalls.filter(isUnanswered), "No unanswered calls recorded.");
+      sheets.push({
+        title: "Outcome Summary",
+        rows: summaryRows
+      });
 
-    // Save workbook
-    const cleanScopeName = activeScopeName.replace(/[^a-zA-Z0-9]/g, '_');
-    XLSX.writeFile(workbook, `${cleanScopeName}_Call_Analytics_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    addToast(`Exported ${activeScopeName} Excel report with dynamically adjusted columns!`, 'success');
+      const addOutcome = (title, list) => {
+        sheets.push({
+          title,
+          rows: list.map((c, i) => formatCallForExcel(c, i))
+        });
+      };
+
+      addOutcome("Interested", scopedCalls.filter(isInterested));
+      addOutcome("Application Sent", scopedCalls.filter(isApplicationSent));
+      addOutcome("Callback", scopedCalls.filter(isCallback));
+      addOutcome("Already Applied", scopedCalls.filter(isAlreadyApplied));
+      addOutcome("Already Joined", scopedCalls.filter(isAlreadyJoined));
+      addOutcome("Not Interested", scopedCalls.filter(isNotInterested));
+      addOutcome("Wrong or Invalid", scopedCalls.filter(isWrongNumber));
+      addOutcome("Calls Not Answered", scopedCalls.filter(isUnanswered));
+
+      const cleanScopeName = activeScopeName.replace(/[^a-zA-Z0-9]/g, '_');
+      await downloadExcelWorkbook(sheets, `${cleanScopeName}_Call_Analytics_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      addToast(`Exported ${activeScopeName} Excel report with dynamically adjusted columns!`, 'success');
+    } catch (err) {
+      console.error('Export error:', err);
+      addToast('Failed to export Excel report.', 'error');
+    }
   };
 
   // Open Detailed Call View
@@ -2729,7 +2715,7 @@ export default function App() {
         || cleanCollege(c.preferredUniversity) || '';
 
       const finalStatus = c.final_status || c.finalStatus || c.interestStatus
-        || (isCompleted ? CALL_OUTCOME_STATUS.NOT_INTERESTED : CALL_OUTCOME_STATUS.NOT_ANSWERED);
+        || resolveCallFinalStatus(c);
 
       const cbReq = c.extracted_variables?.callback_requested;
       const callbackRequired = (cbReq && !/not provided|no|—/i.test(String(cbReq))) ? 'Yes' : 'No';
@@ -2834,7 +2820,7 @@ export default function App() {
   // All comparisons are punctuation-insensitive so sheet values like "MIT WPU"
   // still match a saved college named "MIT - WPU".
   const normKey = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const getCallUniversityId = (c) => {
+  const getCallUniversityId = React.useCallback((c) => {
     if (!c) return 'vidyavision';
     const bot = String(c.botName || c.bot_name || (c.rawFields && c.rawFields.bot_name) || '').toLowerCase();
     const prefUni = String(c.preferredUniversity || c.preferred_university || (c.rawFields && c.rawFields.preferred_university) || '').toLowerCase();
@@ -2865,7 +2851,7 @@ export default function App() {
       }
     }
     return 'vidyavision';
-  };
+  }, [universities]);
 
   // Format campaign contacts with all rich call intelligence, matching the exact columns of the Excel Analytics Report
   const formatCampaignContactsForExport = (camp) => {
@@ -3118,10 +3104,9 @@ export default function App() {
   };
 
   // Export full campaign contacts and results to formatted Excel workbook (.xlsx) with all rich analytics columns
-  const handleDownloadCampaignExcel = (camp, onlyCompleted = false) => {
+  const handleDownloadCampaignExcel = async (camp, onlyCompleted = false) => {
     if (!camp) return;
     try {
-      const workbook = XLSX.utils.book_new();
       let contacts = camp.contacts || [];
       if (onlyCompleted) {
         contacts = contacts.filter(c => c.status === 'completed' || (c.callOutcome && String(c.callOutcome).toLowerCase() === 'completed'));
@@ -3139,9 +3124,12 @@ export default function App() {
 
       // 1. Leads Table Sheet (with full comprehensive columns identical to Excel Report)
       const rows = formatCampaignContactsForExport(campaignForExport);
-      const wsContacts = XLSX.utils.json_to_sheet(rows.length > 0 ? rows : [{ 'Status': 'No contacts in campaign' }]);
-      if (rows.length > 0) wsContacts['!cols'] = calculateColWidths(rows);
-      XLSX.utils.book_append_sheet(workbook, wsContacts, onlyCompleted ? "Completed Leads" : "Campaign Leads");
+      const sheets = [
+        {
+          title: onlyCompleted ? "Completed Leads" : "Campaign Leads",
+          rows
+        }
+      ];
 
       // 2. Overview Sheet - strictly mutually exclusive matching
       const isLeadInterested = (statusStr) => {
@@ -3190,17 +3178,17 @@ export default function App() {
         { 'Metric': 'Wrong / Invalid Number', 'Value': wrongNumberCount },
         ...(onlyCompleted ? [] : [{ 'Metric': 'Queued / Pending', 'Value': queuedCount }])
       ];
-      const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
-      wsSummary['!cols'] = [{ wch: 30 }, { wch: 42 }];
-      XLSX.utils.book_append_sheet(workbook, wsSummary, "Overview");
 
-      // 3. Category sheets for fast counselor follow-up (strictly mutually exclusive)
+      sheets.push({
+        title: "Overview",
+        rows: summaryRows
+      });
+
+      // 3. Category sheets for fast counselor follow-up
       const appendCategorySheet = (sheetTitle, filterFn) => {
         const catRows = rows.filter(filterFn);
         if (catRows.length > 0) {
-          const ws = XLSX.utils.json_to_sheet(catRows);
-          ws['!cols'] = calculateColWidths(catRows);
-          XLSX.utils.book_append_sheet(workbook, ws, sheetTitle);
+          sheets.push({ title: sheetTitle, rows: catRows });
         }
       };
 
@@ -3215,7 +3203,7 @@ export default function App() {
 
       const safeName = (camp.name || 'campaign').replace(/[^a-zA-Z0-9_-]/g, '_');
       const filenameSuffix = onlyCompleted ? '_Completed_Calls' : '_Report';
-      XLSX.writeFile(workbook, `${safeName}${filenameSuffix}.xlsx`);
+      await downloadExcelWorkbook(sheets, `${safeName}${filenameSuffix}.xlsx`);
       addToast(`Downloaded Excel report (${rows.length} contacts) for "${camp.name}".`, 'success');
     } catch (err) {
       console.error('Failed to export campaign Excel:', err);
@@ -3245,17 +3233,7 @@ export default function App() {
     try {
       const rows = formatCampaignContactsForExport(camp);
       if (rows && rows.length > 0) {
-        const ws = XLSX.utils.json_to_sheet(rows);
-        const csvContent = XLSX.utils.sheet_to_csv(ws);
-        const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `${safeName}${suffix}.csv`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
+        downloadCsvFile(rows, `${safeName}${suffix}.csv`);
         addToast(`Downloaded CSV report for "${camp.name || campaignName || 'campaign'}".`, 'success');
         return;
       }
@@ -3352,13 +3330,13 @@ export default function App() {
     });
 
     return stats;
-  }, [mergedCalls, universities]);
+  }, [mergedCalls, universities, getCallUniversityId]);
 
   // Filter mergedCalls by selected universities (multi-select scope)
   const universityFilteredCalls = React.useMemo(() => {
     if (dashboardUniversityFilter.includes('ALL') || dashboardUniversityFilter.length === 0) return mergedCalls;
     return mergedCalls.filter(c => dashboardUniversityFilter.includes(getCallUniversityId(c)));
-  }, [mergedCalls, dashboardUniversityFilter]);
+  }, [mergedCalls, dashboardUniversityFilter, getCallUniversityId]);
 
   // Filter by selected campaign (if a specific campaign is selected)
   const campaignFilteredCalls = React.useMemo(() => {
@@ -6953,7 +6931,7 @@ export default function App() {
                                 }
 
                                 // Counsellor Follow-up
-                                if (isFlagYes(rf.counsellor_follow_up || rf.counselor_follow_up || rf.counselor_followup) || isCounselorReq) {
+                                if (isFlagYes(rf.counsellor_follow_up || rf.counselor_follow_up || rf.counselor_followup || rf.transfer_to_counsellor) || isCounselorReq) {
                                   signals.push({
                                     id: 'counsellor',
                                     icon: '☎️',

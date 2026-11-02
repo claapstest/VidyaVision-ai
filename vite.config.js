@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: true,
-    allowedHosts: true,
+    allowedHosts: ['.localhost', 'localhost', '127.0.0.1'],
     port: 5174,
     proxy: {
       '/api': {
@@ -27,6 +27,24 @@ export default defineConfig({
               }
             });
           });
+        }
+      }
+    }
+  },
+  build: {
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/exceljs')) {
+            return 'vendor-exceljs';
+          }
+          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
+            return 'vendor-react';
+          }
+          if (id.includes('node_modules/lucide-react')) {
+            return 'vendor-icons';
+          }
         }
       }
     }
