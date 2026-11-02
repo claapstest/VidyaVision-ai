@@ -34,6 +34,17 @@
   --sans: 'Inter', system-ui, -apple-system, sans-serif;
   --heading: 'Outfit', system-ui, -apple-system, sans-serif;
   --mono: 'Fira Code', 'Courier New', Courier, monospace;
+
+  /* Fluid layout scale — keeps spacing and type proportionate from a
+     1280x600 laptop viewport up to 2560px monitors, instead of being
+     pinned to one monitor's pixel size. */
+  --pad-x: clamp(1rem, 2.2vw, 2rem);
+  --pad-y: clamp(1.25rem, 2.4vmin, 2.5rem);
+  --stack: clamp(1rem, 1.6vw, 2rem);
+  --h1: clamp(1.7rem, 0.7rem + 1.25vw, 2.2rem);
+  --h2: clamp(1.15rem, 0.95rem + 0.55vw, 1.35rem);
+  --body: clamp(0.95rem, 0.9rem + 0.2vw, 1.05rem);
+  --log-tray-h: 48px;
   
   font-family: var(--sans);
   color-scheme: light;
@@ -50,6 +61,7 @@ body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
   min-height: 100vh;
+  min-height: 100dvh;
   line-height: 1.5;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
@@ -60,6 +72,7 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  min-height: 100dvh;
   width: 100%;
 }
 
@@ -68,6 +81,7 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  min-height: 100dvh;
   width: 100%;
   background: radial-gradient(circle at top right, rgba(241, 101, 34, 0.06), transparent 600px),
               radial-gradient(circle at bottom left, rgba(27, 59, 111, 0.04), transparent 600px);
@@ -195,20 +209,20 @@ body {
 
 .main-content {
   flex: 1;
-  padding: 2.5rem 2rem;
-  max-width: 1300px;
+  padding: var(--pad-y) var(--pad-x);
+  max-width: min(1300px, 100% - (2 * var(--pad-x)));
   width: 100%;
   margin: 0 auto;
 }
 
 /* Page Headers */
 .page-header {
-  margin-bottom: 2rem;
+  margin-bottom: var(--stack);
 }
 
 .page-header h1 {
   font-family: var(--heading);
-  font-size: 2.2rem;
+  font-size: var(--h1);
   font-weight: 700;
   color: var(--text-primary);
   margin-bottom: 0.5rem;
@@ -217,7 +231,7 @@ body {
 
 .page-header p {
   color: var(--text-secondary);
-  font-size: 1.05rem;
+  font-size: var(--body);
 }
 
 /* Grid & Cards */
@@ -244,7 +258,7 @@ body {
 
 .card-title {
   font-family: var(--heading);
-  font-size: 1.35rem;
+  font-size: var(--h2);
   font-weight: 600;
   margin-bottom: 1.5rem;
   display: flex;
@@ -1383,7 +1397,7 @@ tr.row-unanswered:hover {
 }
 
 .logs-terminal.expanded {
-  height: 320px;
+  height: min(320px, 45dvh);
   border-top-color: var(--accent);
 }
 
@@ -1894,3 +1908,78 @@ tr.row-unanswered:hover {
 }
 
 
+
+/* ==========================================================================
+   Fluid / device-neutral layout layer
+   --------------------------------------------------------------------------
+   Keeps the shell, type scale and vertical rhythm proportionate instead of
+   looking oversized on a 14" laptop running Windows at 150% scaling
+   (~1280x600 CSS px), while still filling out 1440p and 4K monitors.
+   ========================================================================== */
+
+.header {
+  padding: clamp(0.7rem, 1.4vw, 1rem) var(--pad-x);
+}
+
+.page-header h1 {
+  line-height: 1.15;
+  text-wrap: balance;
+}
+
+.page-header p {
+  max-width: 72ch;
+  line-height: 1.55;
+}
+
+/* Space reserved for the fixed bottom log console. Collapsed it is only 48px,
+   so the page no longer wastes ~270px of a short laptop viewport. */
+.dialer-wrapper {
+  padding-bottom: calc(var(--log-tray-h) + var(--stack));
+}
+
+.dialer-wrapper.logs-open {
+  --log-tray-h: min(320px, 45dvh);
+}
+
+/* Narrow desktop: tighten the gutters so 1280 does not feel edge-to-edge */
+@media (max-width: 1360px) {
+  :root {
+    --pad-x: clamp(1rem, 2.6vw, 1.5rem);
+  }
+}
+
+/* Short viewports: 14" laptops at 150% scaling, 1366x768, split screens */
+@media (max-height: 780px) {
+  :root {
+    --pad-y: 1.1rem;
+    --stack: 0.9rem;
+  }
+
+  .page-header h1 {
+    font-size: clamp(1.45rem, 1rem + 1vw, 1.85rem);
+  }
+
+  .page-header p {
+    font-size: 0.95rem;
+  }
+
+  .card {
+    padding: 1.5rem;
+  }
+}
+
+/* Very short viewports: keep the primary action above the fold */
+@media (max-height: 620px) {
+  :root {
+    --pad-y: 0.85rem;
+    --stack: 0.75rem;
+  }
+
+  .page-header h1 {
+    font-size: clamp(1.35rem, 0.9rem + 1vw, 1.65rem);
+  }
+
+  .header {
+    padding: 0.55rem var(--pad-x);
+  }
+}

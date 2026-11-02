@@ -3585,7 +3585,7 @@ export default function App() {
         {/* TAB 1: DISPATCH CONSOLE (Replaces Registration) */}
         {/* ========================================== */}
         {activeTab === 'dispatch' && (
-          <div className="dialer-wrapper" style={{ display: 'flex', flexDirection: 'column', gap: '2rem', minHeight: 'calc(100vh - 120px)', position: 'relative', paddingBottom: '320px' }}>
+          <div className={`dialer-wrapper${showLogs ? ' logs-open' : ''}`} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--stack)', minHeight: 'calc(100dvh - 120px)', position: 'relative' }}>
             <div className="page-header">
               <h1>Sequential Voice Call Dispatcher</h1>
               <p>Upload a list of student contacts, select their target university bot, and set sequence call delays. The bots will call each student sequentially.</p>
