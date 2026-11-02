@@ -92,8 +92,27 @@ function sanitizeUser(user) {
   return safe;
 }
 
-// User File Storage Helpers
+// User Storage Helpers (PostgreSQL primary with file fallback)
 async function loadUsers() {
+  try {
+    const res = await query('SELECT * FROM users ORDER BY created_at ASC');
+    if (res && res.rowCount > 0) {
+      return res.rows.map(r => ({
+        id: r.id,
+        email: r.email,
+        name: r.name,
+        role: r.role,
+        passwordHash: r.password_hash,
+        permissions: r.permissions || {},
+        status: r.status,
+        createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+        updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : new Date().toISOString()
+      }));
+    }
+  } catch (err) {
+    console.warn('[DB] PostgreSQL loadUsers fallback to file:', err.message);
+  }
+
   try {
     const raw = await fs.readFile(USERS_FILE, 'utf8');
     const parsed = JSON.parse(raw);
@@ -104,6 +123,28 @@ async function loadUsers() {
 }
 
 async function saveUsers(users) {
+  if (!Array.isArray(users)) return;
+  try {
+    for (const u of users) {
+      await query(`
+        INSERT INTO users (id, email, password_hash, name, role, permissions, status, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+        ON CONFLICT (email) DO UPDATE SET
+          name = EXCLUDED.name,
+          role = EXCLUDED.role,
+          password_hash = EXCLUDED.password_hash,
+          permissions = EXCLUDED.permissions,
+          status = EXCLUDED.status,
+          updated_at = NOW();
+      `, [
+        u.id, u.email, u.passwordHash, u.name, u.role || 'counselor',
+        u.permissions || {}, u.status || 'active'
+      ]);
+    }
+  } catch (err) {
+    console.error('[DB] PostgreSQL saveUsers error:', err.message);
+  }
+
   try {
     await fs.mkdir(DATA_DIR, { recursive: true });
     await fs.writeFile(USERS_FILE, JSON.stringify(users, null, 2), 'utf8');
