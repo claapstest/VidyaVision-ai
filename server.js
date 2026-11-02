@@ -7,6 +7,7 @@ import path from 'path';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { google } from 'googleapis';
+import db, { query, isDbConnected } from './db.js';
 
 dotenv.config();
 
@@ -157,6 +158,64 @@ const OMNI_CALLS_CACHE_FILE = path.join(DATA_DIR, 'omni_calls_cache.json');
 
 async function loadCampaigns() {
   try {
+    const campRes = await query('SELECT * FROM campaigns ORDER BY created_at DESC');
+    if (campRes && campRes.rowCount > 0) {
+      const contactsRes = await query('SELECT * FROM campaign_contacts ORDER BY id ASC');
+      const contactsByCamp = new Map();
+      contactsRes.rows.forEach(r => {
+        if (!contactsByCamp.has(r.campaign_id)) contactsByCamp.set(r.campaign_id, []);
+        contactsByCamp.get(r.campaign_id).push({
+          id: r.id,
+          phone: r.phone,
+          formattedPhone: r.formatted_phone,
+          name: r.name,
+          universityId: r.university_id,
+          universityName: r.university_name,
+          course: r.course,
+          program: r.program,
+          email: r.email,
+          state: r.state,
+          district: r.district,
+          status: r.status,
+          callOutcome: r.call_outcome,
+          callDuration: r.call_duration,
+          retryCount: r.retry_count,
+          reason: r.reason,
+          extraFields: r.extra_fields || {},
+          timestamp: r.timestamp ? new Date(r.timestamp).toISOString() : new Date().toISOString()
+        });
+      });
+
+      return campRes.rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        universityId: r.university_id,
+        universityName: r.university_name,
+        collegePlace: r.college_place,
+        course: r.course,
+        agentId: r.agent_id,
+        status: r.status,
+        totalCount: r.total_count,
+        completedCount: r.completed_count,
+        answeredCount: r.answered_count,
+        unansweredCount: r.unanswered_count,
+        dispatchErrorCount: r.dispatch_error_count,
+        delaySeconds: r.delay_seconds,
+        endMode: r.end_mode,
+        maxDurationMinutes: r.max_duration_minutes,
+        scheduledStartTime: r.scheduled_start_time ? new Date(r.scheduled_start_time).toISOString() : null,
+        startedAt: r.started_at ? new Date(r.started_at).toISOString() : null,
+        completedAt: r.completed_at ? new Date(r.completed_at).toISOString() : null,
+        canceledAt: r.canceled_at ? new Date(r.canceled_at).toISOString() : null,
+        stoppedReason: r.stopped_reason,
+        contacts: contactsByCamp.get(r.id) || []
+      }));
+    }
+  } catch (err) {
+    console.warn('[DB] PostgreSQL loadCampaigns fallback to file:', err.message);
+  }
+
+  try {
     const raw = await fs.readFile(CAMPAIGNS_FILE, 'utf8');
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
@@ -166,10 +225,88 @@ async function loadCampaigns() {
 }
 
 async function saveCampaigns(campaigns) {
+  if (!Array.isArray(campaigns)) return;
+  try {
+    for (const c of campaigns) {
+      await query(`
+        INSERT INTO campaigns (
+          id, name, university_id, university_name, college_place, course, agent_id,
+          status, total_count, completed_count, answered_count, unanswered_count, dispatch_error_count,
+          delay_seconds, end_mode, max_duration_minutes, scheduled_start_time, started_at, completed_at,
+          canceled_at, stopped_reason, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          name = EXCLUDED.name,
+          university_id = EXCLUDED.university_id,
+          university_name = EXCLUDED.university_name,
+          college_place = EXCLUDED.college_place,
+          course = EXCLUDED.course,
+          agent_id = EXCLUDED.agent_id,
+          status = EXCLUDED.status,
+          total_count = EXCLUDED.total_count,
+          completed_count = EXCLUDED.completed_count,
+          answered_count = EXCLUDED.answered_count,
+          unanswered_count = EXCLUDED.unanswered_count,
+          dispatch_error_count = EXCLUDED.dispatch_error_count,
+          delay_seconds = EXCLUDED.delay_seconds,
+          end_mode = EXCLUDED.end_mode,
+          max_duration_minutes = EXCLUDED.max_duration_minutes,
+          scheduled_start_time = EXCLUDED.scheduled_start_time,
+          started_at = EXCLUDED.started_at,
+          completed_at = EXCLUDED.completed_at,
+          canceled_at = EXCLUDED.canceled_at,
+          stopped_reason = EXCLUDED.stopped_reason,
+          updated_at = NOW();
+      `, [
+        c.id, c.name, c.universityId || '', c.universityName || '', c.collegePlace || '',
+        c.course || '', c.agentId ? Number(c.agentId) : null, c.status || 'queued',
+        c.totalCount || (c.contacts ? c.contacts.length : 0), c.completedCount || 0,
+        c.answeredCount || 0, c.unansweredCount || 0, c.dispatchErrorCount || 0,
+        c.delaySeconds || 2, c.endMode || 'none', c.maxDurationMinutes || null,
+        c.scheduledStartTime ? new Date(c.scheduledStartTime) : null,
+        c.startedAt ? new Date(c.startedAt) : null,
+        c.completedAt ? new Date(c.completedAt) : null,
+        c.canceledAt ? new Date(c.canceledAt) : null,
+        c.stoppedReason || null
+      ]);
+
+      if (Array.isArray(c.contacts)) {
+        for (const ct of c.contacts) {
+          const contactId = ct.id || `contact-${c.id}-${ct.phone}`;
+          await query(`
+            INSERT INTO campaign_contacts (
+              id, campaign_id, phone, formatted_phone, name, university_id, university_name,
+              course, program, email, state, district, status, call_outcome, call_duration,
+              retry_count, reason, extra_fields, timestamp, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW())
+            ON CONFLICT (id) DO UPDATE SET
+              status = EXCLUDED.status,
+              call_outcome = EXCLUDED.call_outcome,
+              call_duration = EXCLUDED.call_duration,
+              retry_count = EXCLUDED.retry_count,
+              reason = EXCLUDED.reason,
+              extra_fields = EXCLUDED.extra_fields,
+              updated_at = NOW();
+          `, [
+            contactId, c.id, ct.phone || '', ct.formattedPhone || (ct.phone ? `+91${ct.phone}` : ''),
+            ct.name || '', ct.universityId || c.universityId || '', ct.universityName || c.universityName || '',
+            ct.course || c.course || '', ct.program || ct.course || '', ct.email || '',
+            ct.state || '', ct.district || '', ct.status || 'queued',
+            ct.callOutcome || 'Pending', ct.callDuration || ct.duration || '—',
+            ct.retryCount || 0, ct.reason || '', ct.extraFields || {},
+            ct.timestamp ? new Date(ct.timestamp) : new Date()
+          ]);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[DB] PostgreSQL saveCampaigns error:', err.message);
+  }
+
   try {
     await fs.writeFile(CAMPAIGNS_FILE, JSON.stringify(campaigns, null, 2), 'utf8');
   } catch (err) {
-    console.error('Error saving campaigns:', err.message);
+    console.error('Error saving campaigns backup file:', err.message);
   }
 }
 
@@ -383,6 +520,25 @@ function getDefaultColleges() {
 
 async function loadColleges() {
   try {
+    const res = await query('SELECT * FROM colleges ORDER BY name ASC');
+    if (res && res.rowCount > 0) {
+      return res.rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        place: r.place,
+        agentId: r.agent_id,
+        languages: r.languages,
+        courses: r.courses || [],
+        status: r.status,
+        websiteUrl: r.website_url,
+        description: r.description
+      }));
+    }
+  } catch (err) {
+    console.warn('[DB] PostgreSQL loadColleges fallback to file:', err.message);
+  }
+
+  try {
     const raw = await fs.readFile(COLLEGES_FILE, 'utf8');
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -391,6 +547,32 @@ async function loadColleges() {
 }
 
 async function saveColleges(colleges) {
+  if (!Array.isArray(colleges)) return;
+  try {
+    for (const c of colleges) {
+      await query(`
+        INSERT INTO colleges (id, name, place, agent_id, languages, courses, status, website_url, description, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          name = EXCLUDED.name,
+          place = EXCLUDED.place,
+          agent_id = EXCLUDED.agent_id,
+          languages = EXCLUDED.languages,
+          courses = EXCLUDED.courses,
+          status = EXCLUDED.status,
+          website_url = EXCLUDED.website_url,
+          description = EXCLUDED.description,
+          updated_at = NOW();
+      `, [
+        c.id, c.name, c.place || 'India', c.agentId ? Number(c.agentId) : null,
+        c.languages || 'English, Hindi', Array.isArray(c.courses) ? c.courses : [],
+        c.status || 'active', c.websiteUrl || '', c.description || ''
+      ]);
+    }
+  } catch (err) {
+    console.error('[DB] PostgreSQL saveColleges error:', err.message);
+  }
+
   try {
     await fs.writeFile(COLLEGES_FILE, JSON.stringify(colleges, null, 2), 'utf8');
   } catch (err) {
@@ -1018,6 +1200,47 @@ function normalizeRow(row, headers) {
 
 async function loadCache() {
   try {
+    const res = await query('SELECT * FROM call_records ORDER BY created_at DESC');
+    if (res && res.rowCount > 0) {
+      return res.rows.map(r => ({
+        id: r.id,
+        contactNumber: r.contact_number,
+        cleanPhone: r.clean_phone,
+        studentName: r.student_name,
+        callDate: r.call_date,
+        callDuration: r.call_duration,
+        durationSeconds: r.duration_seconds,
+        callStatus: r.call_status,
+        leadStatus: r.lead_status,
+        studentInterest: r.student_interest,
+        sentiment: r.sentiment,
+        counselorFollowup: r.counselor_followup,
+        counselorRequired: r.counselor_followup,
+        callTransferred: r.call_transferred,
+        transferStatus: r.call_transferred,
+        admissionTimeline: r.admission_timeline,
+        entranceExam: r.entrance_exam,
+        graduationStatus: r.graduation_status,
+        preferredCity: r.preferred_city,
+        preferredState: r.preferred_state,
+        preferredUniversity: r.preferred_university,
+        universitiesDiscussed: r.preferred_university,
+        targetCourse: r.target_course,
+        course: r.target_course,
+        recordingUrl: r.recording_url,
+        summary: r.summary,
+        transcript: r.transcript,
+        call_conversation: r.transcript,
+        rawFields: r.raw_fields || {},
+        extractedVariables: r.extracted_variables || {},
+        source: r.source
+      }));
+    }
+  } catch (err) {
+    console.warn('[DB] PostgreSQL loadCache fallback to file:', err.message);
+  }
+
+  try {
     const raw = await fs.readFile(GOOGLE_SHEETS_CACHE_FILE, 'utf8');
     return JSON.parse(raw);
   } catch {
@@ -1026,15 +1249,77 @@ async function loadCache() {
 }
 
 async function saveCache(data) {
+  if (!Array.isArray(data) || data.length === 0) {
+    console.warn('Sheets saveCache: received empty data, skipping save.');
+    return false;
+  }
+
   try {
-    if (!Array.isArray(data) || data.length === 0) {
-      console.warn('Sheets saveCache: received empty data, skipping save.');
-      return false;
+    for (const r of data) {
+      const cleanPhone = String(r.contactNumber || r.cleanPhone || r.rawFields?.to_number || r.to_number || r.phone || '').replace(/\D/g, '').slice(-10);
+      if (!cleanPhone) continue;
+      const callDate = String(r.callDate || r.call_date || r.time_of_call || new Date().toISOString());
+      const recId = String(r.id || `rec-${cleanPhone}-${callDate.replace(/[^a-zA-Z0-9]/g, '')}`);
+
+      await query(`
+        INSERT INTO call_records (
+          id, contact_number, clean_phone, student_name, call_date, call_duration,
+          call_status, lead_status, student_interest, sentiment, counselor_followup,
+          call_transferred, admission_timeline, entrance_exam, graduation_status,
+          preferred_city, preferred_state, preferred_university, target_course,
+          recording_url, summary, transcript, raw_fields, extracted_variables, source, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, NOW()
+        )
+        ON CONFLICT (clean_phone, call_date) DO UPDATE SET
+          student_name = COALESCE(NULLIF(EXCLUDED.student_name, 'Student'), call_records.student_name),
+          student_interest = COALESCE(NULLIF(EXCLUDED.student_interest, ''), call_records.student_interest),
+          lead_status = COALESCE(NULLIF(EXCLUDED.lead_status, ''), call_records.lead_status),
+          call_status = COALESCE(NULLIF(EXCLUDED.call_status, ''), call_records.call_status),
+          call_duration = COALESCE(NULLIF(EXCLUDED.call_duration, '—'), call_records.call_duration),
+          counselor_followup = EXCLUDED.counselor_followup,
+          summary = COALESCE(NULLIF(EXCLUDED.summary, ''), call_records.summary),
+          transcript = COALESCE(NULLIF(EXCLUDED.transcript, ''), call_records.transcript),
+          recording_url = COALESCE(NULLIF(EXCLUDED.recording_url, ''), call_records.recording_url),
+          raw_fields = EXCLUDED.raw_fields,
+          updated_at = NOW();
+      `, [
+        recId,
+        r.contactNumber || `+91${cleanPhone}`,
+        cleanPhone,
+        r.studentName || 'Student',
+        callDate,
+        r.callDuration || '—',
+        r.callStatus || '',
+        r.leadStatus || '',
+        r.studentInterest || '',
+        r.sentiment || 'Neutral',
+        r.counselorFollowup || r.counselorRequired || 'No',
+        r.callTransferred || r.transferStatus || 'No',
+        r.admissionTimeline || '—',
+        r.entranceExam || '—',
+        r.graduationStatus || '—',
+        r.preferredCity || '',
+        r.preferredState || '',
+        r.preferredUniversity || r.universitiesDiscussed || '',
+        r.targetCourse || r.course || '',
+        r.recordingUrl || '',
+        r.summary || '',
+        r.transcript || r.call_conversation || '',
+        r.rawFields || {},
+        r.extractedVariables || {},
+        r.source || 'google_sheets'
+      ]);
     }
+  } catch (err) {
+    console.error('[DB] PostgreSQL saveCache error:', err.message);
+  }
+
+  try {
     await fs.writeFile(GOOGLE_SHEETS_CACHE_FILE, JSON.stringify(data, null, 2), 'utf8');
     return true;
   } catch (err) {
-    console.error('Failed to save cache file:', err);
+    console.error('Failed to save cache backup file:', err);
     return false;
   }
 }
@@ -2346,6 +2631,13 @@ function validateAndFormatMobile(mobile) {
 }
 
 // Initial status logs
+isDbConnected().then(connected => {
+  if (connected) {
+    console.log('[INFO] PostgreSQL Database connected successfully (vidyavision).');
+  } else {
+    console.warn('[WARN] PostgreSQL Database not reachable; using file storage fallback.');
+  }
+}).catch(() => { });
 console.log(`[INFO] OmniDimension Server Ready. Agent ID: ${getAgentId() || 'Not Configured'}`);
 if (!getApiKey()) {
   console.error('[ERROR] OMNIDIM_API_KEY is not defined in .env! Call dispatches will fail.');
@@ -3674,7 +3966,17 @@ async function handlePostCallWebhook(payload, source = 'omni') {
     }
   };
 
-  // 1. Upsert into Google Sheets cache
+  // 0. Record raw audit event in PostgreSQL (Zero data loss)
+  try {
+    await query(
+      'INSERT INTO webhook_events (source, payload, status) VALUES ($1, $2, $3)',
+      [source, JSON.stringify(payload), 'processed']
+    );
+  } catch (err) {
+    console.warn('[DB] Failed to log webhook event:', err.message);
+  }
+
+  // 1. Upsert into Google Sheets cache and PostgreSQL call_records
   let cached = await loadCache();
   if (!Array.isArray(cached)) cached = [];
   const existingIdx = cached.findIndex(r => String(r.id) === String(callId) || (cleanPhone && String(r.contactNumber || '').replace(/\D/g, '').slice(-10) === cleanPhone));
