@@ -2437,6 +2437,86 @@ async function fetchCallsFromOmni(pages = 1) {
   return existingCache.map(c => enrichCallWithInterest(c));
 }
 
+// Synchronize Call Transfer Configuration directly to OmniDimension Voice Agent (PUT /api/v1/agents/:id)
+async function syncAgentTransferConfigToOmni(agentIds, config = {}) {
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    console.warn('[OmniDimension Sync] OMNIDIM_API_KEY is not set. Cannot sync agent transfer config.');
+    return { success: false, error: 'OMNIDIM_API_KEY not configured' };
+  }
+
+  const idsToSync = Array.isArray(agentIds)
+    ? [...new Set(agentIds.map(Number).filter(Boolean))]
+    : [Number(agentIds || getAgentId())].filter(Boolean);
+
+  if (idsToSync.length === 0) idsToSync.push(270604);
+
+  const {
+    transferEnabled = true,
+    counselorPhone = '+919573097810',
+    transferCondition = 'Transfer when the user asks to speak with a counsellor/officer, OR agrees to be transferred (for example: saying yes when asked about fees, scholarships, or senior counsellor assistance).',
+    transferMessage = "I'm transferring your call to our counselor. Please hold while I connect you."
+  } = config;
+
+  // Format phone cleanly for OmniDimension (must be in format +91XXXXXXXXXX)
+  const cleanDigits = String(counselorPhone || '').replace(/\D/g, '');
+  let formattedNumber = String(counselorPhone || '').trim();
+  if (cleanDigits.length === 10) {
+    formattedNumber = `+91${cleanDigits}`;
+  } else if (cleanDigits.startsWith('91') && cleanDigits.length === 12) {
+    formattedNumber = `+${cleanDigits}`;
+  } else if (!formattedNumber.startsWith('+') && cleanDigits.length > 0) {
+    formattedNumber = `+${cleanDigits}`;
+  }
+
+  const transferOptions = transferEnabled ? [
+    {
+      number: formattedNumber,
+      type: 'static',
+      backup_numbers: [],
+      transfer_condition: transferCondition,
+      transfer_message: transferMessage
+    }
+  ] : [];
+
+  const payload = {
+    is_transfer_enabled: Boolean(transferEnabled),
+    transfer_options: transferOptions
+  };
+
+  const results = [];
+  for (const agentId of idsToSync) {
+    try {
+      const res = await fetch(`https://backend.omnidim.io/api/v1/agents/${agentId}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        console.log(`[OmniDimension Sync] Agent #${agentId} transfer config synced: number=${formattedNumber}, enabled=${transferEnabled}`);
+        addLog('success', `Synced OmniDimension Agent #${agentId}: Live Call Transfer set to ${formattedNumber} (${transferEnabled ? 'Enabled' : 'Disabled'})`);
+        results.push({ agentId, success: true, data });
+      } else {
+        console.warn(`[OmniDimension Sync] Failed to sync Agent #${agentId}:`, res.status, data);
+        results.push({ agentId, success: false, status: res.status, error: data.detail || data.error });
+      }
+    } catch (err) {
+      console.error(`[OmniDimension Sync] Network error for Agent #${agentId}:`, err.message);
+      results.push({ agentId, success: false, error: err.message });
+    }
+  }
+
+  return {
+    success: results.some(r => r.success),
+    formattedNumber,
+    results
+  };
+}
+
 // Handle completion of a call in queue and trigger next contact
 function handleQueueContactFinished(contact, isAnswered, statusText, durationStr, errorType = null) {
   if (!contact) return;
@@ -3341,6 +3421,20 @@ app.post('/api/queue/start', checkPermission('canStartStopCampaigns'), async (re
     if (parsedQueue.length === 0) {
       addLog('error', 'Batch call failed: No valid phone numbers found in list.');
       return res.status(400).json({ error: 'No valid mobile numbers found in submission.' });
+    }
+
+    // Synchronize Counselor Call Transfer directly to OmniDimension Voice Agents
+    try {
+      const activeBotAgentId = resolveAgentIdForCourse(course || parsedQueue[0]?.course, agentId);
+      const syncTargets = [activeBotAgentId, 270604, 270740].filter(Boolean);
+      await syncAgentTransferConfigToOmni(syncTargets, {
+        transferEnabled,
+        counselorPhone,
+        transferCondition,
+        transferMessage
+      });
+    } catch (syncErr) {
+      console.warn('[OmniDimension] Warning: Could not pre-sync agent transfer config:', syncErr.message);
     }
 
     const defaultCampaignName = `${universityName || 'University'} - ${course ? course + ' ' : ''}Campaign (${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}, ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })})`;
@@ -4320,6 +4414,67 @@ app.get('/api/calls', async (req, res) => {
       return res.json({ success: true, data: cached.map(c => enrichCallWithInterest(c)) });
     }
     res.status(502).json({ error: 'Could not fetch calls from OmniDimension: ' + err.message });
+  }
+});
+
+// 8b. Synchronize counselor transfer settings directly to OmniDimension on demand
+app.post('/api/omni/sync-transfer', async (req, res) => {
+  try {
+    const { agentId, counselorPhone, transferEnabled = true, transferCondition, transferMessage } = req.body;
+    const targetAgentId = agentId ? Number(agentId) : getAgentId();
+    const agentsToSync = [targetAgentId, 270604, 270740].filter(Boolean);
+
+    const syncResult = await syncAgentTransferConfigToOmni(agentsToSync, {
+      transferEnabled,
+      counselorPhone,
+      transferCondition,
+      transferMessage
+    });
+
+    res.json({
+      success: syncResult.success,
+      formattedNumber: syncResult.formattedNumber,
+      message: syncResult.success
+        ? `Successfully synced counselor transfer number (${syncResult.formattedNumber}) to OmniDimension Agent!`
+        : 'Failed to sync with OmniDimension',
+      details: syncResult.results
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 8c. Fetch live agent transfer configuration from OmniDimension
+app.get('/api/omni/agent-transfer', async (req, res) => {
+  try {
+    const apiKey = getApiKey();
+    const agentId = Number(req.query.agentId) || getAgentId() || 270604;
+    if (!apiKey) {
+      return res.status(400).json({ success: false, error: 'OMNIDIM_API_KEY missing' });
+    }
+
+    const response = await fetch(`https://backend.omnidim.io/api/v1/agents/${agentId}`, {
+      headers: { Authorization: `Bearer ${apiKey}` }
+    });
+    if (!response.ok) {
+      return res.status(response.status).json({ success: false, error: 'Failed to fetch agent from OmniDimension' });
+    }
+
+    const data = await response.json();
+    const primaryOption = (Array.isArray(data.transfer_options) && data.transfer_options[0]) || {};
+
+    res.json({
+      success: true,
+      agentId: data.id,
+      agentName: data.name,
+      isTransferEnabled: data.is_transfer_enabled,
+      counselorPhone: primaryOption.number || '+919573097810',
+      transferCondition: primaryOption.transfer_condition || '',
+      transferMessage: primaryOption.transfer_message || '',
+      rawOptions: data.transfer_options || []
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

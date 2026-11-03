@@ -179,6 +179,56 @@ export default function App() {
   const [transferCondition, setTransferCondition] = useState('Transfer when the user asks to speak with a counsellor/officer, OR agrees to be transferred (for example: saying yes when asked about fees, scholarships, or senior counsellor assistance).');
   const [transferMessage, setTransferMessage] = useState("I'm transferring your call to our counselor. Please hold while I connect you.");
   const [showTransferPanel, setShowTransferPanel] = useState(true);
+  const [isSyncingOmni, setIsSyncingOmni] = useState(false);
+  const [lastSyncedPhone, setLastSyncedPhone] = useState('+919573097810');
+
+  // Fetch live agent transfer configuration from OmniDimension on mount
+  useEffect(() => {
+    fetch('/api/omni/agent-transfer')
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && data.counselorPhone) {
+          setCounselorPhone(data.counselorPhone);
+          setLastSyncedPhone(data.counselorPhone);
+          if (typeof data.isTransferEnabled === 'boolean') {
+            setTransferEnabled(data.isTransferEnabled);
+          }
+          if (data.transferCondition) setTransferCondition(data.transferCondition);
+          if (data.transferMessage) setTransferMessage(data.transferMessage);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleSyncToOmni = async () => {
+    setIsSyncingOmni(true);
+    try {
+      const uni = universities.find(u => u.id === selectedUniversity);
+      const cAgentId = uni?.agentId || 270604;
+      const res = await fetch('/api/omni/sync-transfer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agentId: cAgentId,
+          counselorPhone,
+          transferEnabled,
+          transferCondition,
+          transferMessage
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setLastSyncedPhone(data.formattedNumber || counselorPhone);
+        addToast(`✔ Successfully updated counselor number (${data.formattedNumber || counselorPhone}) on OmniDimension! Live calls will now transfer here.`, 'success');
+      } else {
+        addToast(data.error || 'Failed to sync with OmniDimension', 'error');
+      }
+    } catch (err) {
+      addToast('Network error syncing with OmniDimension: ' + err.message, 'error');
+    } finally {
+      setIsSyncingOmni(false);
+    }
+  };
 
   const [showLiveDownloadMenu, setShowLiveDownloadMenu] = useState(false);
   const liveDownloadMenuRef = useRef(null);
@@ -5413,10 +5463,56 @@ export default function App() {
                                       }}
                                     />
                                   </div>
+
+                                  {/* Sync Directly to OmniDimension Button */}
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary"
+                                    onClick={handleSyncToOmni}
+                                    disabled={isSyncingOmni}
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.4rem',
+                                      fontSize: '0.82rem',
+                                      fontWeight: '700',
+                                      padding: '0.45rem 0.85rem',
+                                      backgroundColor: '#ffffff',
+                                      borderColor: '#cbd5e1',
+                                      color: '#1b3b6f',
+                                      boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                                      cursor: isSyncingOmni ? 'wait' : 'pointer'
+                                    }}
+                                    title="Immediately push this counselor number to OmniDimension voice bot"
+                                  >
+                                    <RefreshCw size={14} className={isSyncingOmni ? "animate-spin" : ""} style={{ color: '#F16522' }} />
+                                    <span>{isSyncingOmni ? 'Syncing...' : 'Sync to OmniDimension'}</span>
+                                  </button>
                                 </div>
-                                <span style={{ fontSize: '0.74rem', color: '#64748b', marginTop: '0.35rem', display: 'block' }}>
-                                  Multiple numbers will be tried in order if previous ones fail
-                                </span>
+
+                                {(() => {
+                                  const cleanInput = String(counselorPhone || '').replace(/\D/g, '');
+                                  const cleanSynced = String(lastSyncedPhone || '').replace(/\D/g, '');
+                                  const isMatch = cleanInput && cleanSynced && (cleanInput === cleanSynced || cleanInput.endsWith(cleanSynced) || cleanSynced.endsWith(cleanInput));
+                                  return (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.45rem', flexWrap: 'wrap' }}>
+                                      <span style={{
+                                        fontSize: '0.72rem',
+                                        fontWeight: '700',
+                                        padding: '0.15rem 0.55rem',
+                                        borderRadius: '4px',
+                                        backgroundColor: isMatch ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+                                        color: isMatch ? '#047857' : '#b45309',
+                                        border: `1px solid ${isMatch ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.25)'}`
+                                      }}>
+                                        {isMatch ? `✔ Live on OmniDimension: ${lastSyncedPhone}` : `⚠️ Pending Sync (Click 'Sync to OmniDimension' or start campaign)`}
+                                      </span>
+                                      <span style={{ fontSize: '0.74rem', color: '#64748b' }}>
+                                        Multiple numbers will be tried in order if previous ones fail.
+                                      </span>
+                                    </div>
+                                  );
+                                })()}
                               </div>
 
                               {/* Transfer Condition */}
