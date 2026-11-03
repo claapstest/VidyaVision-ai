@@ -1402,7 +1402,14 @@ function resolveFinalCallStatus(item) {
   const lowerCallStatus = String(item.call_status || item.status || '').toLowerCase().trim();
   const lowerOutcome = outcome.toLowerCase();
   const unansweredSet = new Set(['failed', 'canceled', 'cancelled', 'busy', 'no-answer', 'no_answer', 'timeout', 'timedout', 'unreachable', 'missed', 'not answered', 'unanswered']);
-  const callAnswered = String(item.call_answered || item.rawFields?.call_answered || '').toLowerCase().trim();
+  const ev = item.extracted_variables || item.rawFields || {};
+  const isFlagYes = (v) => {
+    if (v === true) return true;
+    if (!v) return false;
+    const s = String(v).trim().toLowerCase();
+    return s === 'yes' || s === 'true' || s === '1' || s === 'required';
+  };
+  const callAnswered = String(item.call_answered || ev.call_answered || item.rawFields?.call_answered || '').toLowerCase().trim();
 
   if (
     callAnswered === 'no' || callAnswered === 'false' ||
@@ -1415,6 +1422,22 @@ function resolveFinalCallStatus(item) {
     interestLevel === 'NO_ANSWER' || outcome === 'NO_ANSWER'
   ) {
     return CALL_OUTCOME_STATUS.NOT_ANSWERED;
+  }
+
+  // 1b. Structured OmniDimension / Sheets Verdict flags (Must precede text heuristics)
+  if (isFlagYes(ev.wrong_invalid || item.wrong_invalid)) return CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID;
+  if (isFlagYes(ev.already_joined || item.already_joined)) return CALL_OUTCOME_STATUS.ALREADY_JOINED;
+  if (isFlagYes(ev.already_applied || item.already_applied)) return CALL_OUTCOME_STATUS.ALREADY_APPLIED;
+  if (isFlagYes(ev.application_sent || item.application_sent)) return CALL_OUTCOME_STATUS.APPLICATION_SENT;
+  if (isFlagYes(ev.callback || item.callback)) return CALL_OUTCOME_STATUS.CALLBACK;
+  if (isFlagYes(ev.not_interested || item.not_interested)) return CALL_OUTCOME_STATUS.NOT_INTERESTED;
+  if (
+    isFlagYes(ev.student_interest || ev.interested || item.student_interest || item.interested) ||
+    leadStatus === 'INTERESTED' || leadStatus === 'HOT LEAD' || leadStatus === 'QUALIFIED' ||
+    leadStatus.includes('COUNSELLOR') || leadStatus.includes('COUNSELOR') ||
+    isFlagYes(ev.counsellor_follow_up || ev.counselor_follow_up || ev.transfer_to_counsellor || item.counsellor_follow_up || item.transfer_to_counsellor || ev.call_transfered_status)
+  ) {
+    return CALL_OUTCOME_STATUS.INTERESTED;
   }
 
   // 2. Wrong Number / Invalid
@@ -1579,6 +1602,7 @@ function normalizeRow(row, headers) {
   // guessing, so the dashboard mirrors the sheet exactly. Most advanced
   // outcome wins when several flags are set together.
   const flagYes = (keywords) => String(findValue(keywords)).trim().toLowerCase() === 'yes';
+  const cleanLeadStatus = String(leadStatus || '').toUpperCase();
   const flagStatus =
     flagYes(['wrong invalid', 'wrong_invalid', 'wrong number']) ? CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID :
       flagYes(['already joined', 'already_joined']) ? CALL_OUTCOME_STATUS.ALREADY_JOINED :
@@ -1586,7 +1610,11 @@ function normalizeRow(row, headers) {
           flagYes(['application sent', 'application_sent']) ? CALL_OUTCOME_STATUS.APPLICATION_SENT :
             flagYes(['callback']) ? CALL_OUTCOME_STATUS.CALLBACK :
               flagYes(['not interested', 'not_interested']) ? CALL_OUTCOME_STATUS.NOT_INTERESTED :
-                flagYes(['interested', 'student interest', 'student_interest', 'student interested']) ? CALL_OUTCOME_STATUS.INTERESTED : '';
+                (flagYes(['interested', 'student interest', 'student_interest', 'student interested']) ||
+                 cleanLeadStatus === 'INTERESTED' ||
+                 cleanLeadStatus.includes('COUNSELLOR') ||
+                 cleanLeadStatus.includes('COUNSELOR') ||
+                 flagYes(['transfer to counsellor', 'transfer_to_counsellor', 'counsellor follow-up', 'counsellor_follow_up', 'call transfered status', 'call_transfered_status'])) ? CALL_OUTCOME_STATUS.INTERESTED : '';
   if (flagStatus) {
     final_status = flagStatus;
     effectiveLeadStatus = flagStatus;
@@ -2097,13 +2125,20 @@ function analyzeCallInterest(callRecord) {
     else if (fullText.includes('civil')) course = 'B.Tech Civil';
 
     const interestText = userText || fullText;
+    const callEv = callRecord.extracted_variables || callRecord.rawFields || {};
+    const evValYes = (k) => String(callEv[k] ?? '').trim().toLowerCase() === 'yes';
+    const cleanLeadSt = String(callRecord.leadStatus || callRecord.lead_status || callEv.lead_status || '').toUpperCase();
+
     const isExplicitlyInterested = interestedKeywords.some(kw => interestText.includes(kw)) ||
       String(callRecord.interestLevel || callRecord.interest_level || '').toUpperCase() === 'HIGH' ||
-      String(callRecord.leadStatus || callRecord.lead_status || '').toUpperCase() === 'INTERESTED';
+      cleanLeadSt === 'INTERESTED' || cleanLeadSt.includes('COUNSELLOR') || cleanLeadSt.includes('COUNSELOR') ||
+      evValYes('student_interest') || evValYes('interested') || evValYes('transfer_to_counsellor') || evValYes('counsellor_follow_up');
 
     if (isExplicitlyInterested) {
       finalStatus = CALL_OUTCOME_STATUS.INTERESTED;
-      if (college !== 'Not Mentioned in Call' && course !== 'Not Mentioned in Call') {
+      if (cleanLeadSt.includes('COUNSELLOR') || evValYes('transfer_to_counsellor') || evValYes('counsellor_follow_up')) {
+        detailsStr = `${name} requested counsellor assistance / live call transfer during call.`;
+      } else if (college !== 'Not Mentioned in Call' && course !== 'Not Mentioned in Call') {
         detailsStr = `${name} expressed interest in ${course} at ${college} during call.`;
       } else if (college !== 'Not Mentioned in Call') {
         detailsStr = `${name} asked for the ${college} application during call.`;
@@ -2203,17 +2238,56 @@ function enrichCallWithInterest(callRecord) {
   // OmniDimension's own structured verdict (extracted_variables) wins over
   // keyword guessing — it is the same source that feeds the Google Sheet,
   // so live rows and sheet rows classify identically.
-  const ev = callRecord.extracted_variables || {};
-  const evYes = (k) => String(ev[k] ?? '').trim().toLowerCase() === 'yes';
-  const evStatus =
-    evYes('wrong_invalid') ? CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID :
-      evYes('already_joined') ? CALL_OUTCOME_STATUS.ALREADY_JOINED :
-        evYes('already_applied') ? CALL_OUTCOME_STATUS.ALREADY_APPLIED :
-          evYes('application_sent') ? CALL_OUTCOME_STATUS.APPLICATION_SENT :
-            evYes('callback') ? CALL_OUTCOME_STATUS.CALLBACK :
-              evYes('not_interested') ? CALL_OUTCOME_STATUS.NOT_INTERESTED :
-                (evYes('Interested') || evYes('interested')) ? CALL_OUTCOME_STATUS.INTERESTED : '';
-  if (evStatus) interestData.interestStatus = evStatus;
+  const ev = callRecord.extracted_variables || callRecord.rawFields || {};
+  const evStr = (k) => String(ev[k] ?? '').trim();
+  const evLower = (k) => evStr(k).toLowerCase();
+  const evYes = (k) => {
+    const v = evLower(k);
+    return v === 'yes' || v === 'true' || v === '1' || v === 'required';
+  };
+
+  const evLeadStatus = String(callRecord.lead_status || callRecord.leadStatus || ev.lead_status || '').toUpperCase().trim();
+  const evCallAnswered = evLower('call_answered');
+  const lowerCallStatus = String(callRecord.call_status || callRecord.status || '').toLowerCase().trim();
+
+  let evStatus = '';
+  if (
+    evCallAnswered === 'no' || evCallAnswered === 'false' ||
+    evLeadStatus === 'CALLS NOT ANSWERED' || evLeadStatus.includes('NOT ANSWERED') ||
+    lowerCallStatus === 'no-answer' || lowerCallStatus === 'busy' || lowerCallStatus === 'failed' || lowerCallStatus === 'missed'
+  ) {
+    evStatus = CALL_OUTCOME_STATUS.NOT_ANSWERED;
+  } else if (evYes('wrong_invalid') || evLeadStatus.includes('WRONG') || evLeadStatus.includes('INVALID')) {
+    evStatus = CALL_OUTCOME_STATUS.WRONG_NUMBER_INVALID;
+  } else if (evYes('already_joined') || evLeadStatus.includes('ALREADY_JOINED') || evLeadStatus.includes('ALREADY JOINED')) {
+    evStatus = CALL_OUTCOME_STATUS.ALREADY_JOINED;
+  } else if (evYes('already_applied') || evLeadStatus.includes('ALREADY_APPLIED') || evLeadStatus.includes('ALREADY APPLIED')) {
+    evStatus = CALL_OUTCOME_STATUS.ALREADY_APPLIED;
+  } else if (evYes('application_sent') || evLeadStatus.includes('APPLICATION_SENT')) {
+    evStatus = CALL_OUTCOME_STATUS.APPLICATION_SENT;
+  } else if (evYes('callback') || evLeadStatus.includes('CALLBACK')) {
+    evStatus = CALL_OUTCOME_STATUS.CALLBACK;
+  } else if (evYes('not_interested') || evLeadStatus === 'NOT INTERESTED' || evLeadStatus === 'DECLINED') {
+    evStatus = CALL_OUTCOME_STATUS.NOT_INTERESTED;
+  } else if (
+    evLeadStatus === 'INTERESTED' ||
+    evLeadStatus === 'COUNSELLOR FOLLOW-UP' ||
+    evLeadStatus.includes('COUNSELLOR') ||
+    evLeadStatus.includes('COUNSELOR') ||
+    evYes('student_interest') ||
+    evYes('interested') ||
+    evYes('Interested') ||
+    evYes('transfer_to_counsellor') ||
+    evYes('counsellor_follow_up') ||
+    evYes('call_transfered_status')
+  ) {
+    evStatus = CALL_OUTCOME_STATUS.INTERESTED;
+  }
+
+  if (evStatus) {
+    interestData.interestStatus = evStatus;
+    interestData.final_status = evStatus;
+  }
 
   // Recover the student's name (user_name is the account holder, not the student).
   const recoveredLiveName = extractStudentName(callRecord);

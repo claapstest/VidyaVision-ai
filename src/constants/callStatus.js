@@ -162,9 +162,23 @@ const EXPLICIT_INTEREST_KEYWORDS = [
 export function resolveCallFinalStatus(item) {
   if (!item) return CALL_OUTCOME_STATUS.NOT_ANSWERED;
 
-  // 1. Direct structured final_status / finalStatus
+  const rf = item.rawFields || item.extracted_variables || {};
+  const isFlagYes = (v) => {
+    if (v === true) return true;
+    if (!v) return false;
+    const s = String(v).trim().toLowerCase();
+    return s === 'yes' || s === 'true' || s === '1' || s === 'required';
+  };
+  const rawLeadStatus = String(item.leadStatus || item.lead_status || rf.lead_status || '').toUpperCase().trim();
+
+  // 1. Direct structured final_status / finalStatus (with safety check for contradicted fallbacks)
   const directStatus = String(item.final_status || item.finalStatus || '').toUpperCase().trim();
   if (directStatus && CALL_OUTCOME_STATUS[directStatus]) {
+    const hasStructuredInterest = isFlagYes(rf.student_interest || rf.interested || rf.transfer_to_counsellor || rf.counsellor_follow_up || rf.call_transfered_status) ||
+      rawLeadStatus === 'INTERESTED' || rawLeadStatus.includes('COUNSELLOR') || rawLeadStatus.includes('COUNSELOR');
+    if (directStatus === CALL_OUTCOME_STATUS.NOT_INTERESTED && hasStructuredInterest) {
+      return CALL_OUTCOME_STATUS.INTERESTED;
+    }
     return CALL_OUTCOME_STATUS[directStatus];
   }
 
@@ -201,13 +215,6 @@ export function resolveCallFinalStatus(item) {
   const userText = userParts.join(' ').toLowerCase();
   const interestText = userText || fullText;
 
-  const rf = item.rawFields || item.extracted_variables || {};
-  const isFlagYes = (v) => {
-    if (v === true) return true;
-    if (!v) return false;
-    const s = String(v).trim().toLowerCase();
-    return s === 'yes' || s === 'true' || s === '1' || s === 'required';
-  };
   const callAnswered = String(item.call_answered || rf.call_answered || '').trim().toLowerCase();
 
   // 1. Calls Not Answered (Must precede any fallback)
