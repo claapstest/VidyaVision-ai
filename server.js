@@ -11,7 +11,7 @@ import db, { query, isDbConnected } from './db.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
-dotenv.config();
+dotenv.config({ quiet: true });
 
 // Constant-time string comparison to prevent timing attacks (SEC-08)
 function timingSafeCompare(a, b) {
@@ -569,25 +569,21 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
 const PORT = process.env.PORT || 5000;
 
 function getApiKey() {
-  dotenv.config();
   // Secrets live in .env only — never hardcode keys here (this file is committed to git).
   return process.env.OMNIDIM_API_KEY || '';
 }
 
 function getAgentId() {
-  dotenv.config();
   const id = Number(process.env.AGENT_ID);
   return !isNaN(id) && id > 0 ? id : null;
 }
 
 function getUgAgentId() {
-  dotenv.config();
   const id = Number(process.env.UG_AGENT_ID);
   return !isNaN(id) && id > 0 ? id : getAgentId();
 }
 
 function getPgAgentId() {
-  dotenv.config();
   const id = Number(process.env.PG_AGENT_ID || process.env.AGENT_ID);
   return !isNaN(id) && id > 0 ? id : getAgentId();
 }
@@ -1349,7 +1345,6 @@ async function fetchSheetRawData() {
   try {
     const client = await getGoogleSheetsClient();
     if (client) {
-      console.log('Fetching sheet data using Google Private API...');
       const spreadsheetInfo = await client.spreadsheets.get({ spreadsheetId });
       const firstSheetName = spreadsheetInfo.data.sheets[0].properties.title || 'Sheet1';
       const res = await client.spreadsheets.values.get({
@@ -1364,7 +1359,6 @@ async function fetchSheetRawData() {
 
   // 2. Try public gviz API fallback
   try {
-    console.log('Fetching sheet data using public endpoint...');
     return await fetchPublicGoogleSheet(spreadsheetId);
   } catch (err) {
     console.error('Google Sheets Public API fallback failed:', err.message);

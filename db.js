@@ -1,6 +1,6 @@
 import pg from 'pg';
 import dotenv from 'dotenv';
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const { Pool } = pg;
 
