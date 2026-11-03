@@ -104,7 +104,7 @@ async function loadUsers() {
         role: r.role,
         passwordHash: r.password_hash,
         permissions: r.permissions || {},
-        status: r.status,
+        status: r.status || 'active',
         createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
         updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : new Date().toISOString()
       }));

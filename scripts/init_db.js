@@ -65,6 +65,7 @@ async function setupDatabase() {
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'active';
     `);
     console.log("✔ Table 'users' verified");
 
