@@ -225,6 +225,16 @@ const requireAuth = async (req, res, next) => {
     return next();
   }
 
+  // Allow OmniDimension Custom API transfer requests & agent transfer check
+  if (
+    req.path.includes('/counselor/transfer') ||
+    req.originalUrl.includes('/counselor/transfer') ||
+    req.path.startsWith('/omni/') ||
+    req.originalUrl.startsWith('/api/omni/')
+  ) {
+    return next();
+  }
+
   // Allow login endpoint without prior authentication
   if (req.path === '/auth/login' || req.originalUrl === '/api/auth/login') {
     return next();
@@ -2481,6 +2491,7 @@ async function syncAgentTransferConfigToOmni(agentIds, config = {}) {
 
   const payload = {
     is_transfer_enabled: Boolean(transferEnabled),
+    is_custom_api_transfer_enabled: Boolean(transferEnabled),
     transfer_options: transferOptions
   };
 
@@ -4475,6 +4486,58 @@ app.get('/api/omni/agent-transfer', async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 8d. Dedicated Custom API Transfer Endpoint for OmniDimension Live Voice Agent Handover
+app.all(['/api/counselor/transfer', '/api/transfer', '/counselor/transfer'], async (req, res) => {
+  try {
+    const queryData = req.query || {};
+    const bodyData = req.body || {};
+    const collegeId = queryData.collegeId || bodyData.collegeId || queryData.universityId || bodyData.universityId;
+    const collegeName = queryData.collegeName || bodyData.collegeName || queryData.college || bodyData.college;
+
+    let targetPhone = CAMPAIGN_STATE?.counselorPhone;
+    let targetMessage = CAMPAIGN_STATE?.transferMessage || "I'm transferring your call to our counselor. Please hold while I connect you.";
+
+    if (!targetPhone) {
+      const colleges = await loadColleges();
+      const match = colleges.find(c =>
+        (collegeId && String(c.id) === String(collegeId)) ||
+        (collegeName && c.name?.toLowerCase().includes(String(collegeName).toLowerCase()))
+      ) || colleges[0];
+      if (match && match.counselorPhone) {
+        targetPhone = match.counselorPhone;
+      }
+    }
+
+    if (!targetPhone) {
+      targetPhone = '+919573097810';
+    }
+
+    // Clean phone number format (+91XXXXXXXXXX)
+    const digits = String(targetPhone).replace(/\D/g, '');
+    let cleanFormatted = targetPhone.trim();
+    if (digits.length === 10) cleanFormatted = `+91${digits}`;
+    else if (digits.startsWith('91') && digits.length === 12) cleanFormatted = `+${digits}`;
+    else if (!cleanFormatted.startsWith('+') && digits.length > 0) cleanFormatted = `+${digits}`;
+
+    addLog('info', `📞 OmniDimension Custom API Call Transfer triggered! Routing live caller to ${cleanFormatted}`);
+
+    return res.json({
+      success: true,
+      status: 'transferring',
+      destination: cleanFormatted,
+      __omni_transfer_number: cleanFormatted,
+      __omni_transfer_message: targetMessage
+    });
+  } catch (err) {
+    console.error('Error in custom API transfer endpoint:', err);
+    return res.json({
+      success: true,
+      __omni_transfer_number: '+919573097810',
+      __omni_transfer_message: "I'm connecting you to our admissions team now."
+    });
   }
 });
 
