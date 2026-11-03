@@ -338,6 +338,10 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ success: false, error: 'Invalid email or password' });
     }
 
+    if (user.status === 'suspended') {
+      return res.status(403).json({ success: false, error: 'Your account has been suspended. Please contact your VidyaVision Administrator.' });
+    }
+
     const isMatch = await bcrypt.compare(String(password), user.passwordHash);
     if (!isMatch) {
       return res.status(401).json({ success: false, error: 'Invalid email or password' });
@@ -450,6 +454,7 @@ app.post('/api/admin/users', requireAdmin, async (req, res) => {
       role: userRole,
       passwordHash,
       permissions: userPermissions,
+      status: 'active',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
@@ -471,7 +476,7 @@ app.post('/api/admin/users', requireAdmin, async (req, res) => {
 app.put('/api/admin/users/:id', requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, email, password, role, permissions } = req.body;
+    const { name, email, password, role, permissions, status } = req.body;
 
     const users = await loadUsers();
     const user = users.find(u => u.id === id);
@@ -502,6 +507,13 @@ app.put('/api/admin/users/:id', requireAdmin, async (req, res) => {
       user.passwordHash = bcrypt.hashSync(String(password).trim(), 10);
     }
 
+    if (status && (status === 'active' || status === 'suspended')) {
+      if (isSuperAdmin && status === 'suspended') {
+        return res.status(400).json({ success: false, error: 'Cannot suspend the default System Admin account' });
+      }
+      user.status = status;
+    }
+
     if (role && !isSuperAdmin) {
       user.role = role === 'admin' ? 'admin' : 'counselor';
     }
@@ -521,6 +533,15 @@ app.put('/api/admin/users/:id', requireAdmin, async (req, res) => {
 
     user.updatedAt = new Date().toISOString();
     await saveUsers(users);
+
+    try {
+      await query(
+        'UPDATE users SET name = $1, email = $2, password_hash = $3, role = $4, permissions = $5, status = $6, updated_at = NOW() WHERE id = $7',
+        [user.name, user.email, user.passwordHash, user.role, JSON.stringify(user.permissions), user.status || 'active', user.id]
+      );
+    } catch (dbErr) {
+      console.warn('[DB] Error directly updating user in PostgreSQL:', dbErr.message);
+    }
 
     res.json({
       success: true,

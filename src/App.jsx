@@ -1,5 +1,5 @@
 import LoginPage from './components/LoginPage';
-import TeamManagementModal from './components/TeamManagementModal';
+import UserManagementPage from './components/UserManagementPage';
 import { LogOut, Shield, Lock } from 'lucide-react';
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -147,7 +147,8 @@ export default function App() {
     setWsConnected(false);
   };
 
-  const [activeTab, setActiveTab] = useState('dashboard'); // 'dispatch' | 'dashboard' | 'calls'
+  const [activeTab, setActiveTab] = useState('dashboard'); // 'dispatch' | 'dashboard' | 'calls' | 'users'
+  const [previousTab, setPreviousTab] = useState('dashboard');
   const [wsConnected, setWsConnected] = useState(false);
 
   // Input Modes in Dispatch Console: 'manual' | 'bulk' | 'excel'
@@ -3768,74 +3769,141 @@ export default function App() {
           </button>
         </div>
 
-        {/* User Badge, Admin Team Button & Logout */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginLeft: 'auto' }}>
-          {/* Admin Team Management Button */}
-          {currentUser?.role === 'admin' && (
+        {/* Header Right: System Admin Interactive Capsule & Logout */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', marginLeft: 'auto', zIndex: 10 }}>
+          {currentUser?.role === 'admin' ? (
+            /* Interactive Admin Capsule for Team & RBAC Management */
             <button
-              className="btn btn-secondary"
-              onClick={() => setShowTeamModal(true)}
+              type="button"
+              onClick={() => {
+                if (activeTab !== 'users') {
+                  setPreviousTab(activeTab);
+                  setActiveTab('users');
+                } else {
+                  setActiveTab(previousTab || 'dashboard');
+                }
+              }}
+              title="System Admin • Click to manage team accounts & permissions"
               style={{
-                fontSize: '0.82rem',
-                padding: '0.45rem 0.85rem',
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '0.4rem',
-                border: '1.5px solid rgba(27, 59, 111, 0.15)',
-                backgroundColor: '#ffffff',
-                color: '#1b3b6f',
-                fontWeight: '700',
-                borderRadius: '8px',
-                cursor: 'pointer'
+                gap: '0.65rem',
+                padding: '0.4rem 0.95rem 0.4rem 0.45rem',
+                backgroundColor: activeTab === 'users' ? 'rgba(241, 101, 34, 0.2)' : 'rgba(255, 255, 255, 0.12)',
+                borderRadius: '9999px',
+                border: activeTab === 'users' ? '1.5px solid #F16522' : '1px solid rgba(255, 255, 255, 0.22)',
+                boxShadow: activeTab === 'users' ? '0 0 16px rgba(241, 101, 34, 0.35)' : '0 2px 8px rgba(0,0,0,0.1)',
+                cursor: 'pointer',
+                transition: 'all 0.18s ease',
+                outline: 'none',
+                color: '#ffffff'
               }}
-              title="Manage counselor accounts and customize granular RBAC permissions"
+              onMouseEnter={e => {
+                if (activeTab !== 'users') {
+                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.18)';
+                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.4)';
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                }
+              }}
+              onMouseLeave={e => {
+                if (activeTab !== 'users') {
+                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.12)';
+                  e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.22)';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                }
+              }}
             >
-              <Users size={15} style={{ color: '#F16522' }} />
-              <span>Team ({teamCount})</span>
-            </button>
-          )}
-
-          {/* User Profile Pill */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.55rem',
-            padding: '0.35rem 0.75rem',
-            backgroundColor: '#ffffff',
-            borderRadius: '9999px',
-            border: '1px solid rgba(27, 59, 111, 0.12)',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
-          }}>
-            <div style={{
-              width: '28px',
-              height: '28px',
-              borderRadius: '50%',
-              backgroundColor: currentUser?.role === 'admin' ? 'rgba(27, 59, 111, 0.1)' : 'rgba(241, 101, 34, 0.1)',
-              color: currentUser?.role === 'admin' ? '#1b3b6f' : '#F16522',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: '800',
-              fontSize: '0.75rem'
-            }}>
-              {currentUser?.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15 }}>
-              <span style={{ fontSize: '0.82rem', fontWeight: '700', color: '#1b3b6f' }}>
-                {currentUser?.name || 'Counselor'}
-              </span>
-              <span style={{
-                fontSize: '0.65rem',
-                fontWeight: '700',
-                color: currentUser?.role === 'admin' ? '#1b3b6f' : '#F16522',
-                textTransform: 'uppercase',
-                letterSpacing: '0.04em'
+              {/* Avatar Shield Circle */}
+              <div style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '50%',
+                backgroundColor: activeTab === 'users' ? '#F16522' : 'rgba(255, 255, 255, 0.2)',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: '800',
+                fontSize: '0.8rem',
+                boxShadow: activeTab === 'users' ? '0 2px 8px rgba(241, 101, 34, 0.4)' : 'none',
+                flexShrink: 0
               }}>
-                {currentUser?.role === 'admin' ? 'Admin' : 'Counselor'}
-              </span>
+                <Shield size={16} />
+              </div>
+
+              {/* Name & Manage Badge */}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.2 }}>
+                <span style={{ fontSize: '0.86rem', fontWeight: '700', color: '#ffffff', letterSpacing: '-0.01em' }}>
+                  {currentUser?.name || 'System Admin'}
+                </span>
+                <span style={{
+                  fontSize: '0.66rem',
+                  fontWeight: '700',
+                  color: activeTab === 'users' ? '#ffedd5' : '#fed7aa',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.3rem'
+                }}>
+                  <span>Manage Team ({teamCount})</span>
+                </span>
+              </div>
+
+              {/* Active Indicator Pip */}
+              <div style={{
+                width: '7px',
+                height: '7px',
+                borderRadius: '50%',
+                backgroundColor: activeTab === 'users' ? '#F16522' : '#34d399',
+                boxShadow: activeTab === 'users' ? '0 0 8px #F16522' : '0 0 8px #34d399',
+                marginLeft: '0.2rem'
+              }} />
+            </button>
+          ) : (
+            /* Non-Interactive Counselor Pill */
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.6rem',
+              padding: '0.38rem 0.85rem 0.38rem 0.45rem',
+              backgroundColor: 'rgba(255, 255, 255, 0.1)',
+              borderRadius: '9999px',
+              border: '1px solid rgba(255, 255, 255, 0.18)',
+              color: '#ffffff'
+            }}>
+              <div style={{
+                width: '30px',
+                height: '30px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(241, 101, 34, 0.3)',
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: '800',
+                fontSize: '0.78rem',
+                flexShrink: 0
+              }}>
+                {currentUser?.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
+                <span style={{ fontSize: '0.84rem', fontWeight: '700', color: '#ffffff' }}>
+                  {currentUser?.name || 'Counselor'}
+                </span>
+                <span style={{
+                  fontSize: '0.64rem',
+                  fontWeight: '700',
+                  color: '#fdba74',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em'
+                }}>
+                  Admission Counselor
+                </span>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Logout Button */}
           <button
@@ -3843,16 +3911,24 @@ export default function App() {
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '0.35rem',
-              padding: '0.45rem 0.75rem',
+              gap: '0.4rem',
+              padding: '0.48rem 0.85rem',
               borderRadius: '8px',
-              border: '1px solid rgba(244, 63, 94, 0.3)',
-              backgroundColor: '#fff1f2',
-              color: '#e11d48',
-              fontSize: '0.8rem',
+              border: '1px solid rgba(244, 63, 94, 0.35)',
+              backgroundColor: 'rgba(244, 63, 94, 0.15)',
+              color: '#fecdd3',
+              fontSize: '0.82rem',
               fontWeight: '700',
               cursor: 'pointer',
               transition: 'all 0.15s ease'
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.backgroundColor = 'rgba(244, 63, 94, 0.28)';
+              e.currentTarget.style.color = '#ffffff';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.backgroundColor = 'rgba(244, 63, 94, 0.15)';
+              e.currentTarget.style.color = '#fecdd3';
             }}
             title="Sign out of VidyaVision"
           >
@@ -3864,6 +3940,17 @@ export default function App() {
 
       {/* Main Container */}
       <main className="main-content">
+
+        {/* ========================================== */}
+        {/* TAB 0: USER & GRANULAR RBAC MANAGEMENT (ADMIN ONLY) */}
+        {/* ========================================== */}
+        {activeTab === 'users' && currentUser?.role === 'admin' && (
+          <UserManagementPage
+            currentUser={currentUser}
+            onBack={() => setActiveTab(previousTab || 'dashboard')}
+            onUserCountChange={(count) => setTeamCount(count)}
+          />
+        )}
 
         {/* ========================================== */}
         {/* TAB 1: DISPATCH CONSOLE (Replaces Registration) */}
