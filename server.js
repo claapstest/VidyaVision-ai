@@ -5050,9 +5050,9 @@ async function recoverServerState() {
 const distDir = path.join(process.cwd(), 'dist');
 app.use(express.static(distDir));
 
-// Fallback to index.html for SPA client-side routing on non-API routes
-app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api')) return next();
+// Fallback to index.html for SPA client-side routing on non-API routes (Express 5 compatible)
+app.use((req, res, next) => {
+  if (req.method !== 'GET' || req.path.startsWith('/api')) return next();
   res.sendFile(path.join(distDir, 'index.html'), (err) => {
     if (err) next();
   });
