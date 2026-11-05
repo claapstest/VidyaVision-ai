@@ -5869,41 +5869,6 @@ export default function App() {
                                 })()}
                               </div>
 
-                              {/* Transfer Condition */}
-                              <div>
-                                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: '700', color: '#1b3b6f', marginBottom: '0.2rem' }}>
-                                  Transfer Condition
-                                </label>
-                                <textarea
-                                  className="form-input"
-                                  rows={2}
-                                  value={transferCondition}
-                                  onChange={(e) => setTransferCondition(e.target.value)}
-                                  placeholder="Transfer when the user asks to speak with a counsellor/officer..."
-                                  style={{ fontSize: '0.84rem' }}
-                                />
-                                <span style={{ fontSize: '0.74rem', color: '#64748b', marginTop: '0.25rem', display: 'block' }}>
-                                  Describe when this transfer option should be used
-                                </span>
-                              </div>
-
-                              {/* Transfer Message */}
-                              <div>
-                                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: '700', color: '#1b3b6f', marginBottom: '0.2rem' }}>
-                                  Transfer Message
-                                </label>
-                                <textarea
-                                  className="form-input"
-                                  rows={2}
-                                  value={transferMessage}
-                                  onChange={(e) => setTransferMessage(e.target.value)}
-                                  placeholder="I'm transferring your call to our counselor. Please hold while I connect you."
-                                  style={{ fontSize: '0.84rem' }}
-                                />
-                                <span style={{ fontSize: '0.74rem', color: '#64748b', marginTop: '0.25rem', display: 'block' }}>
-                                  This message will be played to the caller before the transfer
-                                </span>
-                              </div>
                             </div>
                           </div>
                         )}
