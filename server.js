@@ -5046,6 +5046,18 @@ async function recoverServerState() {
   }
 }
 
+// Serve static frontend assets in production (when dist folder exists)
+const distDir = path.join(process.cwd(), 'dist');
+app.use(express.static(distDir));
+
+// Fallback to index.html for SPA client-side routing on non-API routes
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) return next();
+  res.sendFile(path.join(distDir, 'index.html'), (err) => {
+    if (err) next();
+  });
+});
+
 // Global Error Handler Middleware (SEC-06: Suppress stack traces / internal path disclosure)
 app.use((err, req, res, next) => {
   console.error('[SERVER ERROR]', err.message);

@@ -15,7 +15,12 @@ export default defineConfig({
         ws: true,
         configure: (proxy) => {
           const ignoredCodes = new Set(['ECONNRESET', 'ECONNREFUSED', 'ECONNABORTED', 'EPIPE', 'ETIMEDOUT']);
-          proxy.on('error', (err) => {
+          proxy.on('error', (err, req, res) => {
+            if (res && typeof res.writeHead === 'function' && !res.headersSent) {
+              res.writeHead(503, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Backend server is initializing. Retrying...', code: err.code }));
+              return;
+            }
             if (!ignoredCodes.has(err.code)) {
               console.warn('[vite-proxy]', err.message);
             }
