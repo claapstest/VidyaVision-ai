@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mail, Lock, Eye, EyeOff, Loader2, AlertCircle, ShieldCheck, Sparkles } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, Loader2, AlertCircle, Sparkles } from 'lucide-react';
 
 export default function LoginPage({ onLoginSuccess }) {
   const [email, setEmail] = useState('');
@@ -163,24 +163,6 @@ export default function LoginPage({ onLoginSuccess }) {
           }}>
             AI Admission Telephony & Lead Intelligence
           </p>
-
-          {/* Workspace Pill Badge */}
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.4rem',
-            padding: '0.3rem 0.85rem',
-            borderRadius: '9999px',
-            backgroundColor: 'rgba(27, 59, 111, 0.06)',
-            border: '1px solid rgba(27, 59, 111, 0.1)',
-            fontSize: '0.74rem',
-            fontWeight: '600',
-            color: '#1b3b6f',
-            letterSpacing: '0.01em'
-          }}>
-            <ShieldCheck size={14} style={{ color: '#10b981' }} />
-            Internal Portal — 10-Member Counselor Workspace
-          </div>
         </div>
 
         {/* Error Notification */}
