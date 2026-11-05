@@ -141,19 +141,25 @@ export default function App() {
     verifyAuth();
   }, []);
 
-  const handleLogout = async () => {
+  const handleLogout = () => {
+    // 1. Immediately terminate user session in storage
     try {
-      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
-    } catch (e) {}
-    localStorage.removeItem('vv_auth_token');
-    localStorage.removeItem('vv_user_profile');
-    localStorage.removeItem('currentUser');
-    try {
+      localStorage.removeItem('vv_auth_token');
+      localStorage.removeItem('vv_user_profile');
+      localStorage.removeItem('currentUser');
       sessionStorage.removeItem('vv_recent_contacts');
       sessionStorage.removeItem('vv_recent_files');
-    } catch (e) {}
+    } catch (e) {
+      console.warn('Storage cleanup warning:', e);
+    }
 
-    // Complete workspace isolation: clear in-memory draft queue so next user starts clean
+    // 2. Set currentUser to null IMMEDIATELY so the view switches to <LoginPage> synchronously
+    setCurrentUser(null);
+    setIsAuthChecking(false);
+    setActiveTab('dashboard');
+    setPreviousTab('dashboard');
+
+    // 3. Reset draft inputs and workspace queues cleanly
     setStagedContacts([]);
     setTempContacts([]);
     setUploadedFileInfo(null);
@@ -165,18 +171,21 @@ export default function App() {
     setCampaignCheckedContacts([]);
     setResumingCampaignName(null);
     setResumingCampaignId(null);
-    setSelectedCollegeDetail(null);
     setSelectedCampaignDetail(null);
-    setSelectedCallDetail(null);
+    setSelectedCall(null);
+    setShowCollegeModal(false);
+    setShowPastCampaignsModal(false);
+    setShowTeamModal(false);
 
-    setCurrentUser(null);
-    setActiveTab('dashboard');
-    setPreviousTab('dashboard');
+    // 4. Close WebSocket
     if (wsRef.current) {
       try { wsRef.current.close(); } catch (e) {}
       wsRef.current = null;
     }
     setWsConnected(false);
+
+    // 5. Fire-and-forget backend session clear (never block frontend logout)
+    fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
   };
 
   const [activeTab, setActiveTab] = useState('dashboard'); // 'dispatch' | 'dashboard' | 'calls' | 'users'
