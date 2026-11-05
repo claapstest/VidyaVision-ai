@@ -229,7 +229,7 @@ export default function App() {
     fetch('/api/omni/agent-transfer')
       .then(res => res.json())
       .then(data => {
-        if (data.success && data.counselorPhone) {
+        if (data.success && data.counselorPhone && /\d{4,}/.test(String(data.counselorPhone)) && String(data.counselorPhone).trim() !== 'counselor_phone') {
           setCounselorPhone(data.counselorPhone);
           setLastSyncedPhone(data.counselorPhone);
           if (typeof data.isTransferEnabled === 'boolean') {
@@ -5707,172 +5707,112 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* Transfer Options Details */}
+                        {/* Clean Counselor Call Transfer Configuration */}
                         {transferEnabled && (
-                          <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.25rem', backgroundColor: '#ffffff' }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <span style={{ fontSize: '0.86rem', fontWeight: '700', color: '#1b3b6f' }}>
-                                Transfer Options (1)
-                              </span>
-                              <span style={{ fontSize: '0.74rem', color: '#64748b' }}>
-                                Direct Voice Bridge
-                              </span>
-                            </div>
+                          <div style={{
+                            padding: '1.25rem 1.5rem',
+                            backgroundColor: '#ffffff',
+                            borderTop: '1px solid #f1f5f9',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '0.85rem'
+                          }}>
+                            <div>
+                              <label style={{ display: 'block', fontSize: '0.84rem', fontWeight: '700', color: '#1b3b6f', marginBottom: '0.35rem' }}>
+                                Counselor Phone Number (Live Call Forwarding) *
+                              </label>
+                              <p style={{ margin: '0 0 0.65rem 0', fontSize: '0.76rem', color: '#64748b' }}>
+                                When a prospective student requests to speak with an advisor or officer during an AI call, the system instantly bridges the call to this number.
+                              </p>
 
-                            {/* Option 1 Card */}
-                            <div style={{
-                              border: '1px solid #e2e8f0',
-                              borderRadius: '10px',
-                              padding: '1.25rem',
-                              backgroundColor: '#fafbfc',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              gap: '1rem'
-                            }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #edf2f7', paddingBottom: '0.5rem' }}>
-                                <span style={{ fontSize: '0.84rem', fontWeight: '700', color: '#334155' }}>
-                                  ^ Transfer Option 1
-                                </span>
-                              </div>
-
-                              {/* Transfer Numbers */}
-                              <div>
-                                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: '700', color: '#1b3b6f', marginBottom: '0.4rem' }}>
-                                  Transfer Numbers *
-                                </label>
-
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-                                  {/* Static / Dynamic Tabs */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                                {/* Clean Phone Input */}
+                                <div style={{ flex: '1 1 260px', position: 'relative', display: 'flex', alignItems: 'center' }}>
                                   <div style={{
-                                    display: 'inline-flex',
-                                    borderRadius: '8px',
-                                    padding: '2px',
-                                    backgroundColor: '#e2e8f0',
-                                    border: '1px solid #cbd5e1'
+                                    position: 'absolute',
+                                    left: '0.65rem',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.3rem',
+                                    padding: '0.15rem 0.45rem',
+                                    backgroundColor: '#f1f5f9',
+                                    borderRadius: '4px',
+                                    fontSize: '0.82rem',
+                                    fontWeight: '700',
+                                    color: '#1b3b6f'
                                   }}>
-                                    <button
-                                      type="button"
-                                      onClick={() => setTransferMode('static')}
-                                      style={{
-                                        border: 'none',
-                                        backgroundColor: transferMode === 'static' ? '#ffffff' : 'transparent',
-                                        color: transferMode === 'static' ? '#1b3b6f' : '#64748b',
-                                        fontWeight: '700',
-                                        fontSize: '0.78rem',
-                                        padding: '0.35rem 0.9rem',
-                                        borderRadius: '6px',
-                                        cursor: 'pointer',
-                                        boxShadow: transferMode === 'static' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none'
-                                      }}
-                                    >
-                                      Static
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setTransferMode('dynamic')}
-                                      style={{
-                                        border: 'none',
-                                        backgroundColor: transferMode === 'dynamic' ? '#ffffff' : 'transparent',
-                                        color: transferMode === 'dynamic' ? '#1b3b6f' : '#64748b',
-                                        fontWeight: '700',
-                                        fontSize: '0.78rem',
-                                        padding: '0.35rem 0.9rem',
-                                        borderRadius: '6px',
-                                        cursor: 'pointer',
-                                        boxShadow: transferMode === 'dynamic' ? '0 1px 2px rgba(0,0,0,0.08)' : 'none'
-                                      }}
-                                    >
-                                      Dynamic
-                                    </button>
+                                    <span>🇮🇳</span>
+                                    <span>+91</span>
                                   </div>
-
-                                  {/* Number Input with Flag */}
-                                  <div style={{ flex: '1 1 240px', position: 'relative', display: 'flex', alignItems: 'center' }}>
-                                    <div style={{
-                                      position: 'absolute',
-                                      left: '0.65rem',
-                                      display: 'flex',
-                                      alignItems: 'center',
-                                      gap: '0.3rem',
-                                      padding: '0.15rem 0.4rem',
-                                      backgroundColor: '#f1f5f9',
-                                      borderRadius: '4px',
-                                      fontSize: '0.82rem',
-                                      fontWeight: '700',
-                                      color: '#1b3b6f'
-                                    }}>
-                                      <span>🇮🇳</span>
-                                    </div>
-                                    <input
-                                      type="text"
-                                      className="form-input"
-                                      value={counselorPhone}
-                                      onChange={(e) => setCounselorPhone(e.target.value)}
-                                      placeholder="+91 95730 97810"
-                                      style={{
-                                        paddingLeft: '3rem',
-                                        fontWeight: '600',
-                                        fontSize: '0.9rem',
-                                        letterSpacing: '0.02em'
-                                      }}
-                                    />
-                                  </div>
-
-                                  {/* Sync Directly to OmniDimension Button */}
-                                  <button
-                                    type="button"
-                                    className="btn btn-secondary"
-                                    onClick={handleSyncToOmni}
-                                    disabled={isSyncingOmni}
-                                    style={{
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '0.4rem',
-                                      fontSize: '0.82rem',
-                                      fontWeight: '700',
-                                      padding: '0.45rem 0.85rem',
-                                      backgroundColor: '#ffffff',
-                                      borderColor: '#cbd5e1',
-                                      color: '#1b3b6f',
-                                      boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-                                      cursor: isSyncingOmni ? 'wait' : 'pointer'
+                                  <input
+                                    type="text"
+                                    className="form-input"
+                                    value={counselorPhone.startsWith('+91') ? counselorPhone.replace(/^\+91\s*/, '') : counselorPhone}
+                                    onChange={(e) => {
+                                      const digitsOnly = e.target.value.replace(/[^\d\s]/g, '');
+                                      setCounselorPhone(digitsOnly ? `+91 ${digitsOnly.trim()}` : '');
                                     }}
-                                    title="Immediately push this counselor number to AI voice telephony agent"
-                                  >
-                                    <RefreshCw size={14} className={isSyncingOmni ? "animate-spin" : ""} style={{ color: '#F16522' }} />
-                                    <span>{isSyncingOmni ? 'Syncing...' : 'Sync to Voice Agent'}</span>
-                                  </button>
+                                    placeholder="95730 97810"
+                                    style={{
+                                      paddingLeft: '4.2rem',
+                                      fontWeight: '600',
+                                      fontSize: '0.92rem',
+                                      letterSpacing: '0.02em'
+                                    }}
+                                  />
                                 </div>
 
-                                {(() => {
-                                  const cleanInput = String(counselorPhone || '').replace(/\D/g, '');
-                                  const cleanSynced = String(lastSyncedPhone || '').replace(/\D/g, '');
-                                  const isMatch = cleanInput && cleanSynced && (cleanInput === cleanSynced || cleanInput.endsWith(cleanSynced) || cleanSynced.endsWith(cleanInput));
-                                  return (
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.45rem', flexWrap: 'wrap' }}>
-                                      <span style={{
-                                        fontSize: '0.72rem',
-                                        fontWeight: '700',
-                                        padding: '0.15rem 0.55rem',
-                                        borderRadius: '4px',
-                                        backgroundColor: isMatch ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)',
-                                        color: isMatch ? '#047857' : '#b45309',
-                                        border: `1px solid ${isMatch ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.25)'}`
-                                      }}>
-                                        {isMatch ? `✔ Live on Voice Agent: ${lastSyncedPhone}` : `⚠️ Pending Sync (Click 'Sync to Voice Agent' or start campaign)`}
-                                      </span>
-                                      <span style={{ fontSize: '0.74rem', color: '#64748b' }}>
-                                        Multiple numbers will be tried in order if previous ones fail.
-                                      </span>
-                                    </div>
-                                  );
-                                })()}
+                                {/* Sync to Voice Agent Button */}
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary"
+                                  onClick={handleSyncToOmni}
+                                  disabled={isSyncingOmni}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.4rem',
+                                    fontSize: '0.82rem',
+                                    fontWeight: '700',
+                                    padding: '0.52rem 1rem',
+                                    backgroundColor: '#ffffff',
+                                    borderColor: '#cbd5e1',
+                                    color: '#1b3b6f',
+                                    boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                                    cursor: isSyncingOmni ? 'wait' : 'pointer'
+                                  }}
+                                  title="Sync counselor number to AI voice telephony agent"
+                                >
+                                  <RefreshCw size={14} className={isSyncingOmni ? "animate-spin" : ""} style={{ color: '#F16522' }} />
+                                  <span>{isSyncingOmni ? 'Syncing...' : 'Sync to Voice Agent'}</span>
+                                </button>
                               </div>
 
+                              {(() => {
+                                const cleanInput = String(counselorPhone || '').replace(/\D/g, '');
+                                const cleanSynced = String(lastSyncedPhone || '').replace(/\D/g, '');
+                                const isMatch = cleanInput && cleanSynced && (cleanInput === cleanSynced || cleanInput.endsWith(cleanSynced) || cleanSynced.endsWith(cleanInput));
+                                return (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.55rem', flexWrap: 'wrap' }}>
+                                    <span style={{
+                                      fontSize: '0.72rem',
+                                      fontWeight: '700',
+                                      padding: '0.18rem 0.55rem',
+                                      borderRadius: '4px',
+                                      backgroundColor: isMatch ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+                                      color: isMatch ? '#047857' : '#b45309',
+                                      border: `1px solid ${isMatch ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.25)'}`
+                                    }}>
+                                      {isMatch ? `✔ Connected to Voice Agent: ${lastSyncedPhone}` : `⚠️ Pending Sync (Click 'Sync to Voice Agent' or start campaign)`}
+                                    </span>
+                                  </div>
+                                );
+                              })()}
                             </div>
                           </div>
                         )}
                       </div>
+
 
                       {/* Start Campaign Bar */}
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(27, 59, 111, 0.03)', padding: '1rem 1.5rem', borderRadius: '12px', border: '1px solid var(--border)' }}>

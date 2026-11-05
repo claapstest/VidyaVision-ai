@@ -4612,7 +4612,7 @@ app.get('/api/omni/agent-transfer', async (req, res) => {
       agentId: data.id,
       agentName: data.name,
       isTransferEnabled: data.is_transfer_enabled,
-      counselorPhone: primaryOption.number || '+919573097810',
+      counselorPhone: (/\d{4,}/.test(String(primaryOption.number || '')) && String(primaryOption.number).trim() !== 'counselor_phone') ? primaryOption.number : '+91 95730 97810',
       transferCondition: primaryOption.transfer_condition || '',
       transferMessage: primaryOption.transfer_message || '',
       rawOptions: data.transfer_options || []
