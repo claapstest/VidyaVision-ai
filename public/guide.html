@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VidyaVision Voice AI — End-to-End Calling Process Visual Manual</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #1b3b6f;
+      --primary-dark: #12284c;
+      --accent: #F16522;
+      --accent-hover: #d95314;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --text-main: #1e293b;
+      --text-muted: #64748b;
+      --border: #e2e8f0;
+      --border-highlight: rgba(27, 59, 111, 0.15);
+      --shadow: 0 4px 14px rgba(0, 0, 0, 0.05);
+      --shadow-lg: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: var(--bg);
+      color: var(--text-main);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Top Sticky Brand Bar */
+    .top-bar {
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      background: var(--primary);
+      color: #ffffff;
+      padding: 0.85rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+    }
+
+    .top-bar .brand-container {
+      background: #ffffff;
+      padding: 4px 12px;
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .top-bar .brand-container img {
+      height: 28px;
+      width: auto;
+      display: block;
+    }
+
+    .top-bar .actions {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .btn-print {
+      background: var(--accent);
+      color: #ffffff;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      font-weight: 700;
+      font-size: 0.85rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      transition: background 0.15s ease;
+    }
+
+    .btn-print:hover {
+      background: var(--accent-hover);
+    }
+
+    /* Container */
+    .container {
+      max-width: 1040px;
+      margin: 2.5rem auto 5rem auto;
+      padding: 0 1.5rem;
+    }
+
+    /* Header Banner */
+    .hero-banner {
+      background: linear-gradient(135deg, #1b3b6f 0%, #2a4d8f 100%);
+      color: #ffffff;
+      padding: 3rem 2.5rem;
+      border-radius: 18px;
+      box-shadow: var(--shadow-lg);
+      margin-bottom: 2.5rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero-banner::after {
+      content: '';
+      position: absolute;
+      top: -50px;
+      right: -50px;
+      width: 220px;
+      height: 220px;
+      background: rgba(241, 101, 34, 0.15);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+
+    .hero-banner h1 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 2.4rem;
+      font-weight: 800;
+      line-height: 1.2;
+      margin-bottom: 0.75rem;
+      letter-spacing: -0.02em;
+    }
+
+    .hero-banner p {
+      font-size: 1.05rem;
+      color: #cbd5e1;
+      max-width: 680px;
+      line-height: 1.6;
+    }
+
+    .badge-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.25rem 0.75rem;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 1rem;
+      background: rgba(255, 255, 255, 0.15);
+      color: #ffffff;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+    }
+
+    /* Workflow Cards */
+    .step-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      margin-bottom: 2.5rem;
+      overflow: hidden;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .step-card:hover {
+      border-color: rgba(27, 59, 111, 0.3);
+      box-shadow: var(--shadow-lg);
+    }
+
+    .step-header {
+      padding: 1.5rem 2rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 1.25rem;
+      background: #ffffff;
+    }
+
+    .step-number {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: var(--primary);
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.3rem;
+      font-weight: 800;
+      flex-shrink: 0;
+      box-shadow: 0 4px 10px rgba(27, 59, 111, 0.2);
+    }
+
+    .step-header-text h2 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: var(--primary);
+      margin-bottom: 0.2rem;
+    }
+
+    .step-header-text p {
+      font-size: 0.88rem;
+      color: var(--text-muted);
+    }
+
+    .step-body {
+      padding: 2rem;
+    }
+
+    .step-content {
+      margin-bottom: 1.5rem;
+    }
+
+    .step-content p {
+      font-size: 0.95rem;
+      color: #334155;
+      margin-bottom: 0.85rem;
+    }
+
+    .step-content ul {
+      padding-left: 1.35rem;
+      margin-bottom: 1rem;
+    }
+
+    .step-content li {
+      margin-bottom: 0.4rem;
+      font-size: 0.92rem;
+      color: #475569;
+    }
+
+    .step-content li b {
+      color: #1e293b;
+    }
+
+    /* Screenshot Container */
+    .screenshot-frame {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: #0f172a;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+      margin: 1.25rem 0;
+      position: relative;
+    }
+
+    .screenshot-caption {
+      background: #f1f5f9;
+      padding: 0.6rem 1rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--primary);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .screenshot-frame img {
+      width: 100%;
+      height: auto;
+      display: block;
+      transition: transform 0.2s ease;
+    }
+
+    /* Pro-Tip Box */
+    .protip {
+      background: rgba(16, 185, 129, 0.07);
+      border-left: 4px solid var(--success);
+      padding: 1rem 1.25rem;
+      border-radius: 0 8px 8px 0;
+      margin-top: 1.25rem;
+      font-size: 0.88rem;
+      color: #065f46;
+    }
+
+    .protip b {
+      color: #047857;
+    }
+
+    .warning-box {
+      background: rgba(245, 158, 11, 0.08);
+      border-left: 4px solid var(--warning);
+      padding: 1rem 1.25rem;
+      border-radius: 0 8px 8px 0;
+      margin-top: 1.25rem;
+      font-size: 0.88rem;
+      color: #92400e;
+    }
+
+    /* Table styles */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+      font-size: 0.88rem;
+    }
+
+    th, td {
+      padding: 0.75rem 1rem;
+      border: 1px solid var(--border);
+      text-align: left;
+    }
+
+    th {
+      background: #f1f5f9;
+      color: var(--primary);
+      font-weight: 700;
+    }
+
+    /* Footer */
+    footer {
+      text-align: center;
+      padding: 2.5rem 1rem;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      border-top: 1px solid var(--border);
+      margin-top: 4rem;
+    }
+
+    /* Print Styles */
+    @media print {
+      .top-bar, .btn-print {
+        display: none !important;
+      }
+      body {
+        background: #ffffff;
+      }
+      .container {
+        max-width: 100%;
+        margin: 0;
+        padding: 0;
+      }
+      .step-card {
+        page-break-inside: avoid;
+        box-shadow: none;
+        border: 1px solid #ccc;
+        margin-bottom: 2rem;
+      }
+      .hero-banner {
+        box-shadow: none;
+        padding: 2rem;
+        background: #1b3b6f !important;
+        -webkit-print-color-adjust: exact;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Sticky Header Bar -->
+  <header class="top-bar">
+    <div class="brand-container">
+      <img src="/vidyavision-logo.svg" alt="VidyaVision Logo">
+    </div>
+    <div class="actions">
+      <button class="btn-print" onclick="window.print()">🖨️ Print / Save as PDF</button>
+    </div>
+  </header>
+
+  <main class="container">
+    
+    <!-- Hero Banner -->
+    <div class="hero-banner">
+      <span class="badge-pill">Enterprise Operations Manual</span>
+      <h1>End-to-End Voice AI Calling Process</h1>
+      <p>
+        A complete visual walkthrough for admission counselors and administrators on uploading student leads, staging queues, executing autonomous AI voice calling, live call transfers, and post-call intelligence reviews.
+      </p>
+    </div>
+
+    <!-- ================= STEP 1 ================= -->
+    <section class="step-card">
+      <div class="step-header">
+        <div class="step-number">1</div>
+        <div class="step-header-text">
+          <h2>Secure Counselor Sign In</h2>
+          <p>Accessing the isolated workspace with role-based credentials</p>
+        </div>
+      </div>
+      <div class="step-body">
+        <div class="step-content">
+          <p>Each admission counselor and administrator accesses the platform via the secure VidyaVision authentication portal:</p>
+          <ul>
+            <li>Enter your registered institutional work email address (e.g. <code>counselor@vidyavision.com</code>).</li>
+            <li>Input your authorized security password and click <b>Sign In to VidyaVision</b>.</li>
+            <li><b>Workspace Isolation:</b> Logging in automatically activates your private staging workspace. Your draft contacts and queues are isolated to your account.</li>
+          </ul>
+        </div>
+
+        <div class="screenshot-frame">
+          <img src="/guide-assets/01-login-page.jpg" alt="VidyaVision Secure Login Screen">
+          <div class="screenshot-caption">📷 Screen 1: Official VidyaVision Counselor Sign In Portal</div>
+        </div>
+
+        <div class="protip">
+          💡 <b>Sub-Millisecond Instant Logout:</b> Clicking the <b>Logout</b> button at any time terminates the active session immediately, clearing tokens and wiping in-memory drafts to maintain data confidentiality between shifts.
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= STEP 2 ================= -->
+    <section class="step-card">
+      <div class="step-header">
+        <div class="step-number">2</div>
+        <div class="step-header-text">
+          <h2>Navigating the Executive Call Dashboard</h2>
+          <p>Monitoring high-level lead readiness signals & performance metrics</p>
+        </div>
+      </div>
+      <div class="step-body">
+        <div class="step-content">
+          <p>Upon sign-in, the <b>Call Dashboard</b> delivers instant intelligence on overall calling health:</p>
+          <ul>
+            <li><b>KPI Summary Cards:</b> Live counters for <i>Interested</i>, <i>Counselor Follow-up</i>, <i>Unanswered</i>, and <i>Connected Calls</i>.</li>
+            <li><b>University Scope Selector:</b> Filter all statistics by a specific institution or view combined metrics across <b>All Universities</b>.</li>
+            <li><b>Date Range Filter:</b> Easily inspect results for <i>Today</i>, <i>Yesterday</i>, or custom examination windows.</li>
+            <li><b>AI Student Profile Signals:</b> Click on extracted signals (e.g. <code>Immediate 2026</code>, <code>Counsellor Req</code>, <code>Transferred</code>) to isolate high-intent student leads immediately.</li>
+          </ul>
+        </div>
+
+        <div class="screenshot-frame">
+          <img src="/guide-assets/02-dashboard-analytics.png" alt="Call Dashboard Analytics and Signals">
+          <div class="screenshot-caption">📷 Screen 2: Real-Time Call Intelligence Dashboard & Analytics Overview</div>
+        </div>
+
+        <div class="protip">
+          🛡️ <b>Data Leak Protection:</b> Counselors without the <i>Download Excel Sheet</i> permission will see a locked indicator to prevent unauthorized student contact exports outside institutional databases.
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= STEP 3 ================= -->
+    <section class="step-card">
+      <div class="step-header">
+        <div class="step-number">3</div>
+        <div class="step-header-text">
+          <h2>Step 1 in Dialer: Importing Student Lead Lists</h2>
+          <p>Uploading Excel spreadsheets (.xlsx, .csv) or pasting raw contact numbers</p>
+        </div>
+      </div>
+      <div class="step-body">
+        <div class="step-content">
+          <p>Navigate to the <b>Call Dialer</b> tab from the top navigation bar to prepare a batch calling run:</p>
+          <ul>
+            <li><b>Mode A (Excel/CSV File Upload):</b> Drag and drop student contact sheets. The system automatically extracts valid 10-digit Indian numbers, student names, and programs while skipping duplicates.</li>
+            <li><b>Mode B (Bulk Text Paste):</b> Copy and paste unstructured student text from WhatsApp or email rosters.</li>
+            <li><b>Mode C (Single Number):</b> Enter an individual student's mobile number for immediate one-off dialing.</li>
+          </ul>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Recommended Column</th>
+                <th>Accepted Header Aliases</th>
+                <th>Sample Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><b>Mobile Number *</b></td>
+                <td><code>Phone</code>, <code>Mobile</code>, <code>Contact</code>, <code>Student Phone</code></td>
+                <td><code>9876543210</code></td>
+              </tr>
+              <tr>
+                <td><b>Student Name</b></td>
+                <td><code>Name</code>, <code>Student Name</code>, <code>Full Name</code></td>
+                <td><code>Shankar Rao</code></td>
+              </tr>
+              <tr>
+                <td><b>Target Course</b></td>
+                <td><code>Course</code>, <code>Program</code>, <code>Branch</code></td>
+                <td><code>B.Tech CSE</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="screenshot-frame">
+          <img src="/guide-assets/03-lead-import.png" alt="Lead Import File Upload and Configuration">
+          <div class="screenshot-caption">📷 Screen 3: Importing Student Leads via Excel Spreadsheet in Call Dialer</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= STEP 4 ================= -->
+    <section class="step-card">
+      <div class="step-header">
+        <div class="step-number">4</div>
+        <div class="step-header-text">
+          <h2>Step 2 in Dialer: University Selection & Queue Staging</h2>
+          <p>Assigning voice agents, setting inter-call delays, and staging contacts</p>
+        </div>
+      </div>
+      <div class="step-body">
+        <div class="step-content">
+          <p>Before launching calls, configure the target parameters:</p>
+          <ul>
+            <li><b>Target University:</b> Select the institution the Voice AI represents during the calls (e.g. <i>VidyaVision AI Assistant</i>).</li>
+            <li><b>Target Course:</b> Select whether the focus is <i>UG (Undergraduate)</i> or <i>PG (Postgraduate)</i>. The system automatically routes to the appropriate admission persona.</li>
+            <li><b>Inter-Call Delay:</b> Choose breathing room (e.g. 10s, 15s, 30s) between successive calls.</li>
+            <li>Click <b>Stage Contacts for Calling</b>: Moves validated numbers into the <b>Staged Calling Queue</b>.</li>
+          </ul>
+        </div>
+
+        <div class="screenshot-frame">
+          <img src="/guide-assets/04-staged-queue.png" alt="Staged Calling Queue Table">
+          <div class="screenshot-caption">📷 Screen 4: Reviewing Validated Contacts in the Staged Calling Queue</div>
+        </div>
+
+        <div class="protip">
+          🔒 <b>Isolated Staging Queues:</b> Staged contacts belong strictly to your active login. An administrator staging calls will never mix contacts with a counselor's queue.
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= STEP 5 ================= -->
+    <section class="step-card">
+      <div class="step-header">
+        <div class="step-number">5</div>
+        <div class="step-header-text">
+          <h2>Configuring Live Human Call Transfer</h2>
+          <p>Enabling direct voice forwarding to counselor phones during AI calls</p>
+        </div>
+      </div>
+      <div class="step-body">
+        <div class="step-content">
+          <p>When prospective students express high interest or explicitly ask to speak with an officer, the AI can seamlessly bridge the call to an admission counselor's phone:</p>
+          <ul>
+            <li>Toggle <b>Enable Call Transfer</b> to the ON position.</li>
+            <li>Verify the counselor's destination number with the <code>+91</code> country code (e.g. <code>+91 95730 97810</code>).</li>
+            <li>Click <b>Sync to Voice Agent</b>: Pushes the forwarding rule live to the telephony engine. The green badge displays <code>Live on Voice Agent</code>.</li>
+            <li><b>Student Experience:</b> If the student says <i>"Can I talk to someone about fees?"</i>, the AI politely replies: <i>"I'm transferring your call to our admission counselor. Please hold while I connect you."</i> and rings the counselor's phone immediately.</li>
+          </ul>
+        </div>
+
+        <div class="screenshot-frame">
+          <img src="/guide-assets/05-call-transfer.png" alt="Call Transfer Configuration Interface">
+          <div class="screenshot-caption">📷 Screen 5: Direct Voice Bridge & Human Counselor Call Forwarding Settings</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= STEP 6 ================= -->
+    <section class="step-card">
+      <div class="step-header">
+        <div class="step-number">6</div>
+        <div class="step-header-text">
+          <h2>Executing & Managing Sequential Calling Campaigns</h2>
+          <p>Real-time dialing monitoring, queue controls, and quiet-hours compliance</p>
+        </div>
+      </div>
+      <div class="step-body">
+        <div class="step-content">
+          <p>Click the green <b>Start Sequential Calling Campaign</b> button to begin autonomous dialing:</p>
+          <ul>
+            <li><b>Live Progress Banner:</b> Displays the student currently being dialed, call duration, contacts completed, and remaining queue count.</li>
+            <li><b>Interactive Queue Controls:</b>
+              <ul>
+                <li><b>Pause Campaign:</b> Safely halts dispatch after the ongoing conversation finishes.</li>
+                <li><b>Resume Campaign:</b> Picks up automatically from the next uncalled number.</li>
+                <li><b>Split Queue:</b> Divides remaining contacts or re-stages them for follow-up runs.</li>
+              </ul>
+            </li>
+            <li><b>Telecom Compliance Window:</b> Voice AI calls strictly operate between **09:30 AM and 06:30 PM IST**. If the clock reaches 6:30 PM, the campaign automatically pauses to respect student quiet hours.</li>
+          </ul>
+        </div>
+
+        <div class="screenshot-frame">
+          <img src="/guide-assets/06-active-calling-campaign.png" alt="Active Calling Campaign Progress Banner">
+          <div class="screenshot-caption">📷 Screen 6: Live Campaign Progress Banner & Interactive Dialing Controls</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= STEP 7 ================= -->
+    <section class="step-card">
+      <div class="step-header">
+        <div class="step-number">7</div>
+        <div class="step-header-text">
+          <h2>Recent Call Logs & Lead Outcome Classification</h2>
+          <p>Reviewing historical dispatches, student sentiments, and duration records</p>
+        </div>
+      </div>
+      <div class="step-body">
+        <div class="step-content">
+          <p>Navigate to <b>Recent Calls</b> to review real-time outcomes of all dialed student contacts:</p>
+          <ul>
+            <li><b>Student Details:</b> Name, verified contact number, and program preferences.</li>
+            <li><b>Lead Outcome Badge:</b> Classified into <code>Interested</code>, <code>Not Interested</code>, <code>Calls Not Answered</code>, or <code>Counselor Follow-up</code>.</li>
+            <li><b>AI Feedback & Signals:</b> Badges highlighting whether the student requested a transfer, is seeking immediate 2026 admission, or completed graduation.</li>
+            <li><b>Detail Report Button:</b> Click to open the in-depth student review modal.</li>
+          </ul>
+        </div>
+
+        <div class="screenshot-frame">
+          <img src="/guide-assets/07-recent-calls-table.png" alt="Recent Calls Table with Lead Outcomes">
+          <div class="screenshot-caption">📷 Screen 7: Synchronized Call Logs Table with AI Intent Badges</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= STEP 8 ================= -->
+    <section class="step-card">
+      <div class="step-header">
+        <div class="step-number">8</div>
+        <div class="step-header-text">
+          <h2>Inspecting Audio Recordings, Transcripts & WhatsApp Outreach</h2>
+          <p>Verifying conversation audio, reading dialogs, and dispatching brochures</p>
+        </div>
+      </div>
+      <div class="step-body">
+        <div class="step-content">
+          <p>The <b>Detail Report Modal</b> provides 360-degree visibility into every interaction:</p>
+          <ul>
+            <li><b>Multi-Channel Audio Playback:</b> Listen to the student and Voice AI audio recording directly with playback speed controls.</li>
+            <li><b>Turn-by-Turn Dialog Transcript:</b> Read the complete verbatim conversation transcript with speaker identification.</li>
+            <li><b>Counselor Notes & Follow-Up Date:</b> Log personalized notes and assign calendar follow-up dates.</li>
+            <li><b>1-Click WhatsApp Admission Brochure:</b> Click <b>Send WhatsApp Info</b> to automatically transmit official prospectus links and application forms to the student's phone.</li>
+          </ul>
+        </div>
+
+        <div class="screenshot-frame">
+          <img src="/guide-assets/08-call-detail-transcript.png" alt="Call Detail Modal with Audio and Transcript">
+          <div class="screenshot-caption">📷 Screen 8: Complete Call Detail Modal with Audio Player & Verbatim Transcript</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= STEP 9 ================= -->
+    <section class="step-card">
+      <div class="step-header">
+        <div class="step-number">9</div>
+        <div class="step-header-text">
+          <h2>Team Administration & Granular Permissions (Admin Only)</h2>
+          <p>Managing counselor accounts, dialing seats, and data leak protection</p>
+        </div>
+      </div>
+      <div class="step-body">
+        <div class="step-content">
+          <p>System Administrators manage staff accounts via the <b>Team Management</b> console:</p>
+          <ul>
+            <li><b>Granular Permissions Matrix:</b> Customize 7 individual security flags for each team member (e.g. <i>Upload Lead Sheets</i>, <i>Download Excel Sheet</i>, <i>Start/Stop Dialing</i>).</li>
+            <li><b>Data Leak Shield:</b> Restrict standard counselors from exporting student contact databases to prevent unauthorized data dissemination.</li>
+            <li><b>Real-Time Account Suspension:</b> Immediately revoke counselor access over WebSockets with zero page refresh required.</li>
+          </ul>
+        </div>
+
+        <div class="screenshot-frame">
+          <img src="/guide-assets/09-team-permissions.jpg" alt="Team Management and Granular RBAC Matrix">
+          <div class="screenshot-caption">📷 Screen 9: Team Management Portal with Granular RBAC Security Matrix</div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    <p><b>VidyaVision Voice AI Call Center Platform</b> • <i>Every Student's Vision</i></p>
+    <p>© 2026 VidyaVision Inc. All rights reserved. Built for institutional admission excellence.</p>
+  </footer>
+
+</body>
+</html>

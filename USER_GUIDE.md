@@ -56,17 +56,8 @@
 2. Navigate to your portal address (e.g., `https://your-domain.com` or local network URL).
 3. The official **VidyaVision** secure authentication portal will appear.
 
-```
-┌──────────────────────────────────────────────────────────┐
-│                   [ VIDYAVISION LOGO ]                   │
-│         AI Admission Telephony & Lead Intelligence        │
-│                                                          │
-│  Work Email Address: [ counselor@vidyavision.com       ] │
-│  Password:           [ ••••••••••••••                  ] │
-│                                                          │
-│              [ Sign In to VidyaVision ]                  │
-└──────────────────────────────────────────────────────────┘
-```
+![VidyaVision Counselor & Admin Sign In Portal](public/guide-assets/01-login-page.jpg)
+*Figure 1: Clean, secure counselor authentication screen with official VidyaVision branding.*
 
 ### User Roles at a Glance:
 - **System Administrator:** Unrestricted control across team management, university configurations, dialing batches, and Excel data exports.
@@ -82,6 +73,9 @@
 ## 3. Page 1: Call Dashboard & Analytics
 
 The **Call Dashboard** provides real-time high-level intelligence and lead outcome metrics across all university campaigns.
+
+![VidyaVision Admission Intelligence Dashboard](public/guide-assets/02-dashboard-analytics.png)
+*Figure 2: Real-time call intelligence dashboard showing student intent breakdown, readiness signals, and university filters.*
 
 ### 3.1 Key Performance Metric Cards (KPIs)
 At the top of the dashboard, five real-time summary cards reflect call performance:
@@ -133,6 +127,9 @@ You have three flexible methods to import numbers:
 3. **Manual Single Number:**
    - Quick entry for dialing an individual prospective student on demand.
 
+![Lead Spreadsheet Import and Validation Interface](public/guide-assets/03-lead-import.png)
+*Figure 3: Spreadsheet parser with automated column mapping, Indian phone number sanitizer, and duplicate detection.*
+
 ### 4.2 Step 2: Campaign Configuration
 - **Target University:** Select which institution's voice profile the AI should represent.
 - **Target Course / Program:** Specify whether the campaign focuses on *Engineering, MBA, Medicine, Law*, or *General Admissions*.
@@ -143,6 +140,9 @@ You have three flexible methods to import numbers:
 ### 4.3 Staged Calling Queue (Isolated Workspace)
 - Click **"Stage Contacts for Calling"** to move validated numbers into the staging table.
 - **Individual Workspace Guarantee:** Your staged calls are private to your login. If an admin stages numbers and logs out, a counselor logging in on the same computer will **never** see the admin's staged calls. Each user has their own dedicated draft queue.
+
+![Staged Calling Queue Review](public/guide-assets/04-staged-queue.png)
+*Figure 4: Isolated staged calling queue allowing counselors to inspect student names, numbers, and bots before initiating dispatch.*
 
 ### 4.4 Telecom Compliance & Auto-Cutoff Hours
 To comply with telecom regulations and avoid calling students outside acceptable hours:
@@ -157,6 +157,9 @@ When enabled, if a student says *"Can I speak to an admission counselor?"* or *"
 - **Counselor Phone Number:** Enter the active mobile/desk phone with country code (e.g., `+91 95730 97810`).
 - **Sync to Voice Agent:** Click **"Sync to Voice Agent"** to update the telephony bridge instantly.
 
+![Direct Counselor Voice Bridge and Call Forwarding](public/guide-assets/05-call-transfer.png)
+*Figure 5: Direct Voice Bridge configuration enabling instant human handover when prospective students ask to speak with an advisor.*
+
 ### 4.6 Active Campaign Controls
 Once a campaign begins, the interactive control banner provides live monitoring:
 - **Pause Campaign:** Temporarily halts dialing after the current call completes.
@@ -164,26 +167,26 @@ Once a campaign begins, the interactive control banner provides live monitoring:
 - **Split Queue:** Divides remaining numbers into sub-campaigns or stages them for re-dialing.
 - **Cancel Campaign:** Safely aborts the queue and marks uncalled contacts as canceled.
 
+![Live Calling Campaign Banner](public/guide-assets/06-active-calling-campaign.png)
+*Figure 6: Real-time campaign dispatch banner showing currently connected phone, call duration, progress meter, and pause/resume buttons.*
+
 ---
 
 ## 5. Page 3: Recent Calls, Audio & Transcripts
 
 The **Recent Calls** tab is your complete operational log of all dialed calls.
 
-```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│ Student Profile   │ University    │ Date & Duration │ Lead Outcome    │ Actions        │
-├───────────────────┼───────────────┼─────────────────┼─────────────────┼────────────────┤
-│ Akash             │ MIT WPU       │ 2 Nov 2026      │ (●) Interested  │ [Detail Report]│
-│ +91 86882 68617   │ Admission Bot │ 0:46            │                 │                │
-└────────────────────────────────────────────────────────────────────────────────────────┘
-```
+![Recent Calls Table and Lead Outcomes](public/guide-assets/07-recent-calls-table.png)
+*Figure 7: Comprehensive call logs featuring AI lead outcome classifications, timestamps, durations, and counselor action buttons.*
 
 ### 5.1 Call Detail Modal
 Clicking **Detail Report** on any call opens the comprehensive student inspection card:
 1. **Multi-Channel Audio Player:** Listen to the complete call recording directly in the browser with play, pause, seek, and playback speed controls.
 2. **Turn-by-Turn Conversation Transcript:** Read the verbatim dialog between the Voice AI and the student, complete with exact timestamps and caller intent badges.
 3. **AI Summary:** A concise 2-sentence synopsis summarizing the student's background, eligibility questions, and preferences.
+
+![Call Detail Modal with Audio Player and Transcript](public/guide-assets/08-call-detail-transcript.png)
+*Figure 8: Student call inspection modal showing embedded audio player, verbatim turn-by-turn dialogue, and AI admission assessment.*
 
 ### 5.2 Counselor Follow-Up Actions
 Counselors can update student records directly inside the Detail Modal:
@@ -198,11 +201,8 @@ Counselors can update student records directly inside the Detail Modal:
 
 Administrators have access to the **Team Management** portal via the System Admin pill badge in the navigation header.
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ TOTAL MEMBERS: 2   ACTIVE SEATS: 1   DATA LEAK PROTECTION: 1/1 SHIELDED│
-└────────────────────────────────────────────────────────────────────────┘
-```
+![Team Management and Granular RBAC Permission Matrix](public/guide-assets/09-team-permissions.jpg)
+*Figure 9: Role-based access control panel displaying active dialing seats, Data Leak Protection status, and granular permission badges.*
 
 ### 6.1 The 7 Granular Permission Flags
 Admins can toggle permissions individually for each team member:
@@ -294,3 +294,4 @@ For technical support, custom bot script modifications, or platform upgrades:
 - **Internal Administrator:** Contact your designated VidyaVision Portal Admin.
 - **Official Portal:** [www.vidyavision.com](https://www.vidyavision.com/)
 - **Document Version:** `2.0-Enterprise (Nov 2026)`
+

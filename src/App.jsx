@@ -4111,6 +4111,42 @@ export default function App() {
             </div>
           )}
 
+          {/* Visual User Guide Shortcut */}
+          <a
+            href="/guide.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open Interactive Calling Process Visual Guide & Manual"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.42rem',
+              padding: '0.45rem 0.85rem',
+              borderRadius: '8px',
+              border: '1px solid rgba(255, 255, 255, 0.22)',
+              backgroundColor: 'rgba(255, 255, 255, 0.1)',
+              color: '#ffffff',
+              fontSize: '0.82rem',
+              fontWeight: '700',
+              textDecoration: 'none',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease'
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.2)';
+              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.45)';
+              e.currentTarget.style.transform = 'translateY(-1px)';
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
+              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.22)';
+              e.currentTarget.style.transform = 'translateY(0)';
+            }}
+          >
+            <BookOpen size={14} />
+            <span>User Guide</span>
+          </a>
+
           {/* Logout Button */}
           <button
             onClick={handleLogout}
