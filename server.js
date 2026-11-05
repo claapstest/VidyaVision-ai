@@ -80,7 +80,7 @@ const DEFAULT_COUNSELOR_PERMISSIONS = {
   canViewTranscripts: true,
   canAddNotes: true,
   canStartStopCampaigns: false,
-  canUploadLeads: false,
+  canUploadLeads: true,
   canManageColleges: false,
   canExportData: false
 };
@@ -462,6 +462,12 @@ app.post('/api/admin/users', requireAdmin, async (req, res) => {
     users.push(newUser);
     await saveUsers(users);
 
+    try {
+      broadcastUsersUpdate(newUser, 'create');
+    } catch (e) {
+      console.warn('WebSocket user broadcast warning:', e.message);
+    }
+
     res.status(201).json({
       success: true,
       user: sanitizeUser(newUser)
@@ -543,6 +549,12 @@ app.put('/api/admin/users/:id', requireAdmin, async (req, res) => {
       console.warn('[DB] Error directly updating user in PostgreSQL:', dbErr.message);
     }
 
+    try {
+      broadcastUsersUpdate(user, 'update');
+    } catch (e) {
+      console.warn('WebSocket user broadcast warning:', e.message);
+    }
+
     res.json({
       success: true,
       user: sanitizeUser(user)
@@ -579,6 +591,12 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
 
     const updatedUsers = users.filter(u => u.id !== id);
     await saveUsers(updatedUsers);
+
+    try {
+      broadcastUsersUpdate(null, 'delete', id);
+    } catch (e) {
+      console.warn('WebSocket user broadcast warning:', e.message);
+    }
 
     res.json({ success: true, message: 'Counselor account deleted successfully' });
   } catch (err) {
@@ -2418,6 +2436,32 @@ function broadcast(message) {
     if (client.readyState === 1) {
       client.send(payload);
     }
+  }
+}
+
+async function broadcastUsersUpdate(singleUpdatedUser = null, action = 'update', deletedUserId = null) {
+  try {
+    const allUsers = await loadUsers();
+    const safeUsers = allUsers.map(sanitizeUser);
+    if (singleUpdatedUser) {
+      broadcast({
+        type: 'USER_UPDATED',
+        userId: singleUpdatedUser.id,
+        user: sanitizeUser(singleUpdatedUser),
+        action
+      });
+    } else if (deletedUserId) {
+      broadcast({
+        type: 'USER_DELETED',
+        userId: deletedUserId
+      });
+    }
+    broadcast({
+      type: 'USERS_LIST_UPDATED',
+      users: safeUsers
+    });
+  } catch (err) {
+    console.error('Error broadcasting user updates over WebSocket:', err.message);
   }
 }
 

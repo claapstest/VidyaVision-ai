@@ -65,7 +65,7 @@ const PERMISSION_CONFIG = [
     shortLabel: 'Upload Lead Sheets',
     description: 'Import new student contact spreadsheets (.xlsx, .csv) into the calling queues.',
     adminDefault: true,
-    counselorDefault: false,
+    counselorDefault: true,
   },
   {
     key: 'canManageColleges',
@@ -77,9 +77,9 @@ const PERMISSION_CONFIG = [
   },
   {
     key: 'canExportData',
-    label: 'Export Student Database to Excel/CSV',
-    shortLabel: 'Export Student Data',
-    description: 'Download contact telephone records, call duration sheets, and filtered outcomes.',
+    label: 'Download Excel Sheet / Export Records',
+    shortLabel: 'Download Excel Sheet',
+    description: 'Download contact telephone records, call duration sheets, and filtered outcomes in Excel (.xlsx) / CSV format. Restricted for standard counselors to prevent data leakage.',
     adminDefault: true,
     counselorDefault: false,
   },
@@ -89,13 +89,13 @@ const PRESETS = {
   standard: {
     id: 'standard',
     title: 'Standard Counselor (Recommended)',
-    subtitle: 'View reports, audio transcripts & notes. Dialing, uploads & exports blocked.',
+    subtitle: 'View reports, transcripts, notes & upload lead sheets. Dialing & Excel downloads restricted.',
     permissions: {
       canViewReports: true,
       canViewTranscripts: true,
       canAddNotes: true,
       canStartStopCampaigns: false,
-      canUploadLeads: false,
+      canUploadLeads: true,
       canManageColleges: false,
       canExportData: false,
     }
@@ -103,12 +103,12 @@ const PRESETS = {
   senior: {
     id: 'senior',
     title: 'Senior Counselor / Queue Lead',
-    subtitle: 'Standard counselor privileges + ability to upload student lead spreadsheets.',
+    subtitle: 'Standard counselor privileges + ability to start & pause calling campaigns.',
     permissions: {
       canViewReports: true,
       canViewTranscripts: true,
       canAddNotes: true,
-      canStartStopCampaigns: false,
+      canStartStopCampaigns: true,
       canUploadLeads: true,
       canManageColleges: false,
       canExportData: false,
@@ -195,6 +195,20 @@ export default function UserManagementPage({ currentUser, onBack, onUserCountCha
   useEffect(() => {
     fetchUsers();
   }, [fetchUsers]);
+
+  // Real-time synchronization via WebSocket broadcast
+  useEffect(() => {
+    const handleWsUserUpdate = (e) => {
+      if (Array.isArray(e.detail)) {
+        setUsers(e.detail);
+        if (onUserCountChange) onUserCountChange(e.detail.length);
+      } else {
+        fetchUsers();
+      }
+    };
+    window.addEventListener('vv_users_updated', handleWsUserUpdate);
+    return () => window.removeEventListener('vv_users_updated', handleWsUserUpdate);
+  }, [fetchUsers, onUserCountChange]);
 
   // Determine which preset matches current permissions
   const detectMatchingPreset = (perms, role) => {
@@ -688,7 +702,7 @@ export default function UserManagementPage({ currentUser, onBack, onUserCountCha
             {isLoading ? '—' : `${metrics.protectedCounselors} / ${metrics.counselors}`}
           </div>
           <div style={{ fontSize: '0.78rem', color: '#059669', fontWeight: '600' }}>
-            🛡️ Counselors restricted from exporting leads
+            🛡️ Counselors restricted from downloading Excel sheets
           </div>
         </div>
 

@@ -49,7 +49,7 @@ const PERMISSION_CONFIG = [
     label: 'Allow uploading student lead Excel files',
     description: 'Import new student contact spreadsheets (.xlsx, .csv) into the calling queues.',
     adminDefault: true,
-    counselorDefault: false,
+    counselorDefault: true,
   },
   {
     key: 'canManageColleges',
@@ -60,8 +60,8 @@ const PERMISSION_CONFIG = [
   },
   {
     key: 'canExportData',
-    label: 'Allow exporting student database to CSV/Excel',
-    description: 'Download contact telephone records, call duration sheets, and filtered outcomes.',
+    label: 'Allow downloading Excel sheets & exporting database',
+    description: 'Download contact telephone records, call duration sheets, and filtered outcomes in Excel/CSV.',
     adminDefault: true,
     counselorDefault: false,
   },
@@ -72,7 +72,7 @@ const DEFAULT_COUNSELOR_PERMISSIONS = {
   canViewTranscripts: true,
   canAddNotes: true,
   canStartStopCampaigns: false,
-  canUploadLeads: false,
+  canUploadLeads: true,
   canManageColleges: false,
   canExportData: false,
 };
