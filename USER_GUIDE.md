@@ -105,70 +105,151 @@ The platform analyzes every conversation transcript to extract actionable studen
 
 ---
 
-## 4. Page 2: Call Dialer & Campaign Dispatch
+## 4. End-to-End Sequential Calling Process (Step-by-Step Manual)
 
-The **Call Dialer** is your primary engine for preparing, staging, and executing sequential Voice AI campaigns.
+The **Call Dialer** is the central command center for importing leads, configuring dynamic voice bot parameters, setting time limits, and orchestrating live sequential calling campaigns.
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        CALL DIALER WORKFLOW                            │
-│                                                                        │
-│  [ STEP 1: Upload Leads ] ──> [ STEP 2: Configure ] ──> [ STEP 3: Stage & Dial ]  │
-└────────────────────────────────────────────────────────────────────────┘
-```
+Follow this 10-step process for executing calls:
 
-### 4.1 Step 1: Inputting Student Contacts
-You have three flexible methods to import numbers:
-1. **Excel / CSV File Upload (Recommended):**
-   - Drag and drop or browse for `.xlsx`, `.xls`, or `.csv` files.
-   - The platform automatically validates Indian telephone numbers, strips invalid characters, extracts names and courses, and ignores duplicate entries.
-2. **Bulk Paste Text:**
-   - Paste unformatted text containing names and numbers (e.g., copied from WhatsApp or an email). The parser extracts valid 10-digit numbers automatically.
-3. **Manual Single Number:**
-   - Quick entry for dialing an individual prospective student on demand.
+---
 
-![Lead Spreadsheet Import and Validation Interface](public/guide-assets/03-lead-import.png)
-*Figure 3: Spreadsheet parser with automated column mapping, Indian phone number sanitizer, and duplicate detection.*
+### Step 1: Inputting & Uploading Recipient Contacts
+Under **1. Upload calling data / recipient list**, select one of four flexible input methods:
 
-### 4.2 Step 2: Campaign Configuration
-- **Target University:** Select which institution's voice profile the AI should represent.
-- **Target Course / Program:** Specify whether the campaign focuses on *Engineering, MBA, Medicine, Law*, or *General Admissions*.
-  - *UG Courses (B.Tech, BBA, BCA, B.Sc):* Automatically route through the specialized Undergraduate Bot.
-  - *PG Courses (MBA, M.Tech, MCA):* Automatically route through the Postgraduate Bot.
-- **Inter-Call Delay:** Choose the breathing room between completed calls (e.g., *10 seconds, 15 seconds, 30 seconds*) to allow counselors time to log notes.
+1. **Method A — Excel / CSV Spreadsheet Upload (Recommended for Batch Dialing):**
+   - Click the **Excel / CSV Upload** tab.
+   - Drag and drop your `.xlsx`, `.xls`, or `.csv` file into the upload dropzone (or click to browse).
+   - **Intelligent Auto-Sanitizer:** The system automatically extracts 10-digit Indian mobile numbers, strips country codes (`+91`, `0`), extracts student names and courses, discards incomplete digits, and filters duplicates.
+   - **Uploaded File Capsule:** Shows the file name, file size, extraction timestamp, and total valid contacts count.
+   - **Appending / Merging Sheets:** Click **"+ Add Numbers from Excel"** to append more numbers to this batch without losing previous records, or click **"Replace File"** to start fresh.
+   - **Recent Excel Uploads & Resume Calling:** One-click quick load of past uploaded spreadsheets with progress badges (e.g., `Resume from #201`).
+   - Download the official sample format using the **"Download Sample CSV Template"** button.
 
-### 4.3 Staged Calling Queue (Isolated Workspace)
-- Click **"Stage Contacts for Calling"** to move validated numbers into the staging table.
-- **Individual Workspace Guarantee:** Your staged calls are private to your login. If an admin stages numbers and logs out, a counselor logging in on the same computer will **never** see the admin's staged calls. Each user has their own dedicated draft queue.
+2. **Method B — Single Number Input (On-Demand Ad-Hoc Calls):**
+   - Click the **Single Number Input** tab.
+   - Enter a 10-digit mobile number in the **Phone Number (Required) \*** field.
+   - Enter the student's name in the **Recipient Name (Optional)** field. When provided, the AI bot personally greets the student by name (e.g. *"Hello Ramesh, I am calling from VidyaVision Admissions..."*).
+   - Click **"+ Import Contact"** to load the student into the configuration staging batch.
 
-![Staged Calling Queue Review](public/guide-assets/04-staged-queue.png)
-*Figure 4: Isolated staged calling queue allowing counselors to inspect student names, numbers, and bots before initiating dispatch.*
+3. **Method C — Bulk Paste Raw Text:**
+   - Click the **Bulk Paste Text** tab.
+   - Paste unstructured text containing phone numbers copied from WhatsApp groups, email inquiries, or CRM notes.
+   - Supported formats: comma-separated (`9876543210, Ramesh Kumar`), tab-separated, or single numbers per line.
+   - Click **"Process & Import Numbers"** to sanitize and load contacts.
 
-### 4.4 Telecom Compliance & Auto-Cutoff Hours
-To comply with telecom regulations and avoid calling students outside acceptable hours:
-- **Business Hours Window:** Automatically prevents calls before **09:30 AM** and halts dispatch strictly at **06:30 PM IST**.
-- **Duration Timer:** Set a hard stop after a given duration (e.g., stop automatically after 60 minutes).
-- **Time Cutoff:** Choose an exact stop time (e.g., 6:00 PM). Uncalled numbers remain safely preserved and can be resumed next morning with one click.
+4. **Method D — Choose / Add from Existing Campaigns (Lead Re-Targeting):**
+   - Click the orange **"Choose from Existing Campaigns"** button.
+   - A modal displays all historical campaigns along with university name, dates, total contacts, and status.
+   - Click **"Inspect Contacts"** on any past campaign to view individual student rows and check outcome badges.
+   - Select individual contacts with checkboxes, or click **"Load All into Step 2"** to re-target unreached students or re-dial a batch.
 
-### 4.5 Live Call Transfer Configuration
-When enabled, if a student says *"Can I speak to an admission counselor?"* or *"Connect me to the office"*, the AI says:
-> *"I'm transferring your call to our admission counselor. Please hold while I connect you."*
+---
 
-- **Counselor Phone Number:** Enter the active mobile/desk phone with country code (e.g., `+91 95730 97810`).
-- **Sync to Voice Agent:** Click **"Sync to Voice Agent"** to update the telephony bridge instantly.
+### Step 2: Campaign Configuration (Step 2 Panel)
+Once contacts are imported, the **"Configure Calling Settings"** panel activates automatically:
 
-![Direct Counselor Voice Bridge and Call Forwarding](public/guide-assets/05-call-transfer.png)
-*Figure 5: Direct Voice Bridge configuration enabling instant human handover when prospective students ask to speak with an advisor.*
+1. **Campaign Name (Optional):**
+   - Enter a custom name for this campaign run (e.g., `KL University B.Tech Phase 1` or `Weekend MBA Outreach`).
+   - *Auto-naming:* If left blank, the platform automatically generates a standardized tag from the selected college and current date (e.g., `MIT WPU - Admissions Campaign (05 Nov)`).
+2. **Select Target University:**
+   - Search and choose the institution from the **Select Target University** dropdown.
+   - The selected university card expands to display location, official website link, languages spoken (e.g. *English, Hindi, Telugu*), and telephony agent ID.
+3. **Select Course & Automated Voice Bot Routing:**
+   - Choose a course from the college's offering dropdown (or select *General* if unassigned).
+   - **Dynamic Bot Routing:**
+     - Selecting an **Undergraduate program** (e.g. *B.Tech, BBA, BCA, B.Sc*) automatically assigns the **🤖 UG Admission Assistant (Bot #270740)**.
+     - Selecting a **Postgraduate program** (e.g. *MBA, M.Tech, MCA*) automatically assigns the **🤖 PG Admission Assistant (Bot #270604)**.
 
-### 4.6 Active Campaign Controls
-Once a campaign begins, the interactive control banner provides live monitoring:
-- **Pause Campaign:** Temporarily halts dialing after the current call completes.
-- **Resume Campaign:** Restarts dialing from the exact next uncalled contact.
-- **Split Queue:** Divides remaining numbers into sub-campaigns or stages them for re-dialing.
-- **Cancel Campaign:** Safely aborts the queue and marks uncalled contacts as canceled.
+---
 
-![Live Calling Campaign Banner](public/guide-assets/06-active-calling-campaign.png)
-*Figure 6: Real-time campaign dispatch banner showing currently connected phone, call duration, progress meter, and pause/resume buttons.*
+### Step 3: Select Call Buffer Delay (Inter-Call Cooldown)
+Under **"3. Select Call Buffer Delay between calls"**:
+- Choose the buffer cooldown period between sequential calls:
+  - **0 seconds (Instant):** Dials the next number immediately as soon as the previous call disconnects.
+  - **2 seconds (Recommended Default):** Standard telecom breathing room for carrier lines.
+  - **3 seconds / 5 seconds / 10 seconds:** Extended delay giving counselors time to log notes on the previous student before the next call rings.
+
+---
+
+### Step 4: Select Contact Range / Resume Interrupted Calling
+For batches larger than 1 contact, use the **Range Selector**:
+- **"From Contact #"** and **"To Contact #"**: Dial a specific slice of your spreadsheet (e.g., dial from `#201` to `#500`).
+- **Quick Preset Buttons:** Click **"All (1–N)"**, **"First 100"**, or **"Resume from #N"** based on previous progress.
+- *Preserved Excel Row Tracking:* Even when dialing contacts 201 to 500, the dialer retains the original Excel row numbers (e.g. `Row 202`) for auditability.
+
+---
+
+### Step 5: Stage Contacts & Staged Calling Queue Review
+- Click **"Stage Contacts for Calling"** to push the configured batch into the active **Staged Calling Queue**.
+- **Isolated User Workspace:** Staged queues are private to each counselor's login session. An Admin and Counselor working simultaneously will never see or overwrite each other's staged drafts.
+- **Queue Table Review:**
+  - Inspect `#`, Mobile Number, Student Name, Target University, Course, University ID badge (`#270740 UG` / `#270604 PG`), and Staged Status.
+  - Delete individual contacts with the red trash button, or click **"Clear Queue"** to wipe the queue.
+
+---
+
+### Step 6: Campaign Schedule & Time Limits (Optional)
+Click **"Configure"** on the **Campaign Schedule & Time Limits** bar:
+1. **Start Timing:**
+   - ⚡ **Start Immediately:** Dialing starts the second you click launch.
+   - 📅 **Schedule for Later Time:** Pick a future date and time using the interactive picker, or click quick presets (*In 15 mins, In 30 mins, In 1 hour, Tomorrow 10:00 AM*).
+2. **Stop Timing (Auto-Cutoff Compliance):**
+   - ♾️ **No Limit:** Dials continuously until all queued contacts finish.
+   - ⏳ **Duration Limit:** Stop automatically after a set duration (e.g. 30, 60, or 90 minutes).
+   - 🛑 **Cutoff Time:** Set an exact stop time (e.g. 06:30 PM). Uncalled numbers are cleanly preserved as paused.
+   - 🏢 **Business Window:** Restricts calls strictly to legal telecom business hours (**09:30 AM to 06:30 PM IST**).
+
+---
+
+### Step 7: Counselor Live Call Transfer Configuration
+- Toggle **Enable Call Transfer** to allow the Voice AI to transfer high-intent students live to a human counselor.
+- Enter your active phone number in **Counselor Phone Number (Live Call Forwarding)** (e.g. `95730 97810` with country code `+91`).
+- Click **"Sync to Voice Agent"** to update the telephony bridge. The green badge confirms: `✔ Connected to Voice Agent: +91 95730 97810`.
+
+---
+
+### Step 8: Start AI Calling Campaign & Live Mid-Campaign Controls
+- Click **"Start AI Calling Campaign"** (or **"Schedule Campaign"**).
+- **Active Campaign Command Banner:**
+  - **Pulsing Status:** Displays active campaign title, bot agent ID, and countdown timer.
+  - **Real-Time Progress Bar:** Visual meter showing `Completed / Total Contacts (%)`.
+  - **Current Call Card:** Live connected student name, phone number, and elapsed duration counter.
+- **Mid-Campaign Control Actions:**
+  - ⏸️ **Pause Campaign:** Halts dialing after the current call completes. Uncalled numbers remain safely in the queue.
+  - ▶️ **Resume Campaign:** Restarts sequence immediately from the next uncalled number.
+  - 🔄 **Stage Remaining:** Pulls uncalled numbers back into Staging to adjust delay or switch bot.
+  - ⏹️ **Stop Campaign Queue:** Aborts the queue safely and finalizes the campaign run.
+  - 📥 **Download Excel (Live In-Progress):** Export *Completed Calls Only* or *Full Campaign Snapshot* while campaign is actively dialing!
+
+---
+
+### Step 9: Managing Paused Campaigns in Call Dialer
+- If a campaign was manually paused or auto-stopped by a cutoff limit:
+  - Header displays an orange pill counter: `⏸️ N Paused`.
+  - The **"Paused Campaigns Ready to Resume"** card displays right at the top of the Call Dialer tab.
+  - Shows total uncalled leads waiting across all paused batches.
+  - **Actions for Each Paused Campaign:**
+    - **Resume Calling:** Starts dialing the remaining contacts immediately without re-uploading.
+    - **Add / Append Contacts:** Loads the uncalled numbers into Staging so you can upload another Excel sheet or paste more numbers to append to the campaign before resuming!
+    - **Excel:** Download the list of remaining uncalled contacts.
+    - **Delete:** Safely removes the paused campaign.
+
+---
+
+### Step 10: Accessing Completed Campaigns & Analytics in Dashboard
+1. **Call Dashboard:**
+   - Review high-level KPI cards: *Total Calls, Interested Students, Counselor Follow-up Required, Not Interested, Calls Not Answered*.
+   - Filter by date range, specific university, or lead status.
+   - Click the green **"Download Excel Report (.xlsx)"** button to export comprehensive student reports with durations, recordings, and lead ratings.
+2. **Past Calling Campaigns Section:**
+   - Expand the **Past Calling Campaigns** dropdown to view all historical campaign runs.
+   - Inspect start timestamps, total recipients, and processed count.
+   - Click any campaign name to inspect the full student recipient table.
+   - Click **"Download Excel"** or **"Download CSV"** per campaign.
+   - Rename campaigns with the edit pencil icon.
+3. **Recent Calls Tab:**
+   - Inspect individual call rows, audio recordings, verbatim transcripts, and counselor follow-up notes.
+   - Dispatch brochures with 1-click **"Send WhatsApp Info"**.
 
 ---
 
