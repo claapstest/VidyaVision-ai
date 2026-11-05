@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VidyaVision Voice AI — Official End-to-End Calling Process Manual</title>
+  <title>VidyaVision Voice AI — Official User Guide & Operations Manual</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -25,12 +25,17 @@
       --border-highlight: rgba(27, 59, 111, 0.15);
       --shadow: 0 4px 14px rgba(0, 0, 0, 0.05);
       --shadow-lg: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+      --sidebar-width: 310px;
     }
 
     * {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
     }
 
     body {
@@ -41,14 +46,14 @@
       -webkit-font-smoothing: antialiased;
     }
 
-    /* Top Sticky Brand Bar */
+    /* Top Brand Bar */
     .top-bar {
       position: sticky;
       top: 0;
       z-index: 1000;
       background: var(--primary);
       color: #ffffff;
-      padding: 0.85rem 2rem;
+      padding: 0.75rem 2rem;
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -69,10 +74,28 @@
       display: block;
     }
 
-    .top-bar .actions {
+    .top-bar .top-nav-tabs {
       display: flex;
-      align-items: center;
-      gap: 0.75rem;
+      gap: 0.5rem;
+    }
+
+    .top-nav-tab {
+      color: #cbd5e1;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      padding: 0.45rem 1rem;
+      border-radius: 8px;
+      font-size: 0.84rem;
+      font-weight: 700;
+      text-decoration: none;
+      transition: all 0.15s ease;
+      cursor: pointer;
+    }
+
+    .top-nav-tab:hover, .top-nav-tab.active {
+      background: #ffffff;
+      color: var(--primary);
+      border-color: #ffffff;
     }
 
     .btn-print {
@@ -95,21 +118,114 @@
       transform: translateY(-1px);
     }
 
-    /* Container */
-    .container {
-      max-width: 1060px;
-      margin: 2.5rem auto 5rem auto;
-      padding: 0 1.5rem;
+    /* Documentation Layout with Left Sidepanel */
+    .doc-layout {
+      display: flex;
+      min-height: calc(100vh - 58px);
     }
 
-    /* Header Banner */
+    /* Sticky Sidepanel Navigation */
+    .sidebar {
+      width: var(--sidebar-width);
+      position: sticky;
+      top: 58px;
+      height: calc(100vh - 58px);
+      overflow-y: auto;
+      background: #ffffff;
+      border-right: 1px solid var(--border);
+      padding: 1.5rem 1rem 3rem 1.25rem;
+      flex-shrink: 0;
+    }
+
+    .sidebar::-webkit-scrollbar {
+      width: 5px;
+    }
+    .sidebar::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+
+    .sidebar-section {
+      margin-bottom: 1.75rem;
+    }
+
+    .sidebar-section-title {
+      font-size: 0.76rem;
+      font-weight: 800;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.65rem;
+      padding-left: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+    }
+
+    .sidebar-nav-link {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      padding: 0.48rem 0.65rem;
+      border-radius: 7px;
+      text-decoration: none;
+      color: #334155;
+      font-size: 0.85rem;
+      font-weight: 600;
+      line-height: 1.35;
+      margin-bottom: 0.15rem;
+      transition: all 0.15s ease;
+      border-left: 2px solid transparent;
+    }
+
+    .sidebar-nav-link:hover {
+      background: #f1f5f9;
+      color: var(--primary);
+    }
+
+    .sidebar-nav-link.active {
+      background: rgba(27, 59, 111, 0.08);
+      color: var(--primary);
+      border-left-color: var(--accent);
+      font-weight: 700;
+    }
+
+    .sidebar-nav-num {
+      width: 20px;
+      height: 20px;
+      border-radius: 5px;
+      background: rgba(27, 59, 111, 0.1);
+      color: var(--primary);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.72rem;
+      font-weight: 800;
+      flex-shrink: 0;
+    }
+
+    .sidebar-nav-link:hover .sidebar-nav-num,
+    .sidebar-nav-link.active .sidebar-nav-num {
+      background: var(--primary);
+      color: #ffffff;
+    }
+
+    /* Main Content Area */
+    .main-area {
+      flex: 1;
+      max-width: 1040px;
+      padding: 2.5rem 3rem 6rem 3rem;
+      overflow-x: hidden;
+    }
+
+    /* Hero Banner */
     .hero-banner {
       background: linear-gradient(135deg, #1b3b6f 0%, #2a4d8f 100%);
       color: #ffffff;
-      padding: 3rem 2.5rem;
-      border-radius: 18px;
+      padding: 2.5rem 2.25rem;
+      border-radius: 16px;
       box-shadow: var(--shadow-lg);
-      margin-bottom: 2rem;
+      margin-bottom: 2.5rem;
       position: relative;
       overflow: hidden;
     }
@@ -117,10 +233,10 @@
     .hero-banner::after {
       content: '';
       position: absolute;
-      top: -50px;
-      right: -50px;
-      width: 240px;
-      height: 240px;
+      top: -40px;
+      right: -40px;
+      width: 200px;
+      height: 200px;
       background: rgba(241, 101, 34, 0.18);
       border-radius: 50%;
       pointer-events: none;
@@ -128,15 +244,15 @@
 
     .hero-banner h1 {
       font-family: 'Outfit', sans-serif;
-      font-size: 2.3rem;
+      font-size: 2.2rem;
       font-weight: 800;
       line-height: 1.25;
-      margin-bottom: 0.75rem;
+      margin-bottom: 0.65rem;
       letter-spacing: -0.02em;
     }
 
     .hero-banner p {
-      font-size: 1.05rem;
+      font-size: 1rem;
       color: #cbd5e1;
       max-width: 720px;
       line-height: 1.6;
@@ -146,80 +262,46 @@
       display: inline-flex;
       align-items: center;
       gap: 0.35rem;
-      padding: 0.3rem 0.85rem;
+      padding: 0.25rem 0.75rem;
       border-radius: 20px;
-      font-size: 0.75rem;
+      font-size: 0.74rem;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      margin-bottom: 1rem;
+      margin-bottom: 0.85rem;
       background: rgba(255, 255, 255, 0.15);
       color: #ffffff;
       border: 1px solid rgba(255, 255, 255, 0.25);
     }
 
-    /* Table of Contents Quick Nav */
-    .toc-card {
-      background: #ffffff;
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 1.5rem;
-      margin-bottom: 2.5rem;
-      box-shadow: var(--shadow);
+    /* Section Category Divider */
+    .section-category {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin: 3.5rem 0 1.75rem 0;
+      padding-bottom: 0.75rem;
+      border-bottom: 2px solid var(--border);
     }
 
-    .toc-title {
-      font-size: 0.95rem;
+    .section-category-badge {
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.82rem;
       font-weight: 800;
-      color: var(--primary);
       text-transform: uppercase;
-      letter-spacing: 0.05em;
-      margin-bottom: 1rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .toc-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 0.6rem;
-    }
-
-    .toc-link {
-      display: flex;
-      align-items: center;
-      gap: 0.6rem;
-      padding: 0.5rem 0.75rem;
-      border-radius: 8px;
-      text-decoration: none;
-      color: #334155;
-      font-size: 0.88rem;
-      font-weight: 600;
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
-      transition: all 0.15s ease;
-    }
-
-    .toc-link:hover {
-      background: rgba(27, 59, 111, 0.06);
-      color: var(--primary);
-      border-color: rgba(27, 59, 111, 0.25);
-      transform: translateX(3px);
-    }
-
-    .toc-num {
-      width: 22px;
-      height: 22px;
-      border-radius: 6px;
+      letter-spacing: 0.08em;
       background: var(--primary);
       color: #ffffff;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 0.75rem;
+      padding: 0.35rem 0.85rem;
+      border-radius: 8px;
+    }
+
+    .section-category h2 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.65rem;
       font-weight: 800;
-      flex-shrink: 0;
+      color: var(--primary);
+      margin: 0;
     }
 
     /* Step Cards */
@@ -230,7 +312,7 @@
       box-shadow: var(--shadow);
       margin-bottom: 2.5rem;
       overflow: hidden;
-      scroll-margin-top: 80px;
+      scroll-margin-top: 75px;
       transition: border-color 0.2s ease, box-shadow 0.2s ease;
     }
 
@@ -240,49 +322,54 @@
     }
 
     .step-header {
-      padding: 1.5rem 2rem;
+      padding: 1.35rem 1.75rem;
       border-bottom: 1px solid var(--border);
       display: flex;
       align-items: center;
-      gap: 1.25rem;
+      gap: 1.15rem;
       background: #ffffff;
     }
 
     .step-number {
-      width: 44px;
-      height: 44px;
-      border-radius: 12px;
+      width: 42px;
+      height: 42px;
+      border-radius: 10px;
       background: var(--primary);
       color: #ffffff;
       display: flex;
       align-items: center;
       justify-content: center;
       font-family: 'Outfit', sans-serif;
-      font-size: 1.3rem;
+      font-size: 1.25rem;
       font-weight: 800;
       flex-shrink: 0;
-      box-shadow: 0 4px 10px rgba(27, 59, 111, 0.25);
+      box-shadow: 0 4px 10px rgba(27, 59, 111, 0.22);
     }
 
-    .step-header-text h2 {
+    .step-number.admin-num {
+      background: #F16522;
+      box-shadow: 0 4px 10px rgba(241, 101, 34, 0.25);
+    }
+
+    .step-header-text h3 {
       font-family: 'Outfit', sans-serif;
-      font-size: 1.35rem;
+      font-size: 1.3rem;
       font-weight: 800;
       color: var(--primary);
-      margin-bottom: 0.2rem;
+      margin-bottom: 0.15rem;
     }
 
     .step-header-text p {
-      font-size: 0.88rem;
+      font-size: 0.86rem;
       color: var(--text-muted);
     }
 
     .step-body {
-      padding: 2rem;
+      padding: 1.75rem;
     }
 
     .step-content p {
-      font-size: 0.95rem;
+      font-size: 0.94rem;
       color: #334155;
       margin-bottom: 0.85rem;
     }
@@ -294,7 +381,7 @@
 
     .step-content li {
       margin-bottom: 0.45rem;
-      font-size: 0.92rem;
+      font-size: 0.91rem;
       color: #475569;
     }
 
@@ -321,7 +408,7 @@
 
     .screenshot-caption {
       background: #f8fafc;
-      padding: 0.75rem 1.25rem;
+      padding: 0.7rem 1.15rem;
       font-size: 0.82rem;
       color: var(--text-muted);
       border-top: 1px solid var(--border);
@@ -331,11 +418,34 @@
       font-weight: 600;
     }
 
+    /* Placeholder for upcoming user screenshots */
+    .screenshot-placeholder {
+      border: 2px dashed #cbd5e1;
+      border-radius: 12px;
+      padding: 2.5rem 1.5rem;
+      text-align: center;
+      background: #f8fafc;
+      margin: 1.25rem 0;
+    }
+
+    .screenshot-placeholder h4 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #475569;
+      margin-bottom: 0.25rem;
+    }
+
+    .screenshot-placeholder p {
+      font-size: 0.82rem;
+      color: #94a3b8;
+      margin: 0;
+    }
+
     /* Alerts and Callouts */
     .protip {
       background: rgba(16, 185, 129, 0.07);
       border-left: 4px solid var(--success);
-      padding: 1rem 1.25rem;
+      padding: 0.95rem 1.2rem;
       border-radius: 0 8px 8px 0;
       margin-top: 1.25rem;
       font-size: 0.88rem;
@@ -349,7 +459,7 @@
     .warning-box {
       background: rgba(245, 158, 11, 0.08);
       border-left: 4px solid var(--warning);
-      padding: 1rem 1.25rem;
+      padding: 0.95rem 1.2rem;
       border-radius: 0 8px 8px 0;
       margin-top: 1.25rem;
       font-size: 0.88rem;
@@ -372,13 +482,13 @@
 
     /* Print Styles */
     @media print {
-      .top-bar, .btn-print, .toc-card {
+      .top-bar, .btn-print, .sidebar {
         display: none !important;
       }
       body {
         background: #ffffff;
       }
-      .container {
+      .main-area {
         max-width: 100%;
         margin: 0;
         padding: 0;
@@ -396,341 +506,644 @@
         -webkit-print-color-adjust: exact;
       }
     }
+
+    @media (max-width: 900px) {
+      .sidebar {
+        display: none;
+      }
+      .main-area {
+        padding: 1.5rem;
+      }
+    }
   </style>
 </head>
 <body>
 
   <!-- Sticky Top Brand Bar -->
   <header class="top-bar">
-    <div class="brand-container">
-      <img src="/vidyavision-logo.svg" alt="VidyaVision Logo">
+    <div style="display: flex; alignItems: center; gap: 1.5rem;">
+      <div class="brand-container">
+        <img src="/vidyavision-logo.svg" alt="VidyaVision Logo">
+      </div>
+      <nav class="top-nav-tabs">
+        <a href="#section-general-manual" class="top-nav-tab">📘 Platform User Manual</a>
+        <a href="#section-calling-process" class="top-nav-tab">🚀 Calling Process (10 Steps)</a>
+      </nav>
     </div>
     <div class="actions">
       <button class="btn-print" onclick="window.print()">🖨️ Print / Save as PDF</button>
     </div>
   </header>
 
-  <main class="container">
-    
-    <!-- Hero Banner -->
-    <div class="hero-banner">
-      <span class="badge-pill">Enterprise Operations Manual</span>
-      <h1>End-to-End Voice AI Calling Process</h1>
-      <p>
-        The official visual manual for admission counselors and administrators detailing the entire sequential calling lifecycle: importing student leads, configuring dynamic voice bot personas, setting telecom cutoff limits, live counselor call transfers, managing paused batches, and exporting post-call intelligence.
-      </p>
-    </div>
+  <div class="doc-layout">
 
-    <!-- Quick Table of Contents -->
-    <nav class="toc-card">
-      <div class="toc-title">📖 Calling Process Chapters</div>
-      <div class="toc-grid">
-        <a href="#step-1" class="toc-link"><span class="toc-num">1</span> 1. Contact Input Methods</a>
-        <a href="#step-2" class="toc-link"><span class="toc-num">2</span> 2. Choosing Existing Campaigns</a>
-        <a href="#step-3" class="toc-link"><span class="toc-num">3</span> 3. Step 2 Campaign Configuration</a>
-        <a href="#step-4" class="toc-link"><span class="toc-num">4</span> 4. Delay & Range Selector</a>
-        <a href="#step-5" class="toc-link"><span class="toc-num">5</span> 5. Staged Calling Queue Table</a>
-        <a href="#step-6" class="toc-link"><span class="toc-num">6</span> 6. Schedule & Call Transfer</a>
-        <a href="#step-7" class="toc-link"><span class="toc-num">7</span> 7. Active Campaign Controls</a>
-        <a href="#step-8" class="toc-link"><span class="toc-num">8</span> 8. Managing Paused Campaigns</a>
-        <a href="#step-9" class="toc-link"><span class="toc-num">9</span> 9. Dashboard & Excel Export</a>
-        <a href="#step-10" class="toc-link"><span class="toc-num">10</span> 10. Call Logs & WhatsApp</a>
+    <!-- Sticky Sidepanel Navigation -->
+    <aside class="sidebar">
+      
+      <!-- Section A: Platform Manual -->
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">
+          <span>📘 Platform User Manual</span>
+        </div>
+        <a href="#manual-login" class="sidebar-nav-link">
+          <span class="sidebar-nav-num">1</span> 1. Secure Login & Auth
+        </a>
+        <a href="#manual-colleges" class="sidebar-nav-link">
+          <span class="sidebar-nav-num">2</span> 2. College & Bot Setup
+        </a>
+        <a href="#manual-users" class="sidebar-nav-link">
+          <span class="sidebar-nav-num">3</span> 3. Team & User RBAC
+        </a>
+        <a href="#manual-dashboard" class="sidebar-nav-link">
+          <span class="sidebar-nav-num">4</span> 4. Call Dashboard & KPIs
+        </a>
+        <a href="#manual-recent-calls" class="sidebar-nav-link">
+          <span class="sidebar-nav-num">5</span> 5. Recent Calls & Audio
+        </a>
       </div>
-    </nav>
 
-    <!-- ================= STEP 1 ================= -->
-    <section id="step-1" class="step-card">
-      <div class="step-header">
-        <div class="step-number">1</div>
-        <div class="step-header-text">
-          <h2>Inputting & Uploading Recipient Contacts</h2>
-          <p>4 flexible options: Excel/CSV upload, Single number, Bulk paste, and Existing campaigns</p>
+      <!-- Section B: Calling Process -->
+      <div class="sidebar-section">
+        <div class="sidebar-section-title">
+          <span>🚀 Calling Process (10 Steps)</span>
         </div>
+        <a href="#step-1" class="sidebar-nav-link">
+          <span class="sidebar-nav-num">1</span> 1. Lead Upload Methods
+        </a>
+        <a href="#step-2" class="sidebar-nav-link">
+          <span class="sidebar-nav-num">2</span> 2. Existing Campaigns
+        </a>
+        <a href="#step-3" class="sidebar-nav-link">
+          <span class="sidebar-nav-num">3</span> 3. Step 2 Config & Bots
+        </a>
+        <a href="#step-4" class="sidebar-nav-link">
+          <span class="sidebar-nav-num">4</span> 4. Delay & Range Selector
+        </a>
+        <a href="#step-5" class="sidebar-nav-link">
+          <span class="sidebar-nav-num">5</span> 5. Staged Queue Table
+        </a>
+        <a href="#step-6" class="sidebar-nav-link">
+          <span class="sidebar-nav-num">6</span> 6. Schedule & Transfer
+        </a>
+        <a href="#step-7" class="sidebar-nav-link">
+          <span class="sidebar-nav-num">7</span> 7. Active Campaign Dialing
+        </a>
+        <a href="#step-8" class="sidebar-nav-link">
+          <span class="sidebar-nav-num">8</span> 8. Paused Campaigns
+        </a>
+        <a href="#step-9" class="sidebar-nav-link">
+          <span class="sidebar-nav-num">9</span> 9. Completed Campaigns
+        </a>
+        <a href="#step-10" class="sidebar-nav-link">
+          <span class="sidebar-nav-num">10</span> 10. Transcripts & WhatsApp
+        </a>
       </div>
-      <div class="step-body">
-        <div class="step-content">
-          <p>Under <b>1. Upload calling data / recipient list</b>, choose your preferred method to import prospective student contacts:</p>
-          <ul>
-            <li><b>Excel / CSV Upload (Recommended):</b> Drag and drop <code>.xlsx</code>, <code>.xls</code>, or <code>.csv</code> spreadsheets. The intelligent parser extracts valid 10-digit Indian numbers, cleans non-numeric symbols, pulls student names and courses, and filters duplicate entries.</li>
-            <li><b>Single Number Input:</b> Rapid one-off dialer. Enter the student's 10-digit number and optional Recipient Name so the AI bot addresses the student personally.</li>
-            <li><b>Bulk Paste Text:</b> Paste raw text copied from WhatsApp rosters or emails (e.g. <code>9876543210, Ramesh Kumar</code>).</li>
-            <li><b>Recent Excel Uploads & Resume:</b> Instant one-click reload of previously uploaded spreadsheets with progress badges (e.g. <code>Resume from #201</code>).</li>
-          </ul>
-        </div>
 
-        <div class="screenshot-frame">
-          <img src="/guide-assets/01-dialer-upload-options.png" alt="Call Dialer Step 1 Contact Input Options">
-          <div class="screenshot-caption">📷 Screen 1: Call Dialer Step 1 — Input Options (Excel/CSV Upload, Single Number, Bulk Paste, and Existing Campaigns)</div>
-        </div>
-
-        <div class="protip">
-          💡 <b>Multi-Sheet Appending:</b> Click <b>"+ Add Numbers from Excel"</b> to append additional spreadsheets into the current batch without overwriting existing leads.
-        </div>
+      <div style="border-top: 1px solid var(--border); padding-top: 1rem; margin-top: 1rem;">
+        <span style="font-size: 0.72rem; color: var(--text-muted); display: block; line-height: 1.4;">
+          <b>VidyaVision Voice AI</b><br>v2.0 Enterprise Operations
+        </span>
       </div>
-    </section>
+    </aside>
 
-    <!-- ================= STEP 2 ================= -->
-    <section id="step-2" class="step-card">
-      <div class="step-header">
-        <div class="step-number">2</div>
-        <div class="step-header-text">
-          <h2>Choosing / Adding from Existing Campaigns</h2>
-          <p>Re-targeting previous batches, inspecting recipient outcomes, and loading unreached leads</p>
-        </div>
+    <!-- Main Content Area -->
+    <main class="main-area">
+      
+      <!-- Hero Banner -->
+      <div class="hero-banner">
+        <span class="badge-pill">Enterprise Documentation Portal</span>
+        <h1>VidyaVision User Manual & Operations Guide</h1>
+        <p>
+          Comprehensive visual manual covering system administration, college bot configuration, granular team RBAC, call intelligence analytics, and the complete 10-step sequential Voice AI calling lifecycle.
+        </p>
       </div>
-      <div class="step-body">
-        <div class="step-content">
-          <p>Click the orange <b>"Choose from Existing Campaigns"</b> button to access your historical campaign archive:</p>
-          <ul>
-            <li><b>Inspect Contacts:</b> Review individual student rows, dial outcomes, durations, and interest statuses from any completed or paused run.</li>
-            <li><b>Selective Sub-Batch Staging:</b> Use checkboxes or range filters to select specific students who were unanswered or requested follow-up.</li>
-            <li><b>Load All into Step 2:</b> Move past campaign contacts directly into the dialer configuration pipeline with a single click.</li>
-          </ul>
-        </div>
 
-        <div class="screenshot-frame">
-          <img src="/guide-assets/02-existing-campaigns-modal.png" alt="Choose from Existing Campaigns Modal">
-          <div class="screenshot-caption">📷 Screen 2: Choose from Existing Campaigns Modal — Re-targeting and Sub-Batch Inspection</div>
-        </div>
+      <!-- ========================================================================= -->
+      <!-- PART 1: PLATFORM USER MANUAL & ADMINISTRATION GUIDE -->
+      <!-- ========================================================================= -->
+      <div id="section-general-manual" class="section-category">
+        <span class="section-category-badge">Part 1</span>
+        <h2>Platform User Manual & Administration Guide</h2>
       </div>
-    </section>
 
-    <!-- ================= STEP 3 ================= -->
-    <section id="step-3" class="step-card">
-      <div class="step-header">
-        <div class="step-number">3</div>
-        <div class="step-header-text">
-          <h2>Step 2 in Dialer: Campaign Configuration & Voice Bot Routing</h2>
-          <p>Naming the campaign, selecting target university, and automatic UG / PG bot routing</p>
+      <!-- 1.1 Secure Login -->
+      <section id="manual-login" class="step-card">
+        <div class="step-header">
+          <div class="step-number admin-num">1.1</div>
+          <div class="step-header-text">
+            <h3>Secure Counselor & Administrator Sign In</h3>
+            <p>Accessing the isolated workspace with role-based credentials</p>
+          </div>
         </div>
+        <div class="step-body">
+          <div class="step-content">
+            <p>Each admission counselor and administrator accesses the platform via the secure VidyaVision authentication portal:</p>
+            <ul>
+              <li><b>Work Email Address:</b> Enter your registered corporate email (e.g. <code>counselor@vidyavision.com</code> or <code>admin@vidyavision.com</code>).</li>
+              <li><b>Password:</b> Input your authorized password (minimum 6 characters) and click <b>Sign In to VidyaVision</b>.</li>
+              <li><b>Workspace Isolation:</b> Signing in automatically loads your private in-memory draft queue. Staged calls and dialer drafts are isolated strictly to your user account.</li>
+              <li><b>Instant Logout:</b> Clicking the <b>Logout</b> button at any time terminates the active session immediately, clearing tokens and wiping in-memory drafts to prevent unauthorized access.</li>
+            </ul>
+          </div>
+
+          <div class="screenshot-frame">
+            <img src="/guide-assets/01-login-page.jpg" alt="VidyaVision Secure Login Screen">
+            <div class="screenshot-caption">📷 Screen 1.1: Official VidyaVision Counselor & Admin Authentication Portal</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 1.2 College & University Management -->
+      <section id="manual-colleges" class="step-card">
+        <div class="step-header">
+          <div class="step-number admin-num">1.2</div>
+          <div class="step-header-text">
+            <h3>University & Voice Bot Setup (Add, Edit, Delete)</h3>
+            <p>Configuring institutional voice profiles, course catalogs, and admission agent IDs</p>
+          </div>
+        </div>
+        <div class="step-body">
+          <div class="step-content">
+            <p>Administrators manage the colleges and universities represented by the AI bots directly within the Call Dialer:</p>
+            <ul>
+              <li><b>Accessing Saved Colleges:</b> Click <b>"Show Colleges (N)"</b> on the Saved Colleges banner at the top of the Call Dialer tab.</li>
+              <li><b>Adding a New College:</b> Click <b>"+ Add New College"</b> to open the configuration modal:
+                <ul>
+                  <li><b>College Name *:</b> Full official name (e.g., <i>KL University Hyderabad</i> or <i>MIT WPU Pune</i>).</li>
+                  <li><b>Campus Location:</b> City and state (e.g., <i>Hyderabad, Telangana</i>).</li>
+                  <li><b>Description:</b> Key institutional USPs used by the AI during conversation (e.g., <i>"NAAC A++ Accredited, 100% Placement Assistance"</i>).</li>
+                  <li><b>Assigned Voice Agent ID:</b> Dedicated telephony agent identifier (defaults to <code>270604</code>).</li>
+                  <li><b>Supported Languages:</b> Comma-separated list (e.g. <i>English, Hindi, Telugu</i>).</li>
+                  <li><b>Course Offerings:</b> Comma-separated programs (e.g. <i>B.Tech CSE, MBA, Data Science, AI & ML</i>). These appear in the Step 2 course dropdown.</li>
+                  <li><b>Application / Website Link:</b> URL automatically delivered to students via WhatsApp brochures.</li>
+                  <li><b>Default Admission Counselor Phone:</b> The forwarding mobile number for live call transfers.</li>
+                </ul>
+              </li>
+              <li><b>Editing Colleges:</b> Click <b>"✏️ Edit"</b> on any college card to update course offerings or counselor phones in real-time.</li>
+              <li><b>Deleting Colleges:</b> Click <b>"🗑️ Delete"</b> with confirmation prompt to safely remove obsolete institutions.</li>
+            </ul>
+          </div>
+
+          <div class="screenshot-placeholder">
+            <h4>📷 Screen 1.2A: Saved Colleges Grid with "+ Add New College" Button</h4>
+            <p>Suggested File: <code>01-colleges-list-and-add-button.png</code></p>
+          </div>
+
+          <div class="screenshot-placeholder">
+            <h4>📷 Screen 1.2B: Add / Edit College Modal Configuration Form</h4>
+            <p>Suggested File: <code>02-add-edit-college-modal.png</code></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 1.3 Team & User RBAC -->
+      <section id="manual-users" class="step-card">
+        <div class="step-header">
+          <div class="step-number admin-num">1.3</div>
+          <div class="step-header-text">
+            <h3>Team Management & Granular RBAC Permissions (Admin Only)</h3>
+            <p>Creating counselors, assigning roles, the 7 permission flags, and Data Leak Protection</p>
+          </div>
+        </div>
+        <div class="step-body">
+          <div class="step-content">
+            <p>Administrators access the <b>Team Management</b> portal by clicking the <b>"Manage Team (N)"</b> capsule in the top navigation header:</p>
+            <ul>
+              <li><b>Executive Metrics Bar:</b>
+                <ul>
+                  <li><b>Total Team Members:</b> Headcount of Admins and Counselors.</li>
+                  <li><b>Active Dialing Seats:</b> Staff authorized to launch live calling runs.</li>
+                  <li><b>Data Leak Protection:</b> Count of counselors shielded from downloading raw contact sheets.</li>
+                  <li><b>Account Health:</b> Operational vs suspended users.</li>
+                </ul>
+              </li>
+              <li><b>Adding a New Team Member:</b> Click <b>"+ Add Team Member"</b>:
+                <ul>
+                  <li>Enter Full Name, Work Email, Role (<i>Admin</i> or <i>Counselor</i>), and Temporary Password.</li>
+                  <li><b>Permission Presets:</b> Click <i>Standard Counselor (Recommended)</i>, <i>Senior Counselor / Queue Lead</i>, or <i>Full Administrator</i>.</li>
+                </ul>
+              </li>
+              <li><b>The 7 Granular Permission Flags:</b>
+                <ul>
+                  <li><code>View Reports</code>: Access high-level analytics and KPI cards.</li>
+                  <li><code>Audio & Transcripts</code>: Listen to recordings and read transcripts.</li>
+                  <li><code>Notes & Follow-ups</code>: Log counselor feedback and send WhatsApp info.</li>
+                  <li><code>Upload Lead Sheets</code>: Import student Excel/CSV files.</li>
+                  <li><code>Start/Stop Dialing</code>: Start, pause, or cancel campaigns.</li>
+                  <li><code>Manage Colleges & Bots</code>: Add/edit colleges and agent IDs.</li>
+                  <li><code>Download Excel Sheet</code>: Export student databases (Data Leak Guard).</li>
+                </ul>
+              </li>
+              <li><b>Real-Time Suspension:</b> Toggling status to <b>Suspended</b> revokes access over WebSockets instantaneously without requiring a page refresh.</li>
+            </ul>
+          </div>
+
+          <div class="screenshot-frame">
+            <img src="/guide-assets/09-team-permissions.jpg" alt="Team Management and Granular RBAC Permission Matrix">
+            <div class="screenshot-caption">📷 Screen 1.3A: Team Management Overview & Granular Permission Matrix Table</div>
+          </div>
+
+          <div class="screenshot-placeholder">
+            <h4>📷 Screen 1.3B: Add / Edit User Modal with Role & Permission Presets</h4>
+            <p>Suggested File: <code>04-add-new-user-modal.png</code></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 1.4 Call Dashboard -->
+      <section id="manual-dashboard" class="step-card">
+        <div class="step-header">
+          <div class="step-number admin-num">1.4</div>
+          <div class="step-header-text">
+            <h3>Call Analytics & Post-Call Interest Dashboard</h3>
+            <p>Navigating KPI summary cards, university filters, readiness signals, and live Excel exports</p>
+          </div>
+        </div>
+        <div class="step-body">
+          <div class="step-content">
+            <p>The <b>Call Dashboard</b> delivers executive intelligence across all student outreach campaigns:</p>
+            <ul>
+              <li><b>5 Primary KPI Summary Cards:</b>
+                <ul>
+                  <li><b>Total Student Calls:</b> Cumulative number of call dispatches.</li>
+                  <li><b>Interested Students (Green):</b> Students expressing positive admission intent.</li>
+                  <li><b>Counselor Follow-up Required (Amber):</b> Students requesting fee discussions or callbacks.</li>
+                  <li><b>Not Interested (Red):</b> Students who declined enrollment.</li>
+                  <li><b>Calls Not Answered (Rose):</b> Unreachable, busy, or switched-off phones.</li>
+                </ul>
+              </li>
+              <li><b>University Scope Dropdown:</b> Filter all analytics by a specific college or examine aggregated data across <b>All Universities</b>.</li>
+              <li><b>Date Range Selector:</b> Analyze trends for <i>Today</i>, <i>Yesterday</i>, <i>Last 7 Days</i>, or <i>Custom Date Picker</i>.</li>
+              <li><b>AI Student Profile Signals:</b> Click on extracted signals (<code>Immediate 2026</code>, <code>Counsellor Req</code>, <code>Transferred</code>, <code>Grad Completed</code>) to instantly filter the student table.</li>
+              <li><b>Download Excel Report (.xlsx):</b> Click the green button to export full student records, durations, recordings, and lead ratings.</li>
+            </ul>
+          </div>
+
+          <div class="screenshot-frame">
+            <img src="/guide-assets/09-dashboard-past-campaigns.png" alt="Call Dashboard Analytics and Past Campaigns Grid">
+            <div class="screenshot-caption">📷 Screen 1.4: Call Intelligence Dashboard — KPI Performance Cards & Past Campaigns Archive</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 1.5 Recent Calls & Student Intelligence -->
+      <section id="manual-recent-calls" class="step-card">
+        <div class="step-header">
+          <div class="step-number admin-num">1.5</div>
+          <div class="step-header-text">
+            <h3>Recent Calls Intelligence & Counselor Actions</h3>
+            <p>Inspecting call logs, multi-channel audio playback, transcripts, and 1-click WhatsApp brochure dispatch</p>
+          </div>
+        </div>
+        <div class="step-body">
+          <div class="step-content">
+            <p>The <b>Recent Calls</b> tab provides complete chronological records of every dialed call:</p>
+            <ul>
+              <li><b>Call Table Filters:</b> Search by student name or phone number, and filter by lead outcome or date.</li>
+              <li><b>Call Detail Modal:</b> Click <b>"Detail Report"</b> on any row to open the comprehensive inspection window:
+                <ul>
+                  <li><b>Multi-Channel Audio Player:</b> Listen to the complete call audio directly in the browser with playback speed controls (1x, 1.25x, 1.5x).</li>
+                  <li><b>Turn-by-Turn Transcript:</b> Read the verbatim conversation between the AI bot and the student with exact timestamps.</li>
+                  <li><b>AI Summary & Intent Badges:</b> 2-sentence synopsis highlighting eligibility, scores, and preferences.</li>
+                  <li><b>Counselor Notes & Follow-Up Date:</b> Log personalized counseling notes and set calendar callback reminders.</li>
+                  <li><b>1-Click WhatsApp Admission Brochure:</b> Click <b>"Send WhatsApp Info"</b> to automatically transmit official prospectus links and application forms to the student's mobile number.</li>
+                </ul>
+              </li>
+            </ul>
+          </div>
+
+          <div class="screenshot-frame">
+            <img src="/guide-assets/10-recent-calls-modal.png" alt="Recent Calls Detail Modal Audio Player and Transcript">
+            <div class="screenshot-caption">📷 Screen 1.5: Call Detail Modal — Audio Playback Player, Verbatim Transcript, and Follow-Up Actions</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========================================================================= -->
+      <!-- PART 2: END-TO-END CALLING PROCESS (THE 10-STEP SEQUENTIAL MANUAL) -->
+      <!-- ========================================================================= -->
+      <div id="section-calling-process" class="section-category">
+        <span class="section-category-badge">Part 2</span>
+        <h2>End-to-End Voice AI Calling Process (10 Steps)</h2>
       </div>
-      <div class="step-body">
-        <div class="step-content">
-          <p>Once contacts are loaded, the <b>"Configure Calling Settings"</b> card activates automatically:</p>
-          <ul>
-            <li><b>Campaign Name (Optional):</b> Enter a custom label (e.g. <i>MIT WPU Admissions Phase 1</i>) or leave blank to auto-generate from the college name and today's date.</li>
-            <li><b>Select Target University:</b> Search and pick from your institution list. The card displays campus location, website link, spoken languages (English, Hindi, Telugu), and agent ID.</li>
-            <li><b>Dynamic Voice Bot Assignment:</b>
-              <ul>
-                <li>Selecting an <b>Undergraduate program</b> (B.Tech, BBA, BCA, B.Sc) routes automatically to <b>🤖 UG Admission Assistant (#270740)</b>.</li>
-                <li>Selecting a <b>Postgraduate program</b> (MBA, M.Tech, MCA) routes automatically to <b>🤖 PG Admission Assistant (#270604)</b>.</li>
-                <li>Selecting <b>General</b> instructs the bot to query the caller regarding their degree level.</li>
-              </ul>
-            </li>
-          </ul>
-        </div>
 
-        <div class="screenshot-frame">
-          <img src="/guide-assets/03-campaign-config-step2.png" alt="Step 2 Campaign Configuration and University Selection">
-          <div class="screenshot-caption">📷 Screen 3: Step 2 Campaign Configuration — University Selector, Course Offerings, and Voice Bot Routing</div>
+      <!-- STEP 1 -->
+      <section id="step-1" class="step-card">
+        <div class="step-header">
+          <div class="step-number">1</div>
+          <div class="step-header-text">
+            <h3>Inputting & Uploading Recipient Contacts</h3>
+            <p>4 flexible options: Excel/CSV upload, Single number, Bulk paste, and Existing campaigns</p>
+          </div>
         </div>
-      </div>
-    </section>
+        <div class="step-body">
+          <div class="step-content">
+            <p>Under <b>1. Upload calling data / recipient list</b> in Call Dialer, choose how to import contacts:</p>
+            <ul>
+              <li><b>Excel / CSV Upload (Recommended):</b> Drag and drop <code>.xlsx</code>, <code>.xls</code>, or <code>.csv</code> spreadsheets. The intelligent parser extracts valid 10-digit Indian numbers, cleans non-numeric symbols, pulls student names and courses, and filters duplicate entries.</li>
+              <li><b>Single Number Input:</b> Rapid one-off dialer. Enter the student's 10-digit number and optional Recipient Name so the AI bot addresses the student personally.</li>
+              <li><b>Bulk Paste Text:</b> Paste raw text copied from WhatsApp rosters or emails (e.g. <code>9876543210, Ramesh Kumar</code>).</li>
+              <li><b>Recent Excel Uploads & Resume:</b> Instant one-click reload of previously uploaded spreadsheets with progress badges (e.g. <code>Resume from #201</code>).</li>
+            </ul>
+          </div>
 
-    <!-- ================= STEP 4 ================= -->
-    <section id="step-4" class="step-card">
-      <div class="step-header">
-        <div class="step-number">4</div>
-        <div class="step-header-text">
-          <h2>Inter-Call Buffer Delay & Contact Range Selector</h2>
-          <p>Configuring carrier line cooldown timers and resuming calls from specific contact numbers</p>
-        </div>
-      </div>
-      <div class="step-body">
-        <div class="step-content">
-          <p>Set precise timing parameters before staging numbers:</p>
-          <ul>
-            <li><b>Step 3 Call Buffer Delay:</b> Choose cooldown between sequential calls: <b>0s (Instant), 2s (Recommended Default), 3s, 5s, or 10s</b> to give counselors breathing room to log notes.</li>
-            <li><b>Contact Range Selector:</b> Define <b>"From Contact #"</b> and <b>"To Contact #"</b> (e.g., dial contacts #201 to #500).</li>
-            <li><b>Quick Presets:</b> Instant buttons for <i>All (1–N)</i>, <i>First 100</i>, or <i>Resume from #N</i> based on previous progress.</li>
-            <li><b>Excel Row Alignment:</b> The table retains original Excel row indices (e.g. Row 202) for auditability against raw client files.</li>
-          </ul>
-        </div>
+          <div class="screenshot-frame">
+            <img src="/guide-assets/01-dialer-upload-options.png" alt="Call Dialer Step 1 Contact Input Options">
+            <div class="screenshot-caption">📷 Screen 1: Call Dialer Step 1 — Input Options (Excel/CSV Upload, Single Number, Bulk Paste, and Existing Campaigns)</div>
+          </div>
 
-        <div class="screenshot-frame">
-          <img src="/guide-assets/04-delay-and-range-selector.png" alt="Call Buffer Delay and Range Selector">
-          <div class="screenshot-caption">📷 Screen 4: Call Buffer Delay Cooldown & Contact Range Selector (Resume Calling)</div>
+          <div class="protip">
+            💡 <b>Multi-Sheet Appending:</b> Click <b>"+ Add Numbers from Excel"</b> to append additional spreadsheets into the current batch without overwriting existing leads.
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- ================= STEP 5 ================= -->
-    <section id="step-5" class="step-card">
-      <div class="step-header">
-        <div class="step-number">5</div>
-        <div class="step-header-text">
-          <h2>Reviewing the Staged Calling Queue Table</h2>
-          <p>Inspecting validated numbers, bot IDs, and ensuring isolated user drafts</p>
+      <!-- STEP 2 -->
+      <section id="step-2" class="step-card">
+        <div class="step-header">
+          <div class="step-number">2</div>
+          <div class="step-header-text">
+            <h3>Choosing / Adding from Existing Campaigns</h3>
+            <p>Re-targeting previous batches, inspecting recipient outcomes, and loading unreached leads</p>
+          </div>
         </div>
-      </div>
-      <div class="step-body">
-        <div class="step-content">
-          <p>Click <b>"Stage Contacts for Calling"</b> to move validated leads into the active staging table:</p>
-          <ul>
-            <li><b>Isolated Counselor Workspace:</b> Staged drafts are private to your login session. Multiple counselors can stage their own lists without cross-contamination.</li>
-            <li><b>Full Parameter Inspection:</b> Verify the Mobile Number, Student Name, Target College badge, Program, and Bot ID badge (<code>#270740 UG</code> or <code>#270604 PG</code>).</li>
-            <li><b>Queue Sanitation:</b> Remove individual contacts with the red trash button, or click <b>"Clear Queue"</b> to start fresh.</li>
-          </ul>
-        </div>
+        <div class="step-body">
+          <div class="step-content">
+            <p>Click the orange <b>"Choose from Existing Campaigns"</b> button to access your historical campaign archive:</p>
+            <ul>
+              <li><b>Inspect Contacts:</b> Review individual student rows, dial outcomes, durations, and interest statuses from any completed or paused run.</li>
+              <li><b>Selective Sub-Batch Staging:</b> Use checkboxes or range filters to select specific students who were unanswered or requested follow-up.</li>
+              <li><b>Load All into Step 2:</b> Move past campaign contacts directly into the dialer configuration pipeline with a single click.</li>
+            </ul>
+          </div>
 
-        <div class="screenshot-frame">
-          <img src="/guide-assets/05-staged-queue-table.png" alt="Staged Calling Queue Table">
-          <div class="screenshot-caption">📷 Screen 5: Staged Calling Queue Table Review with Assigned Bot Personas</div>
+          <div class="screenshot-frame">
+            <img src="/guide-assets/02-existing-campaigns-modal.png" alt="Choose from Existing Campaigns Modal">
+            <div class="screenshot-caption">📷 Screen 2: Choose from Existing Campaigns Modal — Re-targeting and Sub-Batch Inspection</div>
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- ================= STEP 6 ================= -->
-    <section id="step-6" class="step-card">
-      <div class="step-header">
-        <div class="step-number">6</div>
-        <div class="step-header-text">
-          <h2>Campaign Scheduling, Cutoff Limits & Call Transfer</h2>
-          <p>Setting autonomous stop triggers and human admission counselor voice forwarding</p>
+      <!-- STEP 3 -->
+      <section id="step-3" class="step-card">
+        <div class="step-header">
+          <div class="step-number">3</div>
+          <div class="step-header-text">
+            <h3>Step 2 in Dialer: Campaign Configuration & Voice Bot Routing</h3>
+            <p>Naming the campaign, selecting target university, and automatic UG / PG bot routing</p>
+          </div>
         </div>
-      </div>
-      <div class="step-body">
-        <div class="step-content">
-          <p>Click <b>"Configure"</b> on the Schedule & Time Limits banner and set up live transfer:</p>
-          <ul>
-            <li><b>1. Start Timing:</b> Select ⚡ <i>Start Immediately</i> or 📅 <i>Schedule for Later Time</i> with exact date/time picker or quick presets (<i>In 15m, In 30m, Tomorrow 10:00 AM</i>).</li>
-            <li><b>2. Stop Timing (Auto-Cutoff):</b> Choose ♾️ <i>No Limit</i>, ⏳ <i>Duration Limit</i> (e.g. 60m), 🛑 <i>Cutoff Time</i> (e.g. 06:30 PM), or 🏢 <i>Business Window Compliance</i> (09:30 AM to 06:30 PM IST).</li>
-            <li><b>Live Counselor Call Transfer:</b> Toggle ON, enter your counselor mobile number with <code>+91</code> prefix, and click <b>"Sync to Voice Agent"</b>. When a student asks for human guidance, the call bridges directly to your phone.</li>
-          </ul>
-        </div>
+        <div class="step-body">
+          <div class="step-content">
+            <p>Once contacts are loaded, the <b>"Configure Calling Settings"</b> card activates automatically:</p>
+            <ul>
+              <li><b>Campaign Name (Optional):</b> Enter a custom label (e.g. <i>MIT WPU Admissions Phase 1</i>) or leave blank to auto-generate from the college name and today's date.</li>
+              <li><b>Select Target University:</b> Search and pick from your institution list. The card displays campus location, website link, spoken languages (English, Hindi, Telugu), and agent ID.</li>
+              <li><b>Dynamic Voice Bot Assignment:</b>
+                <ul>
+                  <li>Selecting an <b>Undergraduate program</b> (B.Tech, BBA, BCA, B.Sc) routes automatically to <b>🤖 UG Admission Assistant (#270740)</b>.</li>
+                  <li>Selecting a <b>Postgraduate program</b> (MBA, M.Tech, MCA) routes automatically to <b>🤖 PG Admission Assistant (#270604)</b>.</li>
+                  <li>Selecting <b>General</b> instructs the bot to query the caller regarding their degree level.</li>
+                </ul>
+              </li>
+            </ul>
+          </div>
 
-        <div class="screenshot-frame">
-          <img src="/guide-assets/06-schedule-and-transfer.png" alt="Campaign Schedule Limits and Counselor Call Transfer">
-          <div class="screenshot-caption">📷 Screen 6: Campaign Schedule, Auto-Cutoff Limits & Counselor Call Transfer Configuration</div>
+          <div class="screenshot-frame">
+            <img src="/guide-assets/03-campaign-config-step2.png" alt="Step 2 Campaign Configuration and University Selection">
+            <div class="screenshot-caption">📷 Screen 3: Step 2 Campaign Configuration — University Selector, Course Offerings, and Voice Bot Routing</div>
+          </div>
         </div>
+      </section>
 
-        <div class="protip">
-          🛡️ <b>Quiet-Hours Compliance:</b> Auto-cutoff halts dialing strictly when the limit is reached. All uncalled numbers remain preserved in the queue and can be resumed with one click the next morning.
+      <!-- STEP 4 -->
+      <section id="step-4" class="step-card">
+        <div class="step-header">
+          <div class="step-number">4</div>
+          <div class="step-header-text">
+            <h3>Inter-Call Buffer Delay & Contact Range Selector</h3>
+            <p>Configuring carrier line cooldown timers and resuming calls from specific contact numbers</p>
+          </div>
         </div>
-      </div>
-    </section>
+        <div class="step-body">
+          <div class="step-content">
+            <p>Set precise timing parameters before staging numbers:</p>
+            <ul>
+              <li><b>Step 3 Call Buffer Delay:</b> Choose cooldown between sequential calls: <b>0s (Instant), 2s (Recommended Default), 3s, 5s, or 10s</b> to give counselors breathing room to log notes.</li>
+              <li><b>Contact Range Selector:</b> Define <b>"From Contact #"</b> and <b>"To Contact #"</b> (e.g., dial contacts #201 to #500).</li>
+              <li><b>Quick Presets:</b> Instant buttons for <i>All (1–N)</i>, <i>First 100</i>, or <i>Resume from #N</i> based on previous progress.</li>
+              <li><b>Excel Row Alignment:</b> The table retains original Excel row indices (e.g. Row 202) for auditability against raw client files.</li>
+            </ul>
+          </div>
 
-    <!-- ================= STEP 7 ================= -->
-    <section id="step-7" class="step-card">
-      <div class="step-header">
-        <div class="step-number">7</div>
-        <div class="step-header-text">
-          <h2>Active Campaign Execution & Live Dispatch Controls</h2>
-          <p>Monitoring sequential dialing, real-time progress bars, and in-progress Excel exports</p>
+          <div class="screenshot-frame">
+            <img src="/guide-assets/04-delay-and-range-selector.png" alt="Call Buffer Delay and Range Selector">
+            <div class="screenshot-caption">📷 Screen 4: Call Buffer Delay Cooldown & Contact Range Selector (Resume Calling)</div>
+          </div>
         </div>
-      </div>
-      <div class="step-body">
-        <div class="step-content">
-          <p>Click <b>"Start AI Calling Campaign"</b> to begin autonomous dispatch:</p>
-          <ul>
-            <li><b>Live Dispatch Banner:</b> Shows the active bot persona, connected phone number, recipient name, and live call duration timer.</li>
-            <li><b>Visual Progress Bar:</b> Real-time visual tracking showing <code>Completed / Total Contacts (%)</code>.</li>
-            <li><b>Mid-Campaign Actions:</b>
-              <ul>
-                <li>⏸️ <b>Pause Campaign:</b> Safely halts dispatch after the current active call completes.</li>
-                <li>▶️ <b>Resume Campaign:</b> Picks up immediately from the next queued contact.</li>
-                <li>🔄 <b>Stage Remaining:</b> Pulls uncalled numbers back into Staging to adjust delay or change bot.</li>
-                <li>⏹️ <b>Stop Campaign Queue:</b> Safely aborts the queue and saves campaign results.</li>
-              </ul>
-            </li>
-            <li><b>Live In-Progress Excel Export:</b> Click <b>"Download Excel"</b> during dialing to export <i>Completed Calls Only</i> or a <i>Full Campaign Snapshot</i> without interrupting the live calls!</li>
-          </ul>
-        </div>
+      </section>
 
-        <div class="screenshot-frame">
-          <img src="/guide-assets/07-active-campaign-banner.png" alt="Active Calling Campaign Progress Banner">
-          <div class="screenshot-caption">📷 Screen 7: Live Sequential Outbound Campaign Active Banner & Mid-Campaign Controls</div>
+      <!-- STEP 5 -->
+      <section id="step-5" class="step-card">
+        <div class="step-header">
+          <div class="step-number">5</div>
+          <div class="step-header-text">
+            <h3>Reviewing the Staged Calling Queue Table</h3>
+            <p>Inspecting validated numbers, bot IDs, and ensuring isolated user drafts</p>
+          </div>
         </div>
-      </div>
-    </section>
+        <div class="step-body">
+          <div class="step-content">
+            <p>Click <b>"Stage Contacts for Calling"</b> to move validated leads into the active staging table:</p>
+            <ul>
+              <li><b>Isolated Counselor Workspace:</b> Staged drafts are private to your login session. Multiple counselors can stage their own lists without cross-contamination.</li>
+              <li><b>Full Parameter Inspection:</b> Verify the Mobile Number, Student Name, Target College badge, Program, and Bot ID badge (<code>#270740 UG</code> or <code>#270604 PG</code>).</li>
+              <li><b>Queue Sanitation:</b> Remove individual contacts with the red trash button, or click <b>"Clear Queue"</b> to start fresh.</li>
+            </ul>
+          </div>
 
-    <!-- ================= STEP 8 ================= -->
-    <section id="step-8" class="step-card">
-      <div class="step-header">
-        <div class="step-number">8</div>
-        <div class="step-header-text">
-          <h2>Managing Paused Campaigns in Call Dialer</h2>
-          <p>Resuming paused runs, downloading uncalled contacts, and appending new spreadsheets</p>
+          <div class="screenshot-frame">
+            <img src="/guide-assets/05-staged-queue-table.png" alt="Staged Calling Queue Table">
+            <div class="screenshot-caption">📷 Screen 5: Staged Calling Queue Table Review with Assigned Bot Personas</div>
+          </div>
         </div>
-      </div>
-      <div class="step-body">
-        <div class="step-content">
-          <p>Whenever a campaign is paused manually or by an auto-cutoff timer:</p>
-          <ul>
-            <li><b>Navigation Capsule:</b> The top header displays a glowing orange badge: <code>⏸️ N Paused</code>.</li>
-            <li><b>Paused Campaigns Card:</b> Displayed prominently at the top of the Call Dialer tab showing the exact count of uncalled leads waiting.</li>
-            <li><b>Instant Resume:</b> Click <b>"Resume Calling"</b> to start dialing remaining contacts immediately.</li>
-            <li><b>Add / Append Contacts:</b> Click <b>"Add / Append Contacts"</b> to load remaining numbers into Staging so you can upload an additional Excel sheet or paste more numbers to append to the campaign!</li>
-            <li><b>Excel Export:</b> Download uncalled contacts to review offline.</li>
-          </ul>
-        </div>
+      </section>
 
-        <div class="screenshot-frame">
-          <img src="/guide-assets/08-paused-campaigns-card.png" alt="Paused Campaigns Ready to Resume Banner">
-          <div class="screenshot-caption">📷 Screen 8: Paused Campaigns Banner — Direct Resumption, Appending Leads, and Uncalled Export</div>
+      <!-- STEP 6 -->
+      <section id="step-6" class="step-card">
+        <div class="step-header">
+          <div class="step-number">6</div>
+          <div class="step-header-text">
+            <h3>Campaign Scheduling, Cutoff Limits & Call Transfer</h3>
+            <p>Setting autonomous stop triggers and human admission counselor voice forwarding</p>
+          </div>
         </div>
-      </div>
-    </section>
+        <div class="step-body">
+          <div class="step-content">
+            <p>Click <b>"Configure"</b> on the Schedule & Time Limits banner and set up live transfer:</p>
+            <ul>
+              <li><b>1. Start Timing:</b> Select ⚡ <i>Start Immediately</i> or 📅 <i>Schedule for Later Time</i> with exact date/time picker or quick presets (<i>In 15m, In 30m, Tomorrow 10:00 AM</i>).</li>
+              <li><b>2. Stop Timing (Auto-Cutoff):</b> Choose ♾️ <i>No Limit</i>, ⏳ <i>Duration Limit</i> (e.g. 60m), 🛑 <i>Cutoff Time</i> (e.g. 06:30 PM), or 🏢 <i>Business Window Compliance</i> (09:30 AM to 06:30 PM IST).</li>
+              <li><b>Live Counselor Call Transfer:</b> Toggle ON, enter your counselor mobile number with <code>+91</code> prefix, and click <b>"Sync to Voice Agent"</b>. When a student asks for human guidance, the call bridges directly to your phone.</li>
+            </ul>
+          </div>
 
-    <!-- ================= STEP 9 ================= -->
-    <section id="step-9" class="step-card">
-      <div class="step-header">
-        <div class="step-number">9</div>
-        <div class="step-header-text">
-          <h2>Call Dashboard & Completed Campaigns Export</h2>
-          <p>Reviewing lead readiness signals, historical campaigns, and downloading comprehensive reports</p>
-        </div>
-      </div>
-      <div class="step-body">
-        <div class="step-content">
-          <p>Navigate to the <b>Call Dashboard</b> for executive-level intelligence:</p>
-          <ul>
-            <li><b>Real-Time KPI Cards:</b> Track Total Student Calls, Interested (Green), Counselor Follow-up (Amber), and Not Answered (Rose).</li>
-            <li><b>Download Excel Report (.xlsx):</b> Click the green button to download full student outcome sheets, call durations, and recordings.</li>
-            <li><b>Past Calling Campaigns Section:</b> Click <b>"Show Campaigns"</b> to view all historical runs. Rename campaigns with the pencil icon, inspect the student table, or download campaign-specific Excel and CSV files.</li>
-          </ul>
-        </div>
+          <div class="screenshot-frame">
+            <img src="/guide-assets/06-schedule-and-transfer.png" alt="Campaign Schedule Limits and Counselor Call Transfer">
+            <div class="screenshot-caption">📷 Screen 6: Campaign Schedule, Auto-Cutoff Limits & Counselor Call Transfer Configuration</div>
+          </div>
 
-        <div class="screenshot-frame">
-          <img src="/guide-assets/09-dashboard-past-campaigns.png" alt="Call Dashboard Analytics and Past Campaigns">
-          <div class="screenshot-caption">📷 Screen 9: Executive Call Dashboard — Lead Intelligence KPI Cards & Past Calling Campaigns Grid</div>
+          <div class="protip">
+            🛡️ <b>Quiet-Hours Compliance:</b> Auto-cutoff halts dialing strictly when the limit is reached. All uncalled numbers remain preserved in the queue and can be resumed with one click the next morning.
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- ================= STEP 10 ================= -->
-    <section id="step-10" class="step-card">
-      <div class="step-header">
-        <div class="step-number">10</div>
-        <div class="step-header-text">
-          <h2>Recent Calls Intelligence, Audio Playback & WhatsApp</h2>
-          <p>Reviewing call recordings, verbatim transcripts, and 1-click brochure dispatch</p>
+      <!-- STEP 7 -->
+      <section id="step-7" class="step-card">
+        <div class="step-header">
+          <div class="step-number">7</div>
+          <div class="step-header-text">
+            <h3>Active Campaign Execution & Live Dispatch Controls</h3>
+            <p>Monitoring sequential dialing, real-time progress bars, and in-progress Excel exports</p>
+          </div>
         </div>
-      </div>
-      <div class="step-body">
-        <div class="step-content">
-          <p>Navigate to <b>Recent Calls</b> and click <b>"Detail Report"</b> on any call record:</p>
-          <ul>
-            <li><b>Multi-Channel Audio Player:</b> Listen to the complete student-agent recording directly in the browser with seek and speed controls.</li>
-            <li><b>Turn-by-Turn Dialog Transcript:</b> Read the verbatim conversation with exact caller intent badges and AI admission assessments.</li>
-            <li><b>Counselor Follow-up Notes:</b> Save follow-up remarks and set scheduled callback dates.</li>
-            <li><b>1-Click WhatsApp Admission Brochure:</b> Click <b>"Send WhatsApp Info"</b> to automatically deliver official prospectus links directly to the student's phone.</li>
-          </ul>
+        <div class="step-body">
+          <div class="step-content">
+            <p>Click <b>"Start AI Calling Campaign"</b> to begin autonomous dispatch:</p>
+            <ul>
+              <li><b>Live Dispatch Banner:</b> Shows the active bot persona, connected phone number, recipient name, and live call duration timer.</li>
+              <li><b>Visual Progress Bar:</b> Real-time visual tracking showing <code>Completed / Total Contacts (%)</code>.</li>
+              <li><b>Mid-Campaign Actions:</b>
+                <ul>
+                  <li>⏸️ <b>Pause Campaign:</b> Safely halts dispatch after the current active call completes.</li>
+                  <li>▶️ <b>Resume Campaign:</b> Picks up immediately from the next queued contact.</li>
+                  <li>🔄 <b>Stage Remaining:</b> Pulls uncalled numbers back into Staging to adjust delay or change bot.</li>
+                  <li>⏹️ <b>Stop Campaign Queue:</b> Safely aborts the queue and saves campaign results.</li>
+                </ul>
+              </li>
+              <li><b>Live In-Progress Excel Export:</b> Click <b>"Download Excel"</b> during dialing to export <i>Completed Calls Only</i> or a <i>Full Campaign Snapshot</i> without interrupting the live calls!</li>
+            </ul>
+          </div>
+
+          <div class="screenshot-frame">
+            <img src="/guide-assets/07-active-campaign-banner.png" alt="Active Calling Campaign Progress Banner">
+            <div class="screenshot-caption">📷 Screen 7: Live Sequential Outbound Campaign Active Banner & Mid-Campaign Controls</div>
+          </div>
         </div>
+      </section>
 
-        <div class="screenshot-frame">
-          <img src="/guide-assets/10-recent-calls-modal.png" alt="Recent Calls Detail Modal Audio Player and Transcript">
-          <div class="screenshot-caption">📷 Screen 10: Call Detail Modal — Audio Playback Player, Verbatim Transcript, and Follow-Up Actions</div>
+      <!-- STEP 8 -->
+      <section id="step-8" class="step-card">
+        <div class="step-header">
+          <div class="step-number">8</div>
+          <div class="step-header-text">
+            <h3>Managing Paused Campaigns in Call Dialer</h3>
+            <p>Resuming paused runs, downloading uncalled contacts, and appending new spreadsheets</p>
+          </div>
         </div>
-      </div>
-    </section>
+        <div class="step-body">
+          <div class="step-content">
+            <p>Whenever a campaign is paused manually or by an auto-cutoff timer:</p>
+            <ul>
+              <li><b>Navigation Capsule:</b> The top header displays a glowing orange badge: <code>⏸️ N Paused</code>.</li>
+              <li><b>Paused Campaigns Card:</b> Displayed prominently at the top of the Call Dialer tab showing the exact count of uncalled leads waiting.</li>
+              <li><b>Instant Resume:</b> Click <b>"Resume Calling"</b> to start dialing remaining contacts immediately.</li>
+              <li><b>Add / Append Contacts:</b> Click <b>"Add / Append Contacts"</b> to load remaining numbers into Staging so you can upload an additional Excel sheet or paste more numbers to append to the campaign before resuming!</li>
+              <li><b>Excel Export:</b> Download uncalled contacts to review offline.</li>
+            </ul>
+          </div>
 
-  </main>
+          <div class="screenshot-frame">
+            <img src="/guide-assets/08-paused-campaigns-card.png" alt="Paused Campaigns Ready to Resume Banner">
+            <div class="screenshot-caption">📷 Screen 8: Paused Campaigns Banner — Direct Resumption, Appending Leads, and Uncalled Export</div>
+          </div>
+        </div>
+      </section>
 
-  <footer>
-    <p><b>VidyaVision Voice AI Call Center Platform</b> • <i>Every Student's Vision</i></p>
-    <p>© 2026 VidyaVision Inc. All rights reserved. Built for institutional admission excellence.</p>
-  </footer>
+      <!-- STEP 9 -->
+      <section id="step-9" class="step-card">
+        <div class="step-header">
+          <div class="step-number">9</div>
+          <div class="step-header-text">
+            <h3>Call Dashboard & Completed Campaigns Export</h3>
+            <p>Reviewing lead readiness signals, historical campaigns, and downloading comprehensive reports</p>
+          </div>
+        </div>
+        <div class="step-body">
+          <div class="step-content">
+            <p>Navigate to the <b>Call Dashboard</b> for executive-level intelligence:</p>
+            <ul>
+              <li><b>Real-Time KPI Cards:</b> Track Total Student Calls, Interested (Green), Counselor Follow-up (Amber), and Not Answered (Rose).</li>
+              <li><b>Download Excel Report (.xlsx):</b> Click the green button to download full student outcome sheets, call durations, and recordings.</li>
+              <li><b>Past Calling Campaigns Section:</b> Click <b>"Show Campaigns"</b> to view all historical runs. Rename campaigns with the pencil icon, inspect the student table, or download campaign-specific Excel and CSV files.</li>
+            </ul>
+          </div>
+
+          <div class="screenshot-frame">
+            <img src="/guide-assets/09-dashboard-past-campaigns.png" alt="Call Dashboard Analytics and Past Campaigns">
+            <div class="screenshot-caption">📷 Screen 9: Executive Call Dashboard — Lead Intelligence KPI Cards & Past Calling Campaigns Grid</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- STEP 10 -->
+      <section id="step-10" class="step-card">
+        <div class="step-header">
+          <div class="step-number">10</div>
+          <div class="step-header-text">
+            <h3>Recent Calls Intelligence, Audio Playback & WhatsApp</h3>
+            <p>Reviewing call recordings, verbatim transcripts, and 1-click brochure dispatch</p>
+          </div>
+        </div>
+        <div class="step-body">
+          <div class="step-content">
+            <p>Navigate to <b>Recent Calls</b> and click <b>"Detail Report"</b> on any call record:</p>
+            <ul>
+              <li><b>Multi-Channel Audio Player:</b> Listen to the complete student-agent recording directly in the browser with seek and speed controls.</li>
+              <li><b>Turn-by-Turn Dialog Transcript:</b> Read the verbatim conversation with exact caller intent badges and AI admission assessments.</li>
+              <li><b>Counselor Follow-up Notes:</b> Save follow-up remarks and set scheduled callback dates.</li>
+              <li><b>1-Click WhatsApp Admission Brochure:</b> Click <b>"Send WhatsApp Info"</b> to automatically deliver official prospectus links directly to the student's phone.</li>
+            </ul>
+          </div>
+
+          <div class="screenshot-frame">
+            <img src="/guide-assets/10-recent-calls-modal.png" alt="Recent Calls Detail Modal Audio Player and Transcript">
+            <div class="screenshot-caption">📷 Screen 10: Call Detail Modal — Audio Playback Player, Verbatim Transcript, and Follow-Up Actions</div>
+          </div>
+        </div>
+      </section>
+
+      <footer>
+        <p><b>VidyaVision Voice AI Call Center Platform</b> • <i>Every Student's Vision</i></p>
+        <p>© 2026 VidyaVision Inc. All rights reserved. Built for institutional admission excellence.</p>
+      </footer>
+
+    </main>
+  </div>
+
+  <script>
+    // Smooth scrolling & active link highlighting in sidepanel
+    const navLinks = document.querySelectorAll('.sidebar-nav-link');
+    const sections = document.querySelectorAll('.step-card');
+
+    window.addEventListener('scroll', () => {
+      let current = '';
+      sections.forEach(section => {
+        const sectionTop = section.offsetTop - 120;
+        if (pageYOffset >= sectionTop) {
+          current = section.getAttribute('id');
+        }
+      });
+
+      navLinks.forEach(link => {
+        link.classList.remove('active');
+        if (link.getAttribute('href') === '#' + current) {
+          link.classList.add('active');
+        }
+      });
+    });
+  </script>
 
 </body>
 </html>
