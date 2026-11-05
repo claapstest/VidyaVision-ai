@@ -127,33 +127,20 @@ export default function LoginPage({ onLoginSuccess }) {
         }} />
 
         {/* Brand Header */}
-        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '56px',
-            height: '56px',
-            borderRadius: '16px',
-            backgroundColor: 'rgba(27, 59, 111, 0.06)',
-            border: '1px solid rgba(27, 59, 111, 0.12)',
-            color: '#1b3b6f',
-            marginBottom: '0.85rem',
-            boxShadow: '0 4px 10px rgba(27, 59, 111, 0.06)'
-          }}>
-            <span style={{ fontSize: '2rem', lineHeight: 1, color: '#F16522' }}>◈</span>
+        <div style={{ textAlign: 'center', marginBottom: '1.85rem' }}>
+          <div style={{ marginBottom: '0.85rem' }}>
+            <img
+              src="/vidyavision-logo.svg"
+              alt="VidyaVision Logo"
+              style={{
+                height: '46px',
+                width: 'auto',
+                maxWidth: '220px',
+                objectFit: 'contain',
+                display: 'inline-block'
+              }}
+            />
           </div>
-
-          <h1 style={{
-            fontFamily: "'Outfit', sans-serif",
-            fontSize: '1.75rem',
-            fontWeight: '800',
-            color: '#1b3b6f',
-            letterSpacing: '-0.02em',
-            margin: '0 0 0.35rem 0'
-          }}>
-            VIDYA <span style={{ color: '#F16522' }}>VISION</span>
-          </h1>
 
           <p style={{
             fontSize: '0.86rem',

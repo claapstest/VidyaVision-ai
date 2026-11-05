@@ -3684,23 +3684,19 @@ export default function App() {
         fontFamily: "'Inter', sans-serif"
       }}>
         <div style={{ textAlign: 'center' }}>
-          <div style={{
-            fontSize: '2.5rem',
-            color: '#F16522',
-            marginBottom: '0.5rem',
-            animation: 'pulse 1.5s infinite'
-          }}>
-            ◈
+          <div style={{ marginBottom: '1rem' }}>
+            <img
+              src="/vidyavision-logo.svg"
+              alt="VidyaVision Logo"
+              style={{
+                height: '48px',
+                width: 'auto',
+                maxWidth: '240px',
+                objectFit: 'contain',
+                display: 'inline-block'
+              }}
+            />
           </div>
-          <h2 style={{
-            fontFamily: "'Outfit', sans-serif",
-            fontSize: '1.5rem',
-            fontWeight: '800',
-            color: '#1b3b6f',
-            margin: '0 0 0.5rem 0'
-          }}>
-            VIDYA <span style={{ color: '#F16522' }}>VISION</span>
-          </h2>
           <p style={{ fontSize: '0.88rem', color: '#64748b', margin: '0 0 1.5rem 0' }}>
             AI Admission Telephony & Lead Intelligence
           </p>
@@ -3746,9 +3742,26 @@ export default function App() {
     <div className="app-container">
       {/* Header */}
       <header className="header">
-        <div className="brand" onClick={() => setActiveTab('dashboard')}>
-          <i className="brand-icon">◈</i>
-          <span>VIDYA <b style={{ color: '#818cf8' }}>VISION</b></span>
+        <div className="brand" onClick={() => setActiveTab('dashboard')} style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', textDecoration: 'none' }}>
+          <div style={{
+            backgroundColor: '#ffffff',
+            padding: '5px 12px',
+            borderRadius: '8px',
+            display: 'flex',
+            alignItems: 'center',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.14)',
+            transition: 'transform 0.15s ease, box-shadow 0.15s ease'
+          }}>
+            <img
+              src="/vidyavision-logo.svg"
+              alt="VidyaVision"
+              style={{
+                height: '30px',
+                width: 'auto',
+                display: 'block'
+              }}
+            />
+          </div>
         </div>
 
         <div className="nav-links">
