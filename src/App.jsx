@@ -75,14 +75,7 @@ export default function App() {
   // ==========================================
   // Authentication & Granular RBAC State
   // ==========================================
-  const [currentUser, setCurrentUser] = useState(() => {
-    try {
-      const saved = localStorage.getItem('vv_user_profile');
-      return saved ? JSON.parse(saved) : null;
-    } catch (e) {
-      return null;
-    }
-  });
+  const [currentUser, setCurrentUser] = useState(null);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [showTeamModal, setShowTeamModal] = useState(false);
   const [teamCount, setTeamCount] = useState(1);
@@ -94,11 +87,23 @@ export default function App() {
     return !!(currentUser.permissions && currentUser.permissions[permKey] === true);
   };
 
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('vv_auth_token');
+    return token ? { 'Authorization': `Bearer ${token}` } : {};
+  };
+
   // Verify auth session on mount
   useEffect(() => {
     const verifyAuth = async () => {
+      const token = localStorage.getItem('vv_auth_token');
+      if (!token) {
+        setCurrentUser(null);
+        localStorage.removeItem('vv_user_profile');
+        setIsAuthChecking(false);
+        return;
+      }
+
       try {
-        const token = localStorage.getItem('vv_auth_token');
         const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
         const res = await fetch('/api/auth/me', {
           headers,
@@ -125,6 +130,9 @@ export default function App() {
         }
       } catch (err) {
         console.error('Auth verification failed:', err);
+        setCurrentUser(null);
+        localStorage.removeItem('vv_auth_token');
+        localStorage.removeItem('vv_user_profile');
       } finally {
         setIsAuthChecking(false);
       }
@@ -140,6 +148,8 @@ export default function App() {
     localStorage.removeItem('vv_auth_token');
     localStorage.removeItem('vv_user_profile');
     setCurrentUser(null);
+    setActiveTab('dashboard');
+    setPreviousTab('dashboard');
     if (wsRef.current) {
       try { wsRef.current.close(); } catch (e) {}
       wsRef.current = null;
@@ -779,7 +789,10 @@ export default function App() {
 
   const fetchColleges = async () => {
     try {
-      const res = await fetch('/api/colleges');
+      const res = await fetch('/api/colleges', {
+        headers: getAuthHeaders(),
+        credentials: 'include'
+      });
       const data = await res.json();
       if (res.ok && data.success && Array.isArray(data.data)) {
         syncColleges(data.data);
@@ -1019,7 +1032,10 @@ export default function App() {
   // Fetch campaigns
   const fetchCampaigns = async () => {
     try {
-      const res = await fetch('/api/campaigns');
+      const res = await fetch('/api/campaigns', {
+        headers: getAuthHeaders(),
+        credentials: 'include'
+      });
       const data = await res.json();
       if (res.ok && data.success && Array.isArray(data.data)) {
         setCampaigns(data.data);
@@ -1037,7 +1053,10 @@ export default function App() {
   // dashboard + Recent Calls update even if the live socket drops).
   const fetchOmniCalls = async () => {
     try {
-      const res = await fetch('/api/calls');
+      const res = await fetch('/api/calls', {
+        headers: getAuthHeaders(),
+        credentials: 'include'
+      });
       const data = await res.json();
       if (res.ok && data.success && Array.isArray(data.data)) {
         setCalls(data.data);
@@ -3705,6 +3724,21 @@ export default function App() {
     return <LoginPage onLoginSuccess={(user) => {
       setCurrentUser(user);
       setIsAuthChecking(false);
+      // Select appropriate landing tab based on user permissions
+      if (user.role === 'admin' || user.permissions?.canViewReports !== false) {
+        setActiveTab('dashboard');
+      } else if (user.permissions?.canStartStopCampaigns || user.permissions?.canUploadLeads) {
+        setActiveTab('dispatch');
+      } else {
+        setActiveTab('calls');
+      }
+      setPreviousTab('dashboard');
+      // Fetch fresh data immediately with the new credentials
+      try {
+        fetchColleges();
+        fetchCampaigns();
+        fetchOmniCalls();
+      } catch (e) {}
     }} />;
   }
 
@@ -3718,20 +3752,23 @@ export default function App() {
         </div>
 
         <div className="nav-links">
-          <button
-            className={`nav-button ${activeTab === 'dashboard' ? 'active' : ''}`}
-            onClick={() => setActiveTab('dashboard')}
-          >
-            <PieChart size={18} />
-            Call Dashboard
-          </button>
+          {hasPermission('canViewReports') && (
+            <button
+              className={`nav-button ${activeTab === 'dashboard' ? 'active' : ''}`}
+              onClick={() => setActiveTab('dashboard')}
+            >
+              <PieChart size={18} />
+              Call Dashboard
+            </button>
+          )}
 
-          <button
-            className={`nav-button ${activeTab === 'dispatch' ? 'active' : ''}`}
-            onClick={() => setActiveTab('dispatch')}
-          >
-            <PhoneCall size={18} />
-            <span>Call Dialer</span>
+          {(hasPermission('canStartStopCampaigns') || hasPermission('canUploadLeads')) && (
+            <button
+              className={`nav-button ${activeTab === 'dispatch' ? 'active' : ''}`}
+              onClick={() => setActiveTab('dispatch')}
+            >
+              <PhoneCall size={18} />
+              <span>Call Dialer</span>
             {(() => {
               const count = campaigns.filter(c => c.status === 'paused').length;
               if (count === 0) return null;
@@ -3759,6 +3796,7 @@ export default function App() {
               );
             })()}
           </button>
+          )}
 
           <button
             className={`nav-button ${activeTab === 'calls' ? 'active' : ''}`}
@@ -3952,10 +3990,33 @@ export default function App() {
           />
         )}
 
+        {/* Fallback Guard: Prevent blank white screen if a non-admin reaches 'users' tab */}
+        {activeTab === 'users' && currentUser?.role !== 'admin' && (
+          <div className="card" style={{ padding: '3.5rem 1.5rem', textAlign: 'center', backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid var(--border)', maxWidth: '520px', margin: '2rem auto' }}>
+            <Shield size={44} style={{ color: '#ef4444', margin: '0 auto 1rem auto' }} />
+            <h2 style={{ fontSize: '1.25rem', fontWeight: '800', color: '#1e293b', marginBottom: '0.5rem' }}>Administrator Privileges Required</h2>
+            <p style={{ color: '#64748b', fontSize: '0.88rem', margin: '0 auto 1.5rem auto', lineHeight: 1.5 }}>
+              User & RBAC Management is strictly restricted to System Administrators. Your counselor account does not have permission to view or manage team members.
+            </p>
+            <button className="btn btn-primary" onClick={() => setActiveTab(hasPermission('canViewReports') ? 'dashboard' : 'calls')} style={{ margin: '0 auto' }}>
+              Return to Safe View
+            </button>
+          </div>
+        )}
+
         {/* ========================================== */}
         {/* TAB 1: DISPATCH CONSOLE (Replaces Registration) */}
         {/* ========================================== */}
         {activeTab === 'dispatch' && (
+          (!hasPermission('canStartStopCampaigns') && !hasPermission('canUploadLeads')) ? (
+            <div className="card" style={{ padding: '3.5rem 1.5rem', textAlign: 'center', backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid var(--border)', maxWidth: '520px', margin: '2rem auto' }}>
+              <Lock size={44} style={{ color: '#f59e0b', margin: '0 auto 1rem auto' }} />
+              <h2 style={{ fontSize: '1.25rem', fontWeight: '800', color: '#1e293b', marginBottom: '0.5rem' }}>Call Dialer Access Restricted</h2>
+              <p style={{ color: '#64748b', fontSize: '0.88rem', margin: '0 auto 1.5rem auto', lineHeight: 1.5 }}>
+                Your counselor account does not have permission to upload student lead spreadsheets or initiate sequential calling campaigns. Please contact your VidyaVision Administrator to request dialer privileges.
+              </p>
+            </div>
+          ) : (
           <div className={`dialer-wrapper${showLogs ? ' logs-open' : ''}`} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--stack)', minHeight: 'calc(100dvh - 120px)', position: 'relative' }}>
             <div className="page-header">
               <h1>Sequential Voice Call Dispatcher</h1>
@@ -6232,6 +6293,7 @@ export default function App() {
             </div>
 
           </div>
+          )
         )}
 
         {/* ========================================== */}
@@ -6241,6 +6303,15 @@ export default function App() {
         {/* TAB 2: INTERACTIVE CALL ANALYTICS DASHBOARD */}
         {/* ========================================== */}
         {activeTab === 'dashboard' && (
+          !hasPermission('canViewReports') ? (
+            <div className="card" style={{ padding: '3.5rem 1.5rem', textAlign: 'center', backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid var(--border)', maxWidth: '520px', margin: '2rem auto' }}>
+              <Lock size={44} style={{ color: '#f43f5e', margin: '0 auto 1rem auto' }} />
+              <h2 style={{ fontSize: '1.25rem', fontWeight: '800', color: '#1e293b', marginBottom: '0.5rem' }}>Call Analytics Access Restricted</h2>
+              <p style={{ color: '#64748b', fontSize: '0.88rem', margin: '0 auto 1.5rem auto', lineHeight: 1.5 }}>
+                Your counselor account does not have permission to view call reports or student lead metrics. Please contact your VidyaVision Administrator to request report viewing access.
+              </p>
+            </div>
+          ) : (
           <div>
             <div className="page-header">
               <div>
@@ -7827,6 +7898,7 @@ export default function App() {
 
             </div>
           </div>
+          )
         )}
 
         {/* ========================================== */}
