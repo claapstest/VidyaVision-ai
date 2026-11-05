@@ -147,6 +147,28 @@ export default function App() {
     } catch (e) {}
     localStorage.removeItem('vv_auth_token');
     localStorage.removeItem('vv_user_profile');
+    localStorage.removeItem('currentUser');
+    try {
+      sessionStorage.removeItem('vv_recent_contacts');
+      sessionStorage.removeItem('vv_recent_files');
+    } catch (e) {}
+
+    // Complete workspace isolation: clear in-memory draft queue so next user starts clean
+    setStagedContacts([]);
+    setTempContacts([]);
+    setUploadedFileInfo(null);
+    setRecentContacts([]);
+    setRecentFiles([]);
+    setSinglePhone('');
+    setSingleName('');
+    setBulkText('');
+    setCampaignCheckedContacts([]);
+    setResumingCampaignName(null);
+    setResumingCampaignId(null);
+    setSelectedCollegeDetail(null);
+    setSelectedCampaignDetail(null);
+    setSelectedCallDetail(null);
+
     setCurrentUser(null);
     setActiveTab('dashboard');
     setPreviousTab('dashboard');
@@ -230,12 +252,12 @@ export default function App() {
       const data = await res.json();
       if (res.ok && data.success) {
         setLastSyncedPhone(data.formattedNumber || counselorPhone);
-        addToast(`✔ Successfully updated counselor number (${data.formattedNumber || counselorPhone}) on OmniDimension! Live calls will now transfer here.`, 'success');
+        addToast(`✔ Successfully updated counselor number (${data.formattedNumber || counselorPhone}) on AI voice agent! Live calls will now transfer here.`, 'success');
       } else {
-        addToast(data.error || 'Failed to sync with OmniDimension', 'error');
+        addToast(data.error || 'Failed to sync with voice agent', 'error');
       }
     } catch (err) {
-      addToast('Network error syncing with OmniDimension: ' + err.message, 'error');
+      addToast('Network error syncing with voice agent: ' + err.message, 'error');
     } finally {
       setIsSyncingOmni(false);
     }
@@ -293,6 +315,72 @@ export default function App() {
       endRow: lastItem?.excelRow || (lastItem?.originalIndex ? lastItem.originalIndex + 1 : e + 1)
     };
   };
+
+  // =========================================================================
+  // USER WORKSPACE ISOLATION: Ensure Admin & Counselor Dialers Never Collide
+  // =========================================================================
+  useEffect(() => {
+    if (!currentUser || !currentUser.id) {
+      setStagedContacts([]);
+      setTempContacts([]);
+      setUploadedFileInfo(null);
+      return;
+    }
+
+    // Load active user's individual staged contacts (never bleed from other users)
+    try {
+      const userStagedKey = `vv_staged_contacts_${currentUser.id}`;
+      const raw = localStorage.getItem(userStagedKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setStagedContacts(Array.isArray(parsed) ? parsed : []);
+      } else {
+        setStagedContacts([]);
+      }
+    } catch (e) {
+      setStagedContacts([]);
+    }
+
+    // Load active user's individual temp/imported contacts
+    try {
+      const userTempKey = `vv_temp_contacts_${currentUser.id}`;
+      const rawTemp = localStorage.getItem(userTempKey);
+      if (rawTemp) {
+        const parsedTemp = JSON.parse(rawTemp);
+        setTempContacts(Array.isArray(parsedTemp) ? parsedTemp : []);
+      } else {
+        setTempContacts([]);
+      }
+    } catch (e) {
+      setTempContacts([]);
+    }
+  }, [currentUser?.id]);
+
+  // Persist staged contacts strictly under current user's ID
+  useEffect(() => {
+    if (!currentUser || !currentUser.id) return;
+    const userStagedKey = `vv_staged_contacts_${currentUser.id}`;
+    try {
+      if (stagedContacts.length > 0) {
+        localStorage.setItem(userStagedKey, JSON.stringify(stagedContacts));
+      } else {
+        localStorage.removeItem(userStagedKey);
+      }
+    } catch (e) { }
+  }, [stagedContacts, currentUser?.id]);
+
+  // Persist temp contacts strictly under current user's ID
+  useEffect(() => {
+    if (!currentUser || !currentUser.id) return;
+    const userTempKey = `vv_temp_contacts_${currentUser.id}`;
+    try {
+      if (tempContacts.length > 0) {
+        localStorage.setItem(userTempKey, JSON.stringify(tempContacts));
+      } else {
+        localStorage.removeItem(userTempKey);
+      }
+    } catch (e) { }
+  }, [tempContacts, currentUser?.id]);
   // Recently used contacts (session-scoped for privacy compliance, SEC-06):
   const getInitialRecent = () => {
     try {
@@ -5532,7 +5620,7 @@ export default function App() {
                                   backgroundColor: transferEnabled ? 'rgba(16, 185, 129, 0.15)' : 'rgba(148, 163, 184, 0.2)',
                                   color: transferEnabled ? '#059669' : '#64748b'
                                 }}>
-                                  {transferEnabled ? 'Enabled in OmniDimension' : 'Disabled'}
+                                  {transferEnabled ? 'Active on Voice Agent' : 'Disabled'}
                                 </span>
                               </div>
                               <p style={{ margin: '0.15rem 0 0', fontSize: '0.78rem', color: '#64748b' }}>
@@ -5582,7 +5670,7 @@ export default function App() {
                                 Transfer Options (1)
                               </span>
                               <span style={{ fontSize: '0.74rem', color: '#64748b' }}>
-                                Direct OmniDimension Voice Bridge
+                                Direct Voice Bridge
                               </span>
                             </div>
 
@@ -5704,10 +5792,10 @@ export default function App() {
                                       boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
                                       cursor: isSyncingOmni ? 'wait' : 'pointer'
                                     }}
-                                    title="Immediately push this counselor number to OmniDimension voice bot"
+                                    title="Immediately push this counselor number to AI voice telephony agent"
                                   >
                                     <RefreshCw size={14} className={isSyncingOmni ? "animate-spin" : ""} style={{ color: '#F16522' }} />
-                                    <span>{isSyncingOmni ? 'Syncing...' : 'Sync to OmniDimension'}</span>
+                                    <span>{isSyncingOmni ? 'Syncing...' : 'Sync to Voice Agent'}</span>
                                   </button>
                                 </div>
 
@@ -5726,7 +5814,7 @@ export default function App() {
                                         color: isMatch ? '#047857' : '#b45309',
                                         border: `1px solid ${isMatch ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.25)'}`
                                       }}>
-                                        {isMatch ? `✔ Live on OmniDimension: ${lastSyncedPhone}` : `⚠️ Pending Sync (Click 'Sync to OmniDimension' or start campaign)`}
+                                        {isMatch ? `✔ Live on Voice Agent: ${lastSyncedPhone}` : `⚠️ Pending Sync (Click 'Sync to Voice Agent' or start campaign)`}
                                       </span>
                                       <span style={{ fontSize: '0.74rem', color: '#64748b' }}>
                                         Multiple numbers will be tried in order if previous ones fail.
@@ -7347,7 +7435,7 @@ export default function App() {
                       AI Student Profile & Readiness Signals
                     </h2>
                     <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                      Variables automatically extracted by OmniDimension AI • Click any signal to filter student table
+                      Variables automatically extracted by Voice AI • Click any signal to filter student table
                     </span>
                   </div>
                 </div>
@@ -8032,7 +8120,7 @@ export default function App() {
             <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
               <div>
                 <h1>Recent Outbound Call Logs</h1>
-                <p>Full synchronized history of dispatches and agent conversation transcripts from OmniDimension.</p>
+                <p>Full synchronized history of dispatches and agent conversation transcripts.</p>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
@@ -8559,7 +8647,7 @@ export default function App() {
                     />
                   </div>
                   <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                    Synced with OmniDimension: When live transfer triggers for this college, calls connect to this counselor.
+                    Synced with Voice Agent: When live transfer triggers for this college, calls connect to this counselor.
                   </span>
                 </div>
 
