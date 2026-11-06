@@ -8,15 +8,26 @@
 ---
 
 ## Table of Contents
-1. [Platform Overview & Architecture](#1-platform-overview--architecture)
-2. [Sign In & Session Security](#2-sign-in--session-security)
-3. [Page 1: Call Dashboard & Analytics](#3-page-1-call-dashboard--analytics)
-4. [Page 2: Call Dialer & Campaign Dispatch](#4-page-2-call-dialer--campaign-dispatch)
-5. [Page 3: Recent Calls, Audio & Transcripts](#5-page-3-recent-calls-audio--transcripts)
-6. [Page 4: Team & Permissions Management (Admin Only)](#6-page-4-team--permissions-management-admin-only)
-7. [University & AI Voice Bot Configuration](#7-university--ai-voice-bot-configuration)
-8. [Spreadsheet Formatting & Lead Preparation Guide](#8-spreadsheet-formatting--lead-preparation-guide)
-9. [Troubleshooting & Frequently Asked Questions (FAQ)](#9-troubleshooting--frequently-asked-questions-faq)
+- [1. Platform Overview & Architecture](#1-platform-overview--architecture)
+- [2. Sign In & Session Security](#2-sign-in--session-security)
+- [Part 1: General Platform User Manual](#part-1-general-platform-user-manual)
+  - [3. Colleges Management & AI Bot Configuration](#3-colleges-management--ai-bot-configuration)
+  - [4. Team & Granular Permissions Management (RBAC)](#4-team--granular-permissions-management-rbac)
+  - [5. Call Dashboard & Real-Time Intelligence](#5-call-dashboard--real-time-intelligence)
+  - [6. Recent Calls, Audio Recordings & Transcripts](#6-recent-calls-audio-recordings--transcripts)
+- [Part 2: End-to-End Voice AI Calling Process (10 Steps)](#part-2-end-to-end-voice-ai-calling-process-10-steps)
+  - [Step 1: Inputting & Uploading Recipient Contacts](#step-1-inputting--uploading-recipient-contacts)
+  - [Step 2: Choosing / Adding from Existing Campaigns](#step-2-choosing--adding-from-existing-campaigns)
+  - [Step 3: Campaign Configuration & Dynamic Bot Routing](#step-3-campaign-configuration--dynamic-bot-routing)
+  - [Step 4: Call Buffer Delay & Contact Range Selector](#step-4-call-buffer-delay--contact-range-selector)
+  - [Step 5: Stage Contacts & Staged Calling Queue Review](#step-5-stage-contacts--staged-calling-queue-review)
+  - [Step 6: Campaign Schedule, Cutoff Limits & Call Transfer](#step-6-campaign-schedule-cutoff-limits--call-transfer)
+  - [Step 7: Start AI Calling Campaign & Live Controls](#step-7-start-ai-calling-campaign--live-controls)
+  - [Step 8: Managing Paused Campaigns in Call Dialer](#step-8-managing-paused-campaigns-in-call-dialer)
+  - [Step 9: Completed Campaigns & Analytics in Dashboard](#step-9-completed-campaigns--analytics-in-dashboard)
+  - [Step 10: Recent Calls Intelligence, Audio Playback & WhatsApp](#step-10-recent-calls-intelligence-audio-playback--whatsapp)
+- [7. Spreadsheet Formatting & Lead Preparation Guide](#7-spreadsheet-formatting--lead-preparation-guide)
+- [8. Troubleshooting & Frequently Asked Questions (FAQ)](#8-troubleshooting--frequently-asked-questions-faq)
 
 ---
 
@@ -70,14 +81,80 @@
 
 ---
 
-## 3. Page 1: Call Dashboard & Analytics
+# Part 1: General Platform User Manual
+
+---
+
+## 3. Colleges Management & AI Bot Configuration
+
+VidyaVision allows multi-college management from a single interface. System Administrators and authorized staff can register colleges, configure program catalogs, link distinct AI telephony agents, and set default counselor transfer numbers.
+
+![Saved Colleges Grid with Add New College Button](public/guide-assets/11-colleges-list-and-add-button.png)
+*Figure 2: Saved colleges catalog showing location, course offering tags, AI agent IDs, and "+ Add New College" button.*
+
+### 3.1 Adding a New College:
+1. In the header or the **Manage Colleges** modal, click **"+ Add New College"**.
+2. Fill in the institutional profile:
+   - **College / University Name:** Official registered name (e.g., *VidyaVision Institute of Technology*).
+   - **Campus Location / City:** (e.g., *Hyderabad, Telangana*).
+   - **Course Offerings:** Add programs as comma-separated tags or pill badges (e.g., *B.Tech, CSE, MBA, Data Science, AI & ML*).
+   - **Primary AI Voice Agent ID:** Telephony bot ID configured in the voice engine (e.g., `270740` for UG or `270604` for PG).
+   - **Default Counselor Transfer Number:** The direct 10-digit mobile number that live student calls bridge to when a student asks to speak with an advisor.
+   - **Official Website & Prospectus URL:** Automatic URL dispatched to students via WhatsApp.
+3. Click **"Save College"** to instantly update the platform database.
+
+![Add / Edit College Modal Configuration Form](public/guide-assets/12-add-edit-college-modal.png)
+*Figure 3: Add / Edit College modal with course tags, bot agent ID, and live counselor transfer phone number.*
+
+### 3.2 Editing or Deleting Colleges:
+- Click the **Pencil (Edit)** icon on any college card to update programs, change counselor transfer numbers, or modify telephony bots.
+- Click the **Trash (Delete)** icon to remove an obsolete institution.
+
+---
+
+## 4. Team & Granular Permissions Management (RBAC)
+
+Administrators have access to the **Team Management** portal via the System Admin pill badge in the navigation header.
+
+![Team Management and Granular RBAC Permission Matrix](public/guide-assets/13-team-management-overview.png)
+*Figure 4: Role-based access control console displaying active dialing seats, Data Leak Protection status, and granular permission badges.*
+
+### 4.1 The 7 Granular Permission Flags:
+Admins can toggle permissions individually for each team member:
+
+| Permission Flag | Description | Recommended for Counselors |
+| :--- | :--- | :---: |
+| **View Reports** | Access high-level analytics, dashboards, and charts. | **YES** |
+| **Audio & Transcripts** | Listen to student call recordings and read dialog transcripts. | **YES** |
+| **Notes & Follow-ups** | Save counselor feedback, set callback dates, and send WhatsApp. | **YES** |
+| **Upload Lead Sheets** | Import student contact spreadsheets (`.xlsx`, `.csv`) into dialer. | **YES** |
+| **Start/Stop Dialing** | Initiate live sequential AI calling campaigns and manage queues. | Optional (Senior) |
+| **Manage Colleges & Bots** | Add/edit university profiles, agent IDs, and course catalogs. | **NO (Admin Only)** |
+| **Download Excel Sheet** | Export student contact databases and duration sheets to Excel. | **NO (Data Leak Guard)** |
+
+![Add / Edit User Modal with Role & Permission Presets](public/guide-assets/14-add-new-user-modal.png)
+*Figure 5: Add / Edit User modal with role presets and custom 7-flag granular permission toggles.*
+
+### 4.2 Adding a New Team Member:
+1. Click **"+ Add Team Member"** in the Team Management console.
+2. Enter the user's **Full Name**, **Email Address**, and temporary **Password**.
+3. Select a role preset (*Standard Counselor*, *Senior Counselor*, or *System Administrator*), or customize permissions individually using the 7 checkboxes.
+4. Click **"Create User"**.
+
+### 4.3 Real-Time Account Management:
+- **Instant Suspension:** Toggling a counselor's status to **Suspended** terminates their session in real-time over WebSockets, immediately returning them to the login screen.
+- **Live Permission Updates:** When an Admin edits a counselor's permissions, the counselor's browser updates instantaneously without requiring a page reload or re-login.
+
+---
+
+## 5. Call Dashboard & Real-Time Intelligence
 
 The **Call Dashboard** provides real-time high-level intelligence and lead outcome metrics across all university campaigns.
 
-![VidyaVision Admission Intelligence Dashboard](public/guide-assets/02-dashboard-analytics.png)
-*Figure 2: Real-time call intelligence dashboard showing student intent breakdown, readiness signals, and university filters.*
+![VidyaVision Admission Intelligence Dashboard](public/guide-assets/15-dashboard-overview-full.png)
+*Figure 6: Real-time call intelligence dashboard showing student intent breakdown, readiness signals, and university filters.*
 
-### 3.1 Key Performance Metric Cards (KPIs)
+### 5.1 Key Performance Metric Cards (KPIs):
 At the top of the dashboard, five real-time summary cards reflect call performance:
 1. **Total Student Calls:** Complete count of call dispatches initiated.
 2. **Interested Students (Green):** Students who expressed positive admission intent or requested program details.
@@ -85,13 +162,13 @@ At the top of the dashboard, five real-time summary cards reflect call performan
 4. **Not Interested (Red):** Students who declined admission or chose another institution.
 5. **Calls Not Answered (Rose):** Dispatches where the recipient did not answer, phone was switched off, or went to voicemail.
 
-### 3.2 Granular Filter Bar
+### 5.2 Granular Filter Bar:
 Filter data dynamically by:
 - **Date Range:** Today, Yesterday, Last 7 Days, Last 30 Days, or Custom Date Picker.
 - **University Scope Dropdown:** Select a specific institution (e.g., *VidyaVision AI Assistant*, *MIT WPU*, *KL University*) or view aggregated metrics across **"All Universities"**.
 - **Lead Status Pills:** Click any status category to narrow down the table instantaneously.
 
-### 3.3 AI Student Profile & Readiness Signals
+### 5.3 AI Student Profile & Readiness Signals:
 The platform analyzes every conversation transcript to extract actionable student signals:
 - **Immediate (2026):** Students seeking enrollment in the upcoming intake.
 - **Counsellor Req:** Inquiries that explicitly requested a human advisor.
@@ -99,13 +176,41 @@ The platform analyzes every conversation transcript to extract actionable studen
 - **No Scores Provided:** Students who need counseling regarding qualifying exams.
 - **Grad Completed:** Students eligible for postgraduate admissions.
 
-### 3.4 Excel Report Downloading & Data Leak Protection
+### 5.4 Excel Report Downloading & Data Leak Protection:
 - **Authorized Users (Admins & Senior Staff):** Click the green **"Download Excel Report (.xlsx)"** button to export comprehensive student contact sheets, durations, recordings, and lead ratings.
 - **Standard Counselors:** The button displays a locked indicator (`Download Excel Report (Restricted)`) to prevent bulk student data leakage outside the organization.
 
+![Past Calling Campaigns Section on Dashboard](public/guide-assets/09-dashboard-past-campaigns.png)
+*Figure 7: Historical Calling Campaigns archive with lead records inspection and Excel/CSV download buttons.*
+
 ---
 
-## 4. End-to-End Sequential Calling Process (Step-by-Step Manual)
+## 6. Recent Calls, Audio Recordings & Transcripts
+
+The **Recent Calls** tab is your complete operational log of all dialed calls.
+
+![Recent Calls Table and Lead Outcomes](public/guide-assets/16-recent-calls-overview.png)
+*Figure 8: Comprehensive call logs featuring AI lead outcome classifications, timestamps, durations, search, and action buttons.*
+
+### 6.1 Call Detail Modal:
+Clicking **Detail Report** on any call opens the comprehensive student inspection card:
+1. **Multi-Channel Audio Player:** Listen to the complete call recording directly in the browser with play, pause, seek, and playback speed controls.
+2. **Turn-by-Turn Conversation Transcript:** Read the verbatim dialog between the Voice AI and the student, complete with exact timestamps and caller intent badges.
+3. **AI Summary:** A concise 2-sentence synopsis summarizing the student's background, eligibility questions, and preferences.
+
+![Call Detail Modal with Audio Player and Transcript](public/guide-assets/10-recent-calls-modal.png)
+*Figure 9: Student call inspection modal showing embedded audio player, verbatim turn-by-turn dialogue, counselor notes, and WhatsApp prospectus dispatch.*
+
+### 6.2 Counselor Follow-Up Actions:
+Counselors can update student records directly inside the Detail Modal:
+- **Update Interest Status:** Adjust the status to *Interested, Callback Requested, Follow-up Needed, Admission Confirmed*, or *Not Interested*.
+- **Counselor Notes:** Record key student details (e.g., *"Student scored 88% in 12th; requested scholarship details via WhatsApp"*).
+- **Next Follow-Up Date:** Schedule automated calendar reminders for callbacks.
+- **1-Click WhatsApp Admission Brochure:** Click **"Send WhatsApp Info"** to automatically deliver official college prospectus links and application forms to the student's mobile number.
+
+---
+
+# Part 2: End-to-End Voice AI Calling Process (10 Steps)
 
 The **Call Dialer** is the central command center for importing leads, configuring dynamic voice bot parameters, setting time limits, and orchestrating live sequential calling campaigns.
 
@@ -144,7 +249,7 @@ Under **1. Upload calling data / recipient list**, select one of four flexible i
    - Select individual contacts with checkboxes, or click **"Load All into Step 2"** to re-target unreached students or re-dial a batch.
 
 ![Call Dialer Step 1 Contact Input Options](public/guide-assets/01-dialer-upload-options.png)
-*Figure 3: Call Dialer Step 1 — Input Options (Excel/CSV Upload, Single Number, Bulk Paste, and Existing Campaigns)*
+*Figure 10: Call Dialer Step 1 — Input Options (Excel/CSV Upload, Single Number, Bulk Paste, and Existing Campaigns)*
 
 ---
 
@@ -155,11 +260,11 @@ Clicking **"Choose from Existing Campaigns"** allows admission counselors to bui
 - Click **"Load All into Step 2"** to stage leads into the dialer configuration pipeline.
 
 ![Choose from Existing Campaigns Modal](public/guide-assets/02-existing-campaigns-modal.png)
-*Figure 4: Choose from Existing Campaigns Modal — Re-targeting and Sub-Batch Inspection*
+*Figure 11: Choose from Existing Campaigns Modal — Re-targeting and Sub-Batch Inspection*
 
 ---
 
-### Step 3: Campaign Configuration (Step 2 Panel)
+### Step 3: Campaign Configuration & Dynamic Bot Routing
 Once contacts are imported, the **"Configure Calling Settings"** panel activates automatically:
 
 1. **Campaign Name (Optional):**
@@ -175,11 +280,11 @@ Once contacts are imported, the **"Configure Calling Settings"** panel activates
      - Selecting a **Postgraduate program** (e.g. *MBA, M.Tech, MCA*) automatically assigns the **🤖 PG Admission Assistant (Bot #270604)**.
 
 ![Step 2 Campaign Configuration](public/guide-assets/03-campaign-config-step2.png)
-*Figure 5: Step 2 Campaign Configuration — University Selector, Course Offerings, and Voice Bot Routing*
+*Figure 12: Step 2 Campaign Configuration — University Selector, Course Offerings, and Voice Bot Routing*
 
 ---
 
-### Step 4: Select Call Buffer Delay & Contact Range Selector
+### Step 4: Call Buffer Delay & Contact Range Selector
 Under **"3. Select Call Buffer Delay between calls"**:
 - **Call Buffer Delay:** Choose the buffer cooldown period between sequential calls: **0s (Instant), 2s (Recommended Default), 3s, 5s, or 10s** to give counselors time to log notes.
 - **Contact Range Selector:** For batches larger than 1 contact, specify **"From Contact #"** and **"To Contact #"** (e.g., dial from `#201` to `#500`).
@@ -187,7 +292,7 @@ Under **"3. Select Call Buffer Delay between calls"**:
 - *Preserved Excel Row Tracking:* Even when dialing contacts 201 to 500, the dialer retains the original Excel row numbers (e.g. `Row 202`) for auditability.
 
 ![Call Buffer Delay and Range Selector](public/guide-assets/04-delay-and-range-selector.png)
-*Figure 6: Call Buffer Delay Cooldown & Contact Range Selector (Resume Calling)*
+*Figure 13: Call Buffer Delay Cooldown & Contact Range Selector (Resume Calling)*
 
 ---
 
@@ -199,7 +304,7 @@ Under **"3. Select Call Buffer Delay between calls"**:
   - Delete individual contacts with the red trash button, or click **"Clear Queue"** to wipe the queue.
 
 ![Staged Calling Queue Table](public/guide-assets/05-staged-queue-table.png)
-*Figure 7: Staged Calling Queue Table Review with Assigned Bot Personas*
+*Figure 14: Staged Calling Queue Table Review with Assigned Bot Personas*
 
 ---
 
@@ -219,11 +324,11 @@ Click **"Configure"** on the **Campaign Schedule & Time Limits** bar:
    - Click **"Sync to Voice Agent"** to update the telephony bridge. The green badge confirms: `✔ Connected to Voice Agent: +91 95730 97810`.
 
 ![Campaign Schedule Limits and Counselor Call Transfer](public/guide-assets/06-schedule-and-transfer.png)
-*Figure 8: Campaign Schedule, Auto-Cutoff Limits & Counselor Call Transfer Configuration*
+*Figure 15: Campaign Schedule, Auto-Cutoff Limits & Counselor Call Transfer Configuration*
 
 ---
 
-### Step 7: Start AI Calling Campaign & Live Mid-Campaign Controls
+### Step 7: Start AI Calling Campaign & Live Controls
 - Click **"Start AI Calling Campaign"** (or **"Schedule Campaign"**).
 - **Active Campaign Command Banner:**
   - **Pulsing Status:** Displays active campaign title, bot agent ID, and countdown timer.
@@ -237,7 +342,7 @@ Click **"Configure"** on the **Campaign Schedule & Time Limits** bar:
   - 📥 **Download Excel (Live In-Progress):** Export *Completed Calls Only* or *Full Campaign Snapshot* while campaign is actively dialing!
 
 ![Active Calling Campaign Progress Banner](public/guide-assets/07-active-campaign-banner.png)
-*Figure 9: Live Sequential Outbound Campaign Active Banner & Mid-Campaign Controls*
+*Figure 16: Live Sequential Outbound Campaign Active Banner & Mid-Campaign Controls*
 
 ---
 
@@ -253,11 +358,11 @@ Click **"Configure"** on the **Campaign Schedule & Time Limits** bar:
     - **Delete:** Safely removes the paused campaign.
 
 ![Paused Campaigns Ready to Resume Banner](public/guide-assets/08-paused-campaigns-card.png)
-*Figure 10: Paused Campaigns Banner — Direct Resumption, Appending Leads, and Uncalled Export*
+*Figure 17: Paused Campaigns Banner — Direct Resumption, Appending Leads, and Uncalled Export*
 
 ---
 
-### Step 9: Accessing Completed Campaigns & Analytics in Dashboard
+### Step 9: Completed Campaigns & Analytics in Dashboard
 1. **Call Dashboard:**
    - Review high-level KPI cards: *Total Calls, Interested Students, Counselor Follow-up Required, Not Interested, Calls Not Answered*.
    - Filter by date range, specific university, or lead status.
@@ -270,7 +375,7 @@ Click **"Configure"** on the **Campaign Schedule & Time Limits** bar:
    - Rename campaigns with the edit pencil icon.
 
 ![Call Dashboard Analytics and Past Campaigns](public/guide-assets/09-dashboard-past-campaigns.png)
-*Figure 11: Executive Call Dashboard — Lead Intelligence KPI Cards & Past Calling Campaigns Grid*
+*Figure 18: Executive Call Dashboard — Lead Intelligence KPI Cards & Past Calling Campaigns Grid*
 
 ---
 
@@ -282,86 +387,11 @@ Navigate to **Recent Calls** to inspect individual student interactions:
 - **1-Click WhatsApp Admission Brochure:** Click **"Send WhatsApp Info"** to automatically deliver official prospectus links directly to the student's phone.
 
 ![Recent Calls Detail Modal Audio Player and Transcript](public/guide-assets/10-recent-calls-modal.png)
-*Figure 12: Call Detail Modal — Audio Playback Player, Verbatim Transcript, and Follow-Up Actions*
-   - Inspect individual call rows, audio recordings, verbatim transcripts, and counselor follow-up notes.
-   - Dispatch brochures with 1-click **"Send WhatsApp Info"**.
+*Figure 19: Call Detail Modal — Audio Playback Player, Verbatim Transcript, and Follow-Up Actions*
 
 ---
 
-## 5. Page 3: Recent Calls, Audio & Transcripts
-
-The **Recent Calls** tab is your complete operational log of all dialed calls.
-
-![Recent Calls Table and Lead Outcomes](public/guide-assets/07-recent-calls-table.png)
-*Figure 7: Comprehensive call logs featuring AI lead outcome classifications, timestamps, durations, and counselor action buttons.*
-
-### 5.1 Call Detail Modal
-Clicking **Detail Report** on any call opens the comprehensive student inspection card:
-1. **Multi-Channel Audio Player:** Listen to the complete call recording directly in the browser with play, pause, seek, and playback speed controls.
-2. **Turn-by-Turn Conversation Transcript:** Read the verbatim dialog between the Voice AI and the student, complete with exact timestamps and caller intent badges.
-3. **AI Summary:** A concise 2-sentence synopsis summarizing the student's background, eligibility questions, and preferences.
-
-![Call Detail Modal with Audio Player and Transcript](public/guide-assets/08-call-detail-transcript.png)
-*Figure 8: Student call inspection modal showing embedded audio player, verbatim turn-by-turn dialogue, and AI admission assessment.*
-
-### 5.2 Counselor Follow-Up Actions
-Counselors can update student records directly inside the Detail Modal:
-- **Update Interest Status:** Adjust the status to *Interested, Callback Requested, Follow-up Needed, Admission Confirmed*, or *Not Interested*.
-- **Counselor Notes:** Record key student details (e.g., *"Student scored 88% in 12th; requested scholarship details via WhatsApp"*).
-- **Next Follow-Up Date:** Schedule automated calendar reminders for callbacks.
-- **1-Click WhatsApp Admission Brochure:** Click **"Send WhatsApp Info"** to automatically deliver official college prospectus links and application forms to the student's mobile number.
-
----
-
-## 6. Page 4: Team & Permissions Management (Admin Only)
-
-Administrators have access to the **Team Management** portal via the System Admin pill badge in the navigation header.
-
-![Team Management and Granular RBAC Permission Matrix](public/guide-assets/09-team-permissions.jpg)
-*Figure 9: Role-based access control panel displaying active dialing seats, Data Leak Protection status, and granular permission badges.*
-
-### 6.1 The 7 Granular Permission Flags
-Admins can toggle permissions individually for each team member:
-
-| Permission Flag | Description | Recommended for Counselors |
-| :--- | :--- | :---: |
-| **View Reports** | Access high-level analytics, dashboards, and charts. | **YES** |
-| **Audio & Transcripts** | Listen to student call recordings and read dialog transcripts. | **YES** |
-| **Notes & Follow-ups** | Save counselor feedback, set callback dates, and send WhatsApp. | **YES** |
-| **Upload Lead Sheets** | Import student contact spreadsheets (`.xlsx`, `.csv`) into dialer. | **YES** |
-| **Start/Stop Dialing** | Initiate live sequential AI calling campaigns and manage queues. | Optional (Senior) |
-| **Manage Colleges & Bots** | Add/edit university profiles, agent IDs, and course catalogs. | **NO (Admin Only)** |
-| **Download Excel Sheet** | Export student contact databases and duration sheets to Excel. | **NO (Data Leak Guard)** |
-
-### 6.2 Pre-Configured Permission Presets
-- **Standard Counselor (Recommended):** View reports, transcripts, notes & upload lead sheets. Dialing start/stop and Excel downloads are blocked.
-- **Senior Counselor / Queue Lead:** Standard privileges + authorization to start, pause, and split calling campaigns.
-- **Full Administrator:** Complete unrestricted access across all system features.
-
-### 6.3 Real-Time Account Management
-- **Instant Suspension:** Toggling a counselor's status to **Suspended** terminates their session in real-time over WebSockets, immediately returning them to the login screen.
-- **Live Permission Updates:** When an Admin edits a counselor's permissions, the counselor's browser updates instantaneously without requiring a page reload or re-login.
-
----
-
-## 7. University & Voice Bot Configuration
-
-System Administrators can configure the target institutions represented by the AI.
-
-### Adding or Editing a University:
-1. In the Dashboard header or University selector, click **"+ Add University"** (or click the edit pencil on an existing college).
-2. Configure the following fields:
-   - **Institution Name:** Official college name (e.g., *KL University Hyderabad*).
-   - **Location / Campus:** City, State (e.g., *Hyderabad, Telangana*).
-   - **Supported Languages:** Primary languages spoken by prospective students (e.g., *English, Hindi, Telugu*).
-   - **Course Offerings:** Comma-separated list of available programs (e.g., *B.Tech CSE, MBA, Data Science, AI & ML*).
-   - **Assigned Voice Agent ID:** Telephony bot identifier configured in the voice engine.
-   - **Counselor Transfer Number:** The direct phone number calls will transfer to when a student asks for human guidance.
-   - **Website & Brochure URL:** Link sent automatically via WhatsApp.
-
----
-
-## 8. Spreadsheet Formatting & Lead Preparation Guide
+## 7. Spreadsheet Formatting & Lead Preparation Guide
 
 To ensure flawless file uploads, follow these simple spreadsheet guidelines:
 
@@ -386,7 +416,7 @@ The file parser is intelligent and recognizes standard variations of column head
 
 ---
 
-## 9. Troubleshooting & Frequently Asked Questions (FAQ)
+## 8. Troubleshooting & Frequently Asked Questions (FAQ)
 
 ### Q1: Why am I unable to download the Excel report?
 > **Answer:** Your counselor account has **Data Leak Protection** enabled. Contact your VidyaVision Administrator to grant the **"Download Excel Sheet"** permission to your profile.
@@ -410,4 +440,3 @@ For technical support, custom bot script modifications, or platform upgrades:
 - **Internal Administrator:** Contact your designated VidyaVision Portal Admin.
 - **Official Portal:** [www.vidyavision.com](https://www.vidyavision.com/)
 - **Document Version:** `2.0-Enterprise (Nov 2026)`
-

@@ -389,8 +389,9 @@
       color: #1e293b;
     }
 
-    /* Screenshot Container */
+    /* Screenshot Container with High-Clarity Optimization */
     .screenshot-frame {
+      position: relative;
       border: 1px solid var(--border);
       border-radius: 12px;
       overflow: hidden;
@@ -404,6 +405,45 @@
       height: auto;
       display: block;
       background-color: #ffffff;
+      image-rendering: -webkit-optimize-contrast;
+      cursor: zoom-in;
+      transition: transform 0.2s ease, opacity 0.2s ease;
+    }
+
+    .screenshot-frame img:hover {
+      opacity: 0.96;
+    }
+
+    /* Modal screenshots rendered at native pixel-sharp dimensions */
+    .screenshot-frame.modal-shot {
+      max-width: 660px;
+      margin: 1.35rem auto;
+      background: #1e293b;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+    }
+
+    .zoom-hint {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(15, 23, 42, 0.85);
+      color: #ffffff;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 0.3rem 0.65rem;
+      border-radius: 6px;
+      pointer-events: none;
+      backdrop-filter: blur(4px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      opacity: 0.9;
+      transition: opacity 0.2s ease;
+    }
+
+    .screenshot-frame:hover .zoom-hint {
+      opacity: 1;
     }
 
     .screenshot-caption {
@@ -418,27 +458,70 @@
       font-weight: 600;
     }
 
-    /* Placeholder for upcoming user screenshots */
-    .screenshot-placeholder {
-      border: 2px dashed #cbd5e1;
-      border-radius: 12px;
-      padding: 2.5rem 1.5rem;
-      text-align: center;
-      background: #f8fafc;
-      margin: 1.25rem 0;
+    /* Lightbox Modal for 100% Crisp Full-Screen Viewing */
+    #lightbox-modal {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(15, 23, 42, 0.94);
+      backdrop-filter: blur(8px);
+      z-index: 9999;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      cursor: zoom-out;
     }
 
-    .screenshot-placeholder h4 {
-      font-size: 0.95rem;
-      font-weight: 700;
-      color: #475569;
-      margin-bottom: 0.25rem;
+    #lightbox-modal.active {
+      display: flex;
+      animation: fadeIn 0.15s ease-out;
     }
 
-    .screenshot-placeholder p {
-      font-size: 0.82rem;
-      color: #94a3b8;
-      margin: 0;
+    #lightbox-modal img {
+      max-width: 95vw;
+      max-height: 90vh;
+      border-radius: 10px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+      background: #ffffff;
+      object-fit: contain;
+      image-rendering: -webkit-optimize-contrast;
+    }
+
+    #lightbox-caption {
+      position: absolute;
+      bottom: 25px;
+      color: #e2e8f0;
+      font-size: 0.9rem;
+      font-weight: 600;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 0.45rem 1.25rem;
+      border-radius: 20px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+    }
+
+    #lightbox-close {
+      position: absolute;
+      top: 20px;
+      right: 25px;
+      background: rgba(255, 255, 255, 0.15);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      color: #ffffff;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    #lightbox-close:hover {
+      background: rgba(239, 68, 68, 0.85);
     }
 
     /* Alerts and Callouts */
@@ -482,7 +565,7 @@
 
     /* Print Styles */
     @media print {
-      .top-bar, .btn-print, .sidebar {
+      .top-bar, .btn-print, .sidebar, .zoom-hint {
         display: none !important;
       }
       body {
@@ -521,7 +604,7 @@
 
   <!-- Sticky Top Brand Bar -->
   <header class="top-bar">
-    <div style="display: flex; alignItems: center; gap: 1.5rem;">
+    <div style="display: flex; align-items: center; gap: 1.5rem;">
       <div class="brand-container">
         <img src="/vidyavision-logo.svg" alt="VidyaVision Logo">
       </div>
@@ -646,8 +729,9 @@
             </ul>
           </div>
 
-          <div class="screenshot-frame">
-            <img src="/guide-assets/01-login-page.jpg" alt="VidyaVision Secure Login Screen">
+          <div class="screenshot-frame modal-shot">
+            <div class="zoom-hint">🔍 Click to zoom full resolution</div>
+            <img src="/guide-assets/01-login-page.jpg" alt="VidyaVision Counselor & Admin Sign In Portal">
             <div class="screenshot-caption">📷 Screen 1.1: Official VidyaVision Counselor & Admin Authentication Portal</div>
           </div>
         </div>
@@ -684,14 +768,16 @@
             </ul>
           </div>
 
-          <div class="screenshot-placeholder">
-            <h4>📷 Screen 1.2A: Saved Colleges Grid with "+ Add New College" Button</h4>
-            <p>Suggested File: <code>01-colleges-list-and-add-button.png</code></p>
+          <div class="screenshot-frame">
+            <div class="zoom-hint">🔍 Click to zoom full resolution</div>
+            <img src="/guide-assets/11-colleges-list-and-add-button.png" alt="Saved Colleges Grid with Add New College Button">
+            <div class="screenshot-caption">📷 Screen 1.2A: Saved Colleges Grid with "+ Add New College" Button & Course Badges</div>
           </div>
 
-          <div class="screenshot-placeholder">
-            <h4>📷 Screen 1.2B: Add / Edit College Modal Configuration Form</h4>
-            <p>Suggested File: <code>02-add-edit-college-modal.png</code></p>
+          <div class="screenshot-frame modal-shot">
+            <div class="zoom-hint">🔍 Click to zoom full resolution</div>
+            <img src="/guide-assets/12-add-edit-college-modal.png" alt="Add / Edit College Modal Configuration Form">
+            <div class="screenshot-caption">📷 Screen 1.2B: Add / Edit College Modal Configuration Form (Courses, Agent ID & Phone)</div>
           </div>
         </div>
       </section>
@@ -739,13 +825,15 @@
           </div>
 
           <div class="screenshot-frame">
-            <img src="/guide-assets/09-team-permissions.jpg" alt="Team Management and Granular RBAC Permission Matrix">
+            <div class="zoom-hint">🔍 Click to zoom full resolution</div>
+            <img src="/guide-assets/13-team-management-overview.png" alt="Team Management Overview & Granular Permission Matrix Table">
             <div class="screenshot-caption">📷 Screen 1.3A: Team Management Overview & Granular Permission Matrix Table</div>
           </div>
 
-          <div class="screenshot-placeholder">
-            <h4>📷 Screen 1.3B: Add / Edit User Modal with Role & Permission Presets</h4>
-            <p>Suggested File: <code>04-add-new-user-modal.png</code></p>
+          <div class="screenshot-frame modal-shot">
+            <div class="zoom-hint">🔍 Click to zoom full resolution</div>
+            <img src="/guide-assets/14-add-new-user-modal.png" alt="Add / Edit User Modal with Role & Permission Presets">
+            <div class="screenshot-caption">📷 Screen 1.3B: Add / Edit User Modal with Role & Granular Permission Checkboxes</div>
           </div>
         </div>
       </section>
@@ -780,8 +868,15 @@
           </div>
 
           <div class="screenshot-frame">
-            <img src="/guide-assets/09-dashboard-past-campaigns.png" alt="Call Dashboard Analytics and Past Campaigns Grid">
-            <div class="screenshot-caption">📷 Screen 1.4: Call Intelligence Dashboard — KPI Performance Cards & Past Campaigns Archive</div>
+            <div class="zoom-hint">🔍 Click to zoom full resolution</div>
+            <img src="/guide-assets/15-dashboard-overview-full.png" alt="Call Intelligence Dashboard KPI Cards and Signals">
+            <div class="screenshot-caption">📷 Screen 1.4A: Executive Call Dashboard — Real-time KPI Cards, Signals & Scopes</div>
+          </div>
+
+          <div class="screenshot-frame">
+            <div class="zoom-hint">🔍 Click to zoom full resolution</div>
+            <img src="/guide-assets/09-dashboard-past-campaigns.png" alt="Past Calling Campaigns Grid on Dashboard">
+            <div class="screenshot-caption">📷 Screen 1.4B: Past Calling Campaigns Archive on Dashboard with Excel/CSV Export Buttons</div>
           </div>
         </div>
       </section>
@@ -813,8 +908,15 @@
           </div>
 
           <div class="screenshot-frame">
+            <div class="zoom-hint">🔍 Click to zoom full resolution</div>
+            <img src="/guide-assets/16-recent-calls-overview.png" alt="Recent Calls Log Table with Filters">
+            <div class="screenshot-caption">📷 Screen 1.5A: Recent Calls Log Table with Outcome Badges, Durations, and Detail Buttons</div>
+          </div>
+
+          <div class="screenshot-frame modal-shot">
+            <div class="zoom-hint">🔍 Click to zoom full resolution</div>
             <img src="/guide-assets/10-recent-calls-modal.png" alt="Recent Calls Detail Modal Audio Player and Transcript">
-            <div class="screenshot-caption">📷 Screen 1.5: Call Detail Modal — Audio Playback Player, Verbatim Transcript, and Follow-Up Actions</div>
+            <div class="screenshot-caption">📷 Screen 1.5B: Call Detail Modal — Audio Playback Player, Verbatim Transcript, and Follow-Up Actions</div>
           </div>
         </div>
       </section>
@@ -848,6 +950,7 @@
           </div>
 
           <div class="screenshot-frame">
+            <div class="zoom-hint">🔍 Click to zoom full resolution</div>
             <img src="/guide-assets/01-dialer-upload-options.png" alt="Call Dialer Step 1 Contact Input Options">
             <div class="screenshot-caption">📷 Screen 1: Call Dialer Step 1 — Input Options (Excel/CSV Upload, Single Number, Bulk Paste, and Existing Campaigns)</div>
           </div>
@@ -878,6 +981,7 @@
           </div>
 
           <div class="screenshot-frame">
+            <div class="zoom-hint">🔍 Click to zoom full resolution</div>
             <img src="/guide-assets/02-existing-campaigns-modal.png" alt="Choose from Existing Campaigns Modal">
             <div class="screenshot-caption">📷 Screen 2: Choose from Existing Campaigns Modal — Re-targeting and Sub-Batch Inspection</div>
           </div>
@@ -910,6 +1014,7 @@
           </div>
 
           <div class="screenshot-frame">
+            <div class="zoom-hint">🔍 Click to zoom full resolution</div>
             <img src="/guide-assets/03-campaign-config-step2.png" alt="Step 2 Campaign Configuration and University Selection">
             <div class="screenshot-caption">📷 Screen 3: Step 2 Campaign Configuration — University Selector, Course Offerings, and Voice Bot Routing</div>
           </div>
@@ -937,6 +1042,7 @@
           </div>
 
           <div class="screenshot-frame">
+            <div class="zoom-hint">🔍 Click to zoom full resolution</div>
             <img src="/guide-assets/04-delay-and-range-selector.png" alt="Call Buffer Delay and Range Selector">
             <div class="screenshot-caption">📷 Screen 4: Call Buffer Delay Cooldown & Contact Range Selector (Resume Calling)</div>
           </div>
@@ -963,6 +1069,7 @@
           </div>
 
           <div class="screenshot-frame">
+            <div class="zoom-hint">🔍 Click to zoom full resolution</div>
             <img src="/guide-assets/05-staged-queue-table.png" alt="Staged Calling Queue Table">
             <div class="screenshot-caption">📷 Screen 5: Staged Calling Queue Table Review with Assigned Bot Personas</div>
           </div>
@@ -989,6 +1096,7 @@
           </div>
 
           <div class="screenshot-frame">
+            <div class="zoom-hint">🔍 Click to zoom full resolution</div>
             <img src="/guide-assets/06-schedule-and-transfer.png" alt="Campaign Schedule Limits and Counselor Call Transfer">
             <div class="screenshot-caption">📷 Screen 6: Campaign Schedule, Auto-Cutoff Limits & Counselor Call Transfer Configuration</div>
           </div>
@@ -1027,6 +1135,7 @@
           </div>
 
           <div class="screenshot-frame">
+            <div class="zoom-hint">🔍 Click to zoom full resolution</div>
             <img src="/guide-assets/07-active-campaign-banner.png" alt="Active Calling Campaign Progress Banner">
             <div class="screenshot-caption">📷 Screen 7: Live Sequential Outbound Campaign Active Banner & Mid-Campaign Controls</div>
           </div>
@@ -1055,6 +1164,7 @@
           </div>
 
           <div class="screenshot-frame">
+            <div class="zoom-hint">🔍 Click to zoom full resolution</div>
             <img src="/guide-assets/08-paused-campaigns-card.png" alt="Paused Campaigns Ready to Resume Banner">
             <div class="screenshot-caption">📷 Screen 8: Paused Campaigns Banner — Direct Resumption, Appending Leads, and Uncalled Export</div>
           </div>
@@ -1081,6 +1191,7 @@
           </div>
 
           <div class="screenshot-frame">
+            <div class="zoom-hint">🔍 Click to zoom full resolution</div>
             <img src="/guide-assets/09-dashboard-past-campaigns.png" alt="Call Dashboard Analytics and Past Campaigns">
             <div class="screenshot-caption">📷 Screen 9: Executive Call Dashboard — Lead Intelligence KPI Cards & Past Calling Campaigns Grid</div>
           </div>
@@ -1107,7 +1218,8 @@
             </ul>
           </div>
 
-          <div class="screenshot-frame">
+          <div class="screenshot-frame modal-shot">
+            <div class="zoom-hint">🔍 Click to zoom full resolution</div>
             <img src="/guide-assets/10-recent-calls-modal.png" alt="Recent Calls Detail Modal Audio Player and Transcript">
             <div class="screenshot-caption">📷 Screen 10: Call Detail Modal — Audio Playback Player, Verbatim Transcript, and Follow-Up Actions</div>
           </div>
@@ -1122,8 +1234,15 @@
     </main>
   </div>
 
+  <!-- Fullscreen HD Lightbox Modal -->
+  <div id="lightbox-modal">
+    <button id="lightbox-close" title="Close preview (Esc)">×</button>
+    <img id="lightbox-img" src="" alt="Fullscreen preview">
+    <div id="lightbox-caption"></div>
+  </div>
+
   <script>
-    // Smooth scrolling & active link highlighting in sidepanel
+    // 1. Smooth scrolling & active link highlighting in sidepanel
     const navLinks = document.querySelectorAll('.sidebar-nav-link');
     const sections = document.querySelectorAll('.step-card');
 
@@ -1142,6 +1261,36 @@
           link.classList.add('active');
         }
       });
+    });
+
+    // 2. Interactive HD Lightbox Modal (Click any screenshot to zoom full resolution)
+    const modal = document.getElementById('lightbox-modal');
+    const modalImg = document.getElementById('lightbox-img');
+    const modalCap = document.getElementById('lightbox-caption');
+    const modalClose = document.getElementById('lightbox-close');
+
+    document.querySelectorAll('.screenshot-frame img').forEach(img => {
+      img.addEventListener('click', () => {
+        modal.classList.add('active');
+        modalImg.src = img.src;
+        modalCap.textContent = img.getAttribute('alt') || 'Screenshot Preview';
+      });
+    });
+
+    modal.addEventListener('click', (e) => {
+      if (e.target !== modalImg) {
+        modal.classList.remove('active');
+      }
+    });
+
+    modalClose.addEventListener('click', () => {
+      modal.classList.remove('active');
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modal.classList.contains('active')) {
+        modal.classList.remove('active');
+      }
     });
   </script>
 
