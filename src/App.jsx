@@ -425,7 +425,7 @@ export default function App() {
   const [resumingCampaignName, setResumingCampaignName] = useState('');
   const [campaignRangeFrom, setCampaignRangeFrom] = useState('');
   const [campaignRangeTo, setCampaignRangeTo] = useState('');
-  const [showPausedCampaignsSection, setShowPausedCampaignsSection] = useState(true);
+  const [showPausedCampaignsSection, setShowPausedCampaignsSection] = useState(false);
 
   const pushRecentContacts = (items) => {
     if (!items || items.length === 0) return;
@@ -4415,7 +4415,7 @@ export default function App() {
                         title={showPausedCampaignsSection ? 'Collapse paused campaigns' : 'Expand paused campaigns'}
                       >
                         {showPausedCampaignsSection ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
-                        {showPausedCampaignsSection ? 'Collapse' : `Show (${pausedCamps.length})`}
+                        {showPausedCampaignsSection ? 'Collapse' : `Show Campaigns (${pausedCamps.length})`}
                       </button>
                     </div>
                   </div>
