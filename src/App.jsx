@@ -217,7 +217,7 @@ export default function App() {
 
   // Live Counselor Call Transfer States (OmniDimension Call Configuration)
   const [transferEnabled, setTransferEnabled] = useState(true);
-  const [counselorPhone, setCounselorPhone] = useState('+91 95730 97810');
+  const [counselorPhone, setCounselorPhone] = useState('+91 98765 43210');
   const [transferMode, setTransferMode] = useState('static'); // 'static' | 'dynamic'
   const [transferCondition, setTransferCondition] = useState('Transfer when the user asks to speak with a counsellor/officer, OR agrees to be transferred (for example: saying yes when asked about fees, scholarships, or senior counsellor assistance).');
   const [transferMessage, setTransferMessage] = useState("I'm transferring your call to our counselor. Please hold while I connect you.");
@@ -831,7 +831,7 @@ export default function App() {
     agentId: '270604',
     languages: 'English, Hindi, Telugu',
     courses: '',
-    counselorPhone: '+91 95730 97810'
+    counselorPhone: ''
   });
 
   const getInitialColleges = () => {
@@ -913,7 +913,7 @@ export default function App() {
       agentId: '270604',
       languages: 'English, Hindi, Telugu',
       courses: '',
-      counselorPhone: '+91 95730 97810'
+      counselorPhone: ''
     });
     setEditingCollegeId('');
   };
@@ -928,7 +928,7 @@ export default function App() {
       agentId: String(college.agentId || 270604),
       languages: college.languages || 'English, Hindi, Telugu',
       courses: Array.isArray(college.courses) ? college.courses.join(', ') : (college.courses || ''),
-      counselorPhone: college.counselorPhone || '+91 95730 97810'
+      counselorPhone: college.counselorPhone || ''
     });
     setEditingCollegeId(college.id);
     setShowCollegeModal(true);

@@ -267,9 +267,15 @@ export default function AddCollegeModal({
                 <input
                   type="text"
                   className="form-input"
-                  value={collegeForm.counselorPhone || ''}
-                  onChange={(e) => setCollegeForm(prev => ({ ...prev, counselorPhone: e.target.value }))}
-                  placeholder="9876543210"
+                  value={collegeForm.counselorPhone ? String(collegeForm.counselorPhone).replace(/^\+91\s*/, '') : ''}
+                  onChange={(e) => {
+                    const digits = e.target.value.replace(/[^\d\s]/g, '');
+                    setCollegeForm(prev => ({
+                      ...prev,
+                      counselorPhone: digits.trim() ? `+91 ${digits.replace(/^\+91\s*/, '').trim()}` : ''
+                    }));
+                  }}
+                  placeholder="Enter mobile number (e.g. 98765 43210)"
                   style={{
                     flex: 1,
                     border: 'none',
