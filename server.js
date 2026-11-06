@@ -741,12 +741,17 @@ async function loadCampaigns() {
       }));
     }
   } catch (err) {
-    console.warn('[DB] PostgreSQL loadCampaigns fallback to file:', err.message);
+    console.warn('[DB] PostgreSQL loadCampaigns fallback to file (legacy migration only):', err.message);
   }
 
+  // Legacy one-time migration fallback only — in normal operation data
+  // is served from Postgres above. Delete the file after migration if desired.
   try {
     const raw = await fs.readFile(CAMPAIGNS_FILE, 'utf8');
     const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      console.warn('[DB] Serving campaigns from legacy JSON fallback — run scripts/migrate_json_to_pg.js');
+    }
     return Array.isArray(parsed) ? parsed : [];
   } catch (err) {
     return [];
@@ -836,12 +841,17 @@ async function saveCampaigns(campaigns) {
     }
   } catch (err) {
     console.error('[DB] PostgreSQL saveCampaigns error:', err.message);
+    // DB is the single source of truth — do not fall back to file write.
   }
 
-  try {
-    await fs.writeFile(CAMPAIGNS_FILE, JSON.stringify(campaigns, null, 2), 'utf8');
-  } catch (err) {
-    console.error('Error saving campaigns backup file:', err.message);
+  // Optional JSON backup only — skipped in normal DB-only mode.
+  // Set WRITE_CACHE_FILE=true in .env to keep a JSON snapshot for debugging.
+  if (process.env.WRITE_CACHE_FILE === 'true') {
+    try {
+      await fs.writeFile(CAMPAIGNS_FILE, JSON.stringify(campaigns, null, 2), 'utf8');
+    } catch (err) {
+      console.error('Error saving campaigns backup file:', err.message);
+    }
   }
 }
 
@@ -1071,13 +1081,18 @@ async function loadColleges() {
       }));
     }
   } catch (err) {
-    console.warn('[DB] PostgreSQL loadColleges fallback to file:', err.message);
+    console.warn('[DB] PostgreSQL loadColleges fallback to file (legacy migration only):', err.message);
   }
 
+  // Legacy one-time migration fallback only — in normal operation data
+  // is served from Postgres above.
   try {
     const raw = await fs.readFile(COLLEGES_FILE, 'utf8');
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      console.warn('[DB] Serving colleges from legacy JSON fallback — run scripts/migrate_json_to_pg.js');
+      return parsed;
+    }
   } catch { }
   return getDefaultColleges();
 }
@@ -1111,10 +1126,13 @@ async function saveColleges(colleges) {
     console.error('[DB] PostgreSQL saveColleges error:', err.message);
   }
 
-  try {
-    await fs.writeFile(COLLEGES_FILE, JSON.stringify(colleges, null, 2), 'utf8');
-  } catch (err) {
-    console.error('Failed to save colleges file:', err);
+  // DB is the single source of truth — JSON backup only when explicitly requested.
+  if (process.env.WRITE_CACHE_FILE === 'true') {
+    try {
+      await fs.writeFile(COLLEGES_FILE, JSON.stringify(colleges, null, 2), 'utf8');
+    } catch (err) {
+      console.error('Failed to save colleges file:', err);
+    }
   }
 }
 
@@ -1390,7 +1408,7 @@ async function ensurePostgresSchema() {
   }
 }
 
-// Ensure database file and folder exists
+// Ensure database tables/seed exist (Postgres is single source of truth)
 async function initDb() {
   await ensurePostgresSchema();
   try {
@@ -1408,11 +1426,17 @@ async function initDb() {
       await saveInterests();
       console.log('Created empty call interests database file.');
     }
+    // Seed colleges in Postgres if table is empty (DB is authoritative,
+    // JSON file is only a one-time migration fallback).
     try {
-      await fs.access(COLLEGES_FILE);
-    } catch {
-      await saveColleges(DEFAULT_COLLEGES);
-      console.log('Created initial colleges database file.');
+      const res = await query('SELECT COUNT(*) FROM colleges');
+      const count = res && res.rows && res.rows[0] ? Number(res.rows[0].count) : 0;
+      if (count === 0) {
+        await saveColleges(getDefaultColleges());
+        console.log('Seeded initial colleges in PostgreSQL.');
+      }
+    } catch (err) {
+      console.warn('[DB] Colleges seed check failed:', err.message);
     }
   } catch (err) {
     console.error('Failed to initialize database folder/file:', err);
@@ -1910,12 +1934,19 @@ async function loadCache() {
       }));
     }
   } catch (err) {
-    console.warn('[DB] PostgreSQL loadCache fallback to file:', err.message);
+    console.warn('[DB] PostgreSQL loadCache fallback to file (legacy migration only):', err.message);
   }
 
+  // Legacy one-time migration fallback only — in normal operation data
+  // is served from Postgres above. In steady state DELETE the file after
+  // running scripts/migrate_json_to_pg.js so Postgres is the only source.
   try {
     const raw = await fs.readFile(GOOGLE_SHEETS_CACHE_FILE, 'utf8');
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      console.warn('[DB] Serving call_records from legacy JSON fallback — run scripts/migrate_json_to_pg.js');
+    }
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
@@ -1986,15 +2017,19 @@ async function saveCache(data) {
     }
   } catch (err) {
     console.error('[DB] PostgreSQL saveCache error:', err.message);
-  }
-
-  try {
-    await fs.writeFile(GOOGLE_SHEETS_CACHE_FILE, JSON.stringify(data, null, 2), 'utf8');
-    return true;
-  } catch (err) {
-    console.error('Failed to save cache backup file:', err);
+    // DB is the single source of truth — do not write file on DB failure.
     return false;
   }
+
+  // Optional JSON backup only — skipped in normal DB-only mode.
+  if (process.env.WRITE_CACHE_FILE === 'true') {
+    try {
+      await fs.writeFile(GOOGLE_SHEETS_CACHE_FILE, JSON.stringify(data, null, 2), 'utf8');
+    } catch (err) {
+      console.error('Failed to save cache backup file:', err);
+    }
+  }
+  return true;
 }
 
 // Polling Google Sheets
@@ -4121,10 +4156,13 @@ app.get('/api/campaigns/:id/export', checkPermission('canExportData'), async (re
       }
     });
 
-    // Helper to test if a key represents one of the standard columns
-    const isStandardKey = (key) => {
+    // Google Sheets outcome block headers (Program onwards) — must not be
+    // duplicated by uploaded columns. Everything else from the uploaded
+    // Excel is kept verbatim (Email, State, District, etc.), i.e. no
+    // collapsing into hardcoded Email ID / State / District columns.
+    const isOutcomeKey = (key) => {
       const norm = String(key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      return ['name', 'fullname', 'studentname', 'student', 'phone', 'phonenumber', 'mobile', 'mobilenumber', 'contact', 'contactnumber', 'email', 'emailid', 'mail', 'mailid', 'state', 'preferredstate', 'stateut', 'district', 'preferredcity', 'city', 'town', 'program', 'course', 'degree', 'branch', 'university', 'college', 'collegename', 'targetcollege', 'preferreduniversity'].includes(norm);
+      return ['program', 'university', 'leadstatus', 'graduationstatus', 'admissiontimeline', 'entranceexam', 'counsellorfollowup', 'livetransferred', 'callduration', 'calldatetime', 'callsummary', 'callrecordingurl', 'calltranscriptfullconversation'].includes(norm);
     };
 
     // Helper to find best matching value for a field from multiple object sources
@@ -4159,7 +4197,7 @@ app.get('/api/campaigns/:id/export', checkPermission('canExportData'), async (re
     campaignContacts.forEach(c => {
       if (c.extraFields && typeof c.extraFields === 'object') {
         Object.keys(c.extraFields).forEach(k => {
-          if (!isStandardKey(k)) {
+          if (!isOutcomeKey(k)) {
             const norm = k.toLowerCase().replace(/[^a-z0-9]/g, '');
             if (norm && !normKeyMap.has(norm)) {
               normKeyMap.set(norm, k);
@@ -4183,7 +4221,7 @@ app.get('/api/campaigns/:id/export', checkPermission('canExportData'), async (re
     };
 
     const csvHeaders = [
-      'S.No', 'Full Name', 'Phone Number', 'Email ID', 'State', 'District',
+      'S.No', 'Full Name', 'Phone Number',
       ...extraFieldKeys,
       'Program', 'University',
       'Lead Status', 'Graduation Status', 'Admission Timeline', 'Entrance Exam', 'Counsellor Follow-up',
@@ -4211,19 +4249,18 @@ app.get('/api/campaigns/:id/export', checkPermission('canExportData'), async (re
       const outcome = String(c.callOutcome || match?.callOutcome || match?.leadStatus || '').toLowerCase();
       let statusLabel = '❌ Not Answered';
       if (st === 'queued') statusLabel = '⏳ Queued';
-      else if (outcome.includes('interest')) statusLabel = '🟢 Interested';
+      // NOTE: check "Not Interested" BEFORE "Interested" — "not interested"
+      // contains "interest", so the order matters.
+      else if (outcome.includes('not') || outcome.includes('decline')) statusLabel = '❌ Not Interested';
+      else if (outcome.includes('interest')) statusLabel = '✅ Interested';
       else if (outcome.includes('app') || outcome.includes('sent')) statusLabel = '📩 Application Sent';
       else if (outcome.includes('callback')) statusLabel = '📞 Callback';
       else if (outcome.includes('joined')) statusLabel = '🎓 Already Joined';
-      else if (outcome.includes('not') || outcome.includes('decline')) statusLabel = '🔴 Not Interested';
       else if (outcome.includes('wrong') || outcome.includes('invalid')) statusLabel = '⚠️ Wrong / Invalid';
       else if (st === 'completed' || st === 'answered') statusLabel = '📞 Answered';
 
       const studentName = c.name && c.name !== 'Student' ? c.name : (match?.studentName || match?.name || c.name || 'Student');
       const phone = c.formattedPhone || (cleanPhone ? `+91${cleanPhone}` : '') || match?.contactNumber || '—';
-      const email = resolveField([c, c.extraFields, match, match?.extraFields, rf], ['email', 'email id', 'emailid', 'email address', 'mail', 'mail id', 'student email']);
-      const state = resolveField([c, c.extraFields, match, match?.extraFields, rf], ['state', 'preferred state', 'preferredstate', 'state ut', 'region', 'province']);
-      const district = resolveField([c, c.extraFields, match, match?.extraFields, rf], ['district', 'preferred city', 'preferredcity', 'city', 'town', 'location']);
       const program = resolveField([c, c.extraFields, match, match?.extraFields, rf], ['program', 'course', 'degree', 'branch', 'specialization', 'target_course']);
       const university = resolveField([c, c.extraFields, match, match?.extraFields, rf], ['university', 'university name', 'college', 'college name', 'target_college', 'preferred university']);
 
@@ -4281,9 +4318,6 @@ app.get('/api/campaigns/:id/export', checkPermission('canExportData'), async (re
         i + 1,
         escapeCsv(studentName),
         escapeCsv(phone),
-        escapeCsv(email),
-        escapeCsv(state),
-        escapeCsv(district),
         ...extraVals,
         escapeCsv(program !== '—' ? program : (camp.course || 'MBA')),
         escapeCsv(university !== '—' ? university : (camp.universityName || 'MIT WPU')),

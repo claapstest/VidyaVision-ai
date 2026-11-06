@@ -223,7 +223,7 @@ export default function App() {
   const [transferMessage, setTransferMessage] = useState("I'm transferring your call to our counselor. Please hold while I connect you.");
   const [showTransferPanel, setShowTransferPanel] = useState(true);
   const [isSyncingOmni, setIsSyncingOmni] = useState(false);
-  const [lastSyncedPhone, setLastSyncedPhone] = useState('+919573097810');
+  const [lastSyncedPhone, setLastSyncedPhone] = useState('+919876543210');
 
   // Fetch live agent transfer configuration from OmniDimension on mount
   useEffect(() => {
@@ -960,7 +960,7 @@ export default function App() {
           agentId: Number(collegeForm.agentId) || 270604,
           languages: (collegeForm.languages || '').trim() || 'English, Hindi, Telugu',
           courses: String(collegeForm.courses || '').split(',').map(s => s.trim()).filter(Boolean),
-          counselorPhone: (collegeForm.counselorPhone || '').trim() || '+91 95730 97810'
+          counselorPhone: (collegeForm.counselorPhone || '').trim() || '+91 98765 43210'
         })
       });
 
@@ -1815,7 +1815,7 @@ export default function App() {
           maxDurationMinutes: campaignEndMode === 'duration' && campaignDurationMinutes ? Number(campaignDurationMinutes) : null,
           cutoffTime: campaignEndMode === 'cutoff' ? campaignCutoffTime : null,
           transferEnabled: Boolean(transferEnabled),
-          counselorPhone: (counselorPhone || '').trim() || '+91 95730 97810',
+          counselorPhone: (counselorPhone || '').trim() || '+91 98765 43210',
           transferCondition: (transferCondition || '').trim(),
           transferMessage: (transferMessage || '').trim()
         })
@@ -2692,11 +2692,14 @@ export default function App() {
     const rf = call.rawFields || {};
 
     // Determine clean consolidated Lead Status with visual color cue
+    // Text icons (✅/❌/⏳) are used so every status stays visible even on
+    // Excel installations without a color-emoji font; cell fills in
+    // excelHelper.js provide color as a second cue.
     let leadStatusLabel = '❌ Not Answered';
     if (call.status === 'queued' || call.leadStatus === 'QUEUED' || call.final_status === 'QUEUED') {
       leadStatusLabel = '⏳ Queued';
     } else if (isInterested(call)) {
-      leadStatusLabel = '🟢 Interested';
+      leadStatusLabel = '✅ Interested';
     } else if (isApplicationSent(call)) {
       leadStatusLabel = '📩 Application Sent';
     } else if (isCallback(call)) {
@@ -2706,17 +2709,21 @@ export default function App() {
     } else if (isAlreadyJoined(call)) {
       leadStatusLabel = '🎓 Already Joined';
     } else if (isNotInterested(call)) {
-      leadStatusLabel = '🔴 Not Interested';
+      leadStatusLabel = '❌ Not Interested';
     } else if (isWrongNumber(call)) {
       leadStatusLabel = '⚠️ Wrong / Invalid';
     } else if (isAns) {
       leadStatusLabel = '📞 Answered';
     }
 
-    // Helper to test if a key represents one of the standard columns
-    const isStandardKey = (key) => {
+    // Keys that would collide with the fixed Google Sheets outcome block below.
+    // All other uploaded Excel columns (Email, State, District, Father Name, etc.)
+    // are kept verbatim — Email/State/District are no longer collapsed into
+    // hardcoded columns; they appear here with their original header names.
+    // (Google Sheets outcome columns — Program onwards — are untouched.)
+    const isOutcomeKey = (key) => {
       const norm = String(key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      return ['name', 'fullname', 'studentname', 'student', 'phone', 'phonenumber', 'mobile', 'mobilenumber', 'contact', 'contactnumber', 'email', 'emailid', 'mail', 'mailid', 'state', 'preferredstate', 'stateut', 'district', 'preferredcity', 'city', 'town', 'program', 'course', 'degree', 'branch', 'university', 'college', 'collegename', 'targetcollege', 'preferreduniversity'].includes(norm);
+      return ['program', 'university', 'leadstatus', 'graduationstatus', 'admissiontimeline', 'entranceexam', 'counsellorfollowup', 'livetransferred', 'callduration', 'calldatetime', 'callsummary', 'callrecordingurl', 'calltranscriptfullconversation'].includes(norm);
     };
 
     // Helper to find best matching value for a field from multiple object sources
@@ -2745,10 +2752,9 @@ export default function App() {
       return '—';
     };
 
-    // Student & Parent Metadata from Excel Sheet / Google Sheets
-    const email = resolveField([call, call.extraFields, rf], ['email', 'email id', 'emailid', 'email address', 'mail', 'mail id', 'student email']);
-    const state = resolveField([call, call.extraFields, rf], ['state', 'preferred state', 'preferredstate', 'state ut', 'region', 'province']);
-    const district = resolveField([call, call.extraFields, rf], ['district', 'preferred city', 'preferredcity', 'city', 'town', 'location']);
+    // Program still comes from the Google Sheets outcome block (merged upload + call).
+    // Email/State/District are no longer hardcoded — they flow through from
+    // uploaded extraFields verbatim below.
     const program = resolveField([call, call.extraFields, rf], ['program', 'course', 'degree', 'branch', 'specialization', 'target_course']);
 
     // AI Extracted Intelligence (OmniDimension Variables)
@@ -2797,20 +2803,25 @@ export default function App() {
         : '');
     const callTranscript = rawTranscript ? String(rawTranscript).replace(/<br\s*\/?>/gi, '\n').trim() : '—';
 
-    // Base ordered row object
+    // Base ordered row object — contact identity first.
+    // Full Name / Phone Number stay fixed because upload-time parsing
+    // excludes the detected Name/Phone columns from extraFields (original
+    // header spelling for those two is not stored); all OTHER uploaded
+    // columns flow through verbatim below.
     const rowObj = {
       'S.No': idx + 1,
       'Full Name': studentName,
-      'Phone Number': phoneNumber,
-      'Email ID': email,
-      'State': state,
-      'District': district
+      'Phone Number': phoneNumber
     };
 
-    // Dynamically insert any other extra calling sheet columns (e.g. Father Name, Parent Phone, Remarks)
+    // ALL uploaded Excel columns verbatim, in original header order
+    // (e.g. EmailID, State, District, Father Name, Remarks — any header).
+    // Only keys colliding with the Google Sheets outcome block
+    // (Program onwards) are skipped — those stay as the fixed outcome
+    // columns below, per requirement that Google Sheets handling is unchanged.
     if (call.extraFields && typeof call.extraFields === 'object') {
       Object.keys(call.extraFields).forEach(k => {
-        if (!isStandardKey(k)) {
+        if (!isOutcomeKey(k)) {
           const val = call.extraFields[k];
           rowObj[k] = (val !== undefined && val !== null && String(val).trim() !== '') ? String(val).trim() : '—';
         }
@@ -3184,10 +3195,12 @@ export default function App() {
     if (!camp || !Array.isArray(camp.contacts) || camp.contacts.length === 0) return [];
     const contacts = camp.contacts;
 
-    // Helper to test if a key represents one of the standard columns
-    const isStandardKey = (key) => {
+    // Google Sheets outcome block headers (Program onwards) — must not be
+    // duplicated by uploaded columns. Everything else from the uploaded
+    // Excel is kept verbatim (Email, State, District, etc.).
+    const isOutcomeKey = (key) => {
       const norm = String(key || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      return ['name', 'fullname', 'studentname', 'student', 'phone', 'phonenumber', 'mobile', 'mobilenumber', 'contact', 'contactnumber', 'email', 'emailid', 'mail', 'mailid', 'state', 'preferredstate', 'stateut', 'district', 'preferredcity', 'city', 'town', 'program', 'course', 'degree', 'branch', 'university', 'college', 'collegename', 'targetcollege', 'preferreduniversity'].includes(norm);
+      return ['program', 'university', 'leadstatus', 'graduationstatus', 'admissiontimeline', 'entranceexam', 'counsellorfollowup', 'livetransferred', 'callduration', 'calldatetime', 'callsummary', 'callrecordingurl', 'calltranscriptfullconversation'].includes(norm);
     };
 
     // Collect unique extra field keys with case & punctuation normalization
@@ -3196,7 +3209,7 @@ export default function App() {
     contacts.forEach(c => {
       if (c.extraFields && typeof c.extraFields === 'object') {
         Object.keys(c.extraFields).forEach(k => {
-          if (!isStandardKey(k)) {
+          if (!isOutcomeKey(k)) {
             const norm = k.toLowerCase().replace(/[^a-z0-9]/g, '');
             if (norm && !normExtraMap.has(norm)) {
               normExtraMap.set(norm, k);
@@ -5753,7 +5766,7 @@ export default function App() {
                                       const digitsOnly = e.target.value.replace(/[^\d\s]/g, '');
                                       setCounselorPhone(digitsOnly ? `+91 ${digitsOnly.trim()}` : '');
                                     }}
-                                    placeholder="95730 97810"
+                                    placeholder="98765 43210"
                                     style={{
                                       paddingLeft: '4.2rem',
                                       fontWeight: '600',
@@ -5831,7 +5844,7 @@ export default function App() {
                           </span>
                           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                             Live Call Transfer: <b style={{ color: transferEnabled ? '#059669' : '#64748b' }}>
-                              {transferEnabled ? `Enabled (${counselorPhone || '+91 95730 97810'})` : 'Disabled'}
+                              {transferEnabled ? `Enabled (${counselorPhone || '+91 98765 43210'})` : 'Disabled'}
                             </b>
                           </span>
                           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>

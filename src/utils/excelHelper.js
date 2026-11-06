@@ -158,7 +158,19 @@ export async function downloadExcelWorkbook(sheetsConfig, filename) {
       continue;
     }
 
-    const headers = Object.keys(rows[0]);
+    // Union of all row keys in first-appearance order — uploaded Excel
+    // columns differ per row (empty cells are skipped at upload), so using
+    // only rows[0] would clip columns. Missing values render as '—'.
+    const headers = [];
+    const seen = new Set();
+    for (const r of rows) {
+      for (const h of Object.keys(r || {})) {
+        if (!seen.has(h)) {
+          seen.add(h);
+          headers.push(h);
+        }
+      }
+    }
     ws.columns = headers.map(header => ({
       header,
       key: header
@@ -181,6 +193,35 @@ export async function downloadExcelWorkbook(sheetsConfig, filename) {
       pattern: 'solid',
       fgColor: { argb: 'FF1E293B' }
     };
+    headerRow.alignment = { vertical: 'middle', wrapText: true };
+
+    // Lead Status pill fills — visible even when the emoji icon itself
+    // doesn't render (missing color-emoji font). Matches the dashboard's
+    // Interested (green) / Not Interested (red) / Not Answered (gray) cues.
+    const leadIdx = headers.indexOf('Lead Status');
+    if (leadIdx !== -1) {
+      for (let r = 2; r <= rows.length + 1; r++) {
+        const cell = ws.getCell(r, leadIdx + 1);
+        const val = String(cell.value || '').toLowerCase();
+        if (val.includes('not interested')) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+          cell.font = { color: { argb: 'FF991B1B' }, bold: true };
+        } else if (val.includes('interested')) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } };
+          cell.font = { color: { argb: 'FF166534' }, bold: true };
+        } else if (val.includes('not answered') || val.includes('queued')) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+          cell.font = { color: { argb: 'FF64748B' } };
+        } else if (val.includes('application sent')) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0F2FE' } };
+          cell.font = { color: { argb: 'FF075985' } };
+        } else if (val.includes('callback')) {
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF9C3' } };
+          cell.font = { color: { argb: 'FF854D0E' } };
+        }
+        cell.alignment = { vertical: 'middle', wrapText: true };
+      }
+    }
 
     // Auto width
     const widths = calculateColumnWidths(rows);
@@ -199,7 +240,16 @@ export async function downloadExcelWorkbook(sheetsConfig, filename) {
  */
 export function downloadCsvFile(rows, filename) {
   if (!rows || rows.length === 0) return;
-  const headers = Object.keys(rows[0]);
+  const headers = [];
+  const seen = new Set();
+  for (const r of rows) {
+    for (const h of Object.keys(r || {})) {
+      if (!seen.has(h)) {
+        seen.add(h);
+        headers.push(h);
+      }
+    }
+  }
 
   const csvRows = [];
   // Header row
