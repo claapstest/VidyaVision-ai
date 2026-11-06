@@ -8843,7 +8843,7 @@ export default function App() {
                         onClick={() => handleDownloadCampaignCsv(selectedCampaignDetail.id, selectedCampaignDetail.name)}
                         title="Download CSV"
                       >
-                        <Download size={14} /> CSV
+                        <Download size={14} /> Download CSV
                       </button>
 
                       <button
@@ -9657,34 +9657,42 @@ export default function App() {
                                 type="button"
                                 style={{
                                   fontSize: '0.82rem',
-                                  padding: '0.5rem 0.75rem',
+                                  padding: '0.5rem 0.85rem',
                                   backgroundColor: '#ecfdf5',
                                   border: '1px solid #a7f3d0',
                                   color: '#047857',
                                   borderRadius: '8px',
-                                  cursor: 'pointer'
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.35rem',
+                                  fontWeight: '600'
                                 }}
                                 onClick={() => handleDownloadCampaignExcel(camp)}
                                 title="Download Excel (.xlsx)"
                               >
-                                <Download size={14} />
+                                <Download size={14} /> Excel Download
                               </button>
 
                               <button
                                 type="button"
                                 style={{
                                   fontSize: '0.82rem',
-                                  padding: '0.5rem 0.75rem',
+                                  padding: '0.5rem 0.85rem',
                                   backgroundColor: '#ffffff',
                                   border: '1px solid #cbd5e1',
                                   color: '#475569',
                                   borderRadius: '8px',
-                                  cursor: 'pointer'
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.35rem',
+                                  fontWeight: '600'
                                 }}
                                 onClick={() => handleDownloadCampaignCsv(camp.id, camp.name)}
                                 title="Download CSV"
                               >
-                                <Download size={14} />
+                                <Download size={14} /> CSV Download
                               </button>
                             </>
                           )}
