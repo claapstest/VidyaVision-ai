@@ -58,6 +58,7 @@ import {
 import CallOutcomePieChart from './components/CallOutcomePieChart';
 import TablePagination from './components/TablePagination';
 import CampaignDateTimePicker, { CampaignTimePicker } from './components/CampaignDateTimePicker';
+import AddCollegeModal from './components/AddCollegeModal';
 
 
 const isUgCourse = (courseName) => {
@@ -216,7 +217,7 @@ export default function App() {
 
   // Live Counselor Call Transfer States (OmniDimension Call Configuration)
   const [transferEnabled, setTransferEnabled] = useState(true);
-  const [counselorPhone, setCounselorPhone] = useState('+91 95730 97810');
+  const [counselorPhone, setCounselorPhone] = useState('+91 98765 43210');
   const [transferMode, setTransferMode] = useState('static'); // 'static' | 'dynamic'
   const [transferCondition, setTransferCondition] = useState('Transfer when the user asks to speak with a counsellor/officer, OR agrees to be transferred (for example: saying yes when asked about fees, scholarships, or senior counsellor assistance).');
   const [transferMessage, setTransferMessage] = useState("I'm transferring your call to our counselor. Please hold while I connect you.");
@@ -830,7 +831,7 @@ export default function App() {
     agentId: '270604',
     languages: 'English, Hindi, Telugu',
     courses: '',
-    counselorPhone: '+91 95730 97810'
+    counselorPhone: ''
   });
 
   const getInitialColleges = () => {
@@ -912,7 +913,7 @@ export default function App() {
       agentId: '270604',
       languages: 'English, Hindi, Telugu',
       courses: '',
-      counselorPhone: '+91 95730 97810'
+      counselorPhone: ''
     });
     setEditingCollegeId('');
   };
@@ -927,7 +928,7 @@ export default function App() {
       agentId: String(college.agentId || 270604),
       languages: college.languages || 'English, Hindi, Telugu',
       courses: Array.isArray(college.courses) ? college.courses.join(', ') : (college.courses || ''),
-      counselorPhone: college.counselorPhone || '+91 95730 97810'
+      counselorPhone: college.counselorPhone || ''
     });
     setEditingCollegeId(college.id);
     setShowCollegeModal(true);
@@ -8522,153 +8523,21 @@ export default function App() {
       })()}
 
       {/* Add College Modal */}
-      {showCollegeModal && (
-        <div className="modal-overlay" onClick={() => setShowCollegeModal(false)}>
-          <div className="modal-content" style={{ maxWidth: '620px', width: '92%' }} onClick={e => e.stopPropagation()}>
-            <div className="modal-header" style={{ borderBottom: '1px solid var(--border)', paddingBottom: '1rem' }}>
-              <div>
-                <h3 style={{ fontSize: '1.15rem', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <GraduationCap size={20} /> {editingCollegeId ? 'Edit College' : 'Add New College'}
-                </h3>
-                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                  Saved colleges appear in sequence calling, WhatsApp links, and analytics filters.
-                </span>
-              </div>
-              <button className="modal-close" onClick={() => setShowCollegeModal(false)}>×</button>
-            </div>
-
-            <form onSubmit={handleSaveCollege}>
-              <div className="modal-body" style={{ padding: '1.25rem 0', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <div className="form-grid">
-                  <div className="form-group">
-                    <label className="form-label">College Name *</label>
-                    <input
-                      className="form-input"
-                      value={collegeForm.name}
-                      onChange={(e) => setCollegeForm(prev => ({ ...prev, name: e.target.value }))}
-                      placeholder="CBIT Hyderabad"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Place / City</label>
-                    <input
-                      className="form-input"
-                      value={collegeForm.place}
-                      onChange={(e) => setCollegeForm(prev => ({ ...prev, place: e.target.value }))}
-                      placeholder="Gandipet, Hyderabad"
-                    />
-                  </div>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Available Courses</label>
-                  <input
-                    className="form-input"
-                    value={collegeForm.courses}
-                    onChange={(e) => setCollegeForm(prev => ({ ...prev, courses: e.target.value }))}
-                    placeholder="B.Tech CSE, B.Tech ECE, MBA"
-                  />
-                  <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>Comma-separated — e.g. B.Tech CSE, MBA. Shown below the college name and selectable in Step 2.</span>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Application / Website Link</label>
-                  <input
-                    className="form-input"
-                    value={collegeForm.websiteUrl}
-                    onChange={(e) => setCollegeForm(prev => ({ ...prev, websiteUrl: e.target.value }))}
-                    placeholder="https://college.edu/admissions"
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <PhoneForwarded size={14} style={{ color: '#F16522' }} />
-                    Default Admission Counselor Phone (Live Call Transfer)
-                  </label>
-                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                    <span style={{ position: 'absolute', left: '0.75rem', fontSize: '0.85rem' }}>🇮🇳</span>
-                    <input
-                      className="form-input"
-                      style={{ paddingLeft: '2.5rem' }}
-                      value={collegeForm.counselorPhone || ''}
-                      onChange={(e) => setCollegeForm(prev => ({ ...prev, counselorPhone: e.target.value }))}
-                      placeholder="+91 95730 97810"
-                    />
-                  </div>
-                  <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
-                    Synced with Voice Agent: When live transfer triggers for this college, calls connect to this counselor.
-                  </span>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Languages</label>
-                  <input
-                    className="form-input"
-                    value={collegeForm.languages}
-                    onChange={(e) => setCollegeForm(prev => ({ ...prev, languages: e.target.value }))}
-                    placeholder="English, Hindi, Telugu"
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Description</label>
-                  <textarea
-                    className="form-input"
-                    rows={3}
-                    value={collegeForm.description}
-                    onChange={(e) => setCollegeForm(prev => ({ ...prev, description: e.target.value }))}
-                    placeholder="Admissions outreach notes for this college bot"
-                  />
-                </div>
-
-                {/* Existing Saved Colleges Quick Delete Section */}
-                <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem', marginTop: '0.5rem' }}>
-                  <label style={{ fontSize: '0.78rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '0.5rem', display: 'block' }}>
-                    Existing Saved Colleges ({universities.length}) — Click Delete to remove:
-                  </label>
-                  <div style={{ maxHeight: '160px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.4rem', paddingRight: '0.25rem' }}>
-                    {universities.map(uni => (
-                      <div key={uni.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.45rem 0.75rem', backgroundColor: 'var(--bg-card)', borderRadius: '6px', border: '1px solid var(--border)' }}>
-                        <div>
-                          <strong style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>🎓 {uni.name}</strong>
-                          {uni.place && <span style={{ fontSize: '0.76rem', color: '#818cf8', marginLeft: '0.4rem' }}>({uni.place})</span>}
-                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>🕒 {uni.createdAt ? new Date(uni.createdAt).toLocaleString() : '—'}</div>
-                        </div>
-                        <button
-                          type="button"
-                          className="btn btn-danger-outline"
-                          style={{ padding: '0.2rem 0.55rem', fontSize: '0.74rem', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.4)', backgroundColor: 'rgba(239, 68, 68, 0.1)', fontWeight: '700' }}
-                          disabled={deletingCollegeId === uni.id}
-                          onClick={() => handleDeleteCollege(uni)}
-                        >
-                          <Trash2 size={12} /> {deletingCollegeId === uni.id ? 'Deleting...' : 'Delete'}
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="modal-footer" style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem', display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => {
-                    setShowCollegeModal(false);
-                    resetCollegeForm();
-                  }}
-                >
-                  Cancel
-                </button>
-                <button className="btn btn-primary" type="submit" disabled={isSavingCollege}>
-                  <Save size={15} /> {isSavingCollege ? 'Saving...' : (editingCollegeId ? 'Update College' : 'Save College')}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <AddCollegeModal
+        isOpen={showCollegeModal}
+        onClose={() => {
+          setShowCollegeModal(false);
+          resetCollegeForm();
+        }}
+        collegeForm={collegeForm}
+        setCollegeForm={setCollegeForm}
+        editingCollegeId={editingCollegeId}
+        isSavingCollege={isSavingCollege}
+        handleSaveCollege={handleSaveCollege}
+        universities={universities}
+        deletingCollegeId={deletingCollegeId}
+        handleDeleteCollege={handleDeleteCollege}
+      />
 
       {/* MODAL 1: CAMPAIGN RECIPIENT STUDENT TABLE MODAL */}
       {selectedCampaignDetail && (

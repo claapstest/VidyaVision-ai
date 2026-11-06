@@ -320,8 +320,8 @@ Click **"Configure"** on the **Campaign Schedule & Time Limits** bar:
    - 🏢 **Business Window:** Restricts calls strictly to legal telecom business hours (**09:30 AM to 06:30 PM IST**).
 3. **Counselor Live Call Transfer Configuration:**
    - Toggle **Enable Call Transfer** to allow the Voice AI to transfer high-intent students live to a human counselor.
-   - Enter your active phone number in **Counselor Phone Number (Live Call Forwarding)** (e.g. `95730 97810` with country code `+91`).
-   - Click **"Sync to Voice Agent"** to update the telephony bridge. The green badge confirms: `✔ Connected to Voice Agent: +91 95730 97810`.
+   - Enter your active phone number in **Counselor Phone Number (Live Call Forwarding)** (e.g. `9876543210` with country code `+91`).
+   - Click **"Sync to Voice Agent"** to update the telephony bridge. The green badge confirms: `✔ Connected to Voice Agent: +91 9876543210`.
 
 ![Campaign Schedule Limits and Counselor Call Transfer](public/guide-assets/06-schedule-and-transfer.png)
 *Figure 15: Campaign Schedule, Auto-Cutoff Limits & Counselor Call Transfer Configuration*

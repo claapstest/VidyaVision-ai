@@ -107,12 +107,12 @@ async function setupDatabase() {
         status VARCHAR(32) DEFAULT 'active',
         website_url VARCHAR(512),
         description TEXT,
-        counselor_phone VARCHAR(50) DEFAULT '+91 95730 97810',
+        counselor_phone VARCHAR(50) DEFAULT '+91 98765 43210',
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_colleges_agent_id ON colleges(agent_id);
-      ALTER TABLE colleges ADD COLUMN IF NOT EXISTS counselor_phone VARCHAR(50) DEFAULT '+91 95730 97810';
+      ALTER TABLE colleges ADD COLUMN IF NOT EXISTS counselor_phone VARCHAR(50) DEFAULT '+91 98765 43210';
     `);
     console.log("✔ Table 'colleges' verified");
 
@@ -136,7 +136,7 @@ async function setupDatabase() {
         end_mode VARCHAR(32) DEFAULT 'none',
         max_duration_minutes INTEGER,
         transfer_enabled BOOLEAN DEFAULT FALSE,
-        counselor_phone VARCHAR(50) DEFAULT '+91 95730 97810',
+        counselor_phone VARCHAR(50) DEFAULT '+91 98765 43210',
         transfer_condition TEXT,
         transfer_message TEXT,
         scheduled_start_time TIMESTAMP WITH TIME ZONE,
@@ -151,7 +151,7 @@ async function setupDatabase() {
       CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status);
       CREATE INDEX IF NOT EXISTS idx_campaigns_created ON campaigns(created_at DESC);
       ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS transfer_enabled BOOLEAN DEFAULT FALSE;
-      ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS counselor_phone VARCHAR(50) DEFAULT '+91 95730 97810';
+      ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS counselor_phone VARCHAR(50) DEFAULT '+91 98765 43210';
       ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS transfer_condition TEXT;
       ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS transfer_message TEXT;
     `);

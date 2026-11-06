@@ -235,6 +235,11 @@ const requireAuth = async (req, res, next) => {
     return next();
   }
 
+  // Allow health check endpoint without prior authentication (Docker, Render, load balancers)
+  if (req.path === '/health' || req.path === '/api/health' || req.originalUrl === '/api/health') {
+    return next();
+  }
+
   // Allow login endpoint without prior authentication
   if (req.path === '/auth/login' || req.originalUrl === '/api/auth/login') {
     return next();
@@ -253,6 +258,9 @@ const requireAuth = async (req, res, next) => {
       const users = await loadUsers();
       const user = users.find(u => u.id === decoded.id || u.email.toLowerCase() === String(decoded.email || '').toLowerCase());
       if (user) {
+        if (user.status === 'suspended') {
+          return res.status(403).json({ success: false, error: 'Your account has been suspended. Please contact your VidyaVision Administrator.' });
+        }
         req.user = user;
         return next();
       }
@@ -317,6 +325,18 @@ const requireAdmin = (req, res, next) => {
 };
 
 app.use('/api', requireAuth);
+
+// System Health Check Endpoint (Public for Docker / Render / Load Balancers)
+app.get(['/health', '/api/health'], async (req, res) => {
+  const dbConnected = await isDbConnected();
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    database: dbConnected ? 'connected' : 'disconnected',
+    uptimeSeconds: Math.floor(process.uptime()),
+    agentConfigured: Boolean(getApiKey() && getAgentId())
+  });
+});
 
 // ==========================================================
 // Authentication REST API Endpoints
@@ -714,7 +734,7 @@ async function loadCampaigns() {
         canceledAt: r.canceled_at ? new Date(r.canceled_at).toISOString() : null,
         stoppedReason: r.stopped_reason,
         transferEnabled: !!r.transfer_enabled,
-        counselorPhone: r.counselor_phone || '+91 95730 97810',
+        counselorPhone: r.counselor_phone || '+91 98765 43210',
         transferCondition: r.transfer_condition || '',
         transferMessage: r.transfer_message || '',
         contacts: contactsByCamp.get(r.id) || []
@@ -776,7 +796,7 @@ async function saveCampaigns(campaigns) {
         c.totalCount || (c.contacts ? c.contacts.length : 0), c.completedCount || 0,
         c.answeredCount || 0, c.unansweredCount || 0, c.dispatchErrorCount || 0,
         c.delaySeconds || 2, c.endMode || 'none', c.maxDurationMinutes || null,
-        Boolean(c.transferEnabled), c.counselorPhone || '+91 95730 97810',
+        Boolean(c.transferEnabled), c.counselorPhone || '+91 98765 43210',
         c.transferCondition || '', c.transferMessage || '',
         c.scheduledStartTime ? new Date(c.scheduledStartTime) : null,
         c.startedAt ? new Date(c.startedAt) : null,
@@ -1047,7 +1067,7 @@ async function loadColleges() {
         status: r.status,
         websiteUrl: r.website_url,
         description: r.description,
-        counselorPhone: r.counselor_phone || '+91 95730 97810'
+        counselorPhone: r.counselor_phone || '+91 98765 43210'
       }));
     }
   } catch (err) {
@@ -1084,7 +1104,7 @@ async function saveColleges(colleges) {
         c.id, c.name, c.place || 'India', c.agentId ? Number(c.agentId) : null,
         c.languages || 'English, Hindi', Array.isArray(c.courses) ? c.courses : [],
         c.status || 'active', c.websiteUrl || '', c.description || '',
-        c.counselorPhone || '+91 95730 97810'
+        c.counselorPhone || '+91 98765 43210'
       ]);
     }
   } catch (err) {
@@ -1262,8 +1282,117 @@ function broadcastQueueUpdate() {
   });
 }
 
+// Ensure PostgreSQL schema and columns match application specifications
+async function ensurePostgresSchema() {
+  try {
+    const connected = await isDbConnected();
+    if (!connected) return;
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id VARCHAR(64) PRIMARY KEY,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        role VARCHAR(32) NOT NULL DEFAULT 'counselor',
+        permissions JSONB NOT NULL DEFAULT '{}'::jsonb,
+        status VARCHAR(32) NOT NULL DEFAULT 'active',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'active';
+
+      CREATE TABLE IF NOT EXISTS colleges (
+        id VARCHAR(64) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        place VARCHAR(255) DEFAULT 'India',
+        agent_id INTEGER,
+        languages VARCHAR(255) DEFAULT 'English, Hindi',
+        courses TEXT[] DEFAULT '{}',
+        status VARCHAR(32) DEFAULT 'active',
+        website_url VARCHAR(512),
+        description TEXT,
+        counselor_phone VARCHAR(50) DEFAULT '+91 98765 43210',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_colleges_agent_id ON colleges(agent_id);
+      ALTER TABLE colleges ADD COLUMN IF NOT EXISTS counselor_phone VARCHAR(50) DEFAULT '+91 98765 43210';
+
+      CREATE TABLE IF NOT EXISTS campaigns (
+        id VARCHAR(64) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        university_id VARCHAR(64),
+        university_name VARCHAR(255),
+        college_place VARCHAR(255),
+        course VARCHAR(255),
+        agent_id INTEGER,
+        status VARCHAR(32) NOT NULL DEFAULT 'queued',
+        total_count INTEGER DEFAULT 0,
+        completed_count INTEGER DEFAULT 0,
+        answered_count INTEGER DEFAULT 0,
+        unanswered_count INTEGER DEFAULT 0,
+        dispatch_error_count INTEGER DEFAULT 0,
+        delay_seconds INTEGER DEFAULT 2,
+        end_mode VARCHAR(32) DEFAULT 'none',
+        max_duration_minutes INTEGER,
+        transfer_enabled BOOLEAN DEFAULT FALSE,
+        counselor_phone VARCHAR(50) DEFAULT '+91 98765 43210',
+        transfer_condition TEXT,
+        transfer_message TEXT,
+        scheduled_start_time TIMESTAMP WITH TIME ZONE,
+        started_at TIMESTAMP WITH TIME ZONE,
+        completed_at TIMESTAMP WITH TIME ZONE,
+        canceled_at TIMESTAMP WITH TIME ZONE,
+        paused_at TIMESTAMP WITH TIME ZONE,
+        stopped_reason TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status);
+      CREATE INDEX IF NOT EXISTS idx_campaigns_created ON campaigns(created_at DESC);
+      ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS transfer_enabled BOOLEAN DEFAULT FALSE;
+      ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS counselor_phone VARCHAR(50) DEFAULT '+91 98765 43210';
+      ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS transfer_condition TEXT;
+      ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS transfer_message TEXT;
+      ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS paused_at TIMESTAMP WITH TIME ZONE;
+
+      CREATE TABLE IF NOT EXISTS campaign_contacts (
+        id VARCHAR(128) PRIMARY KEY,
+        campaign_id VARCHAR(64) REFERENCES campaigns(id) ON DELETE CASCADE,
+        phone VARCHAR(32) NOT NULL,
+        formatted_phone VARCHAR(32) NOT NULL,
+        name VARCHAR(255),
+        university_id VARCHAR(64),
+        university_name VARCHAR(255),
+        course VARCHAR(255),
+        program VARCHAR(255),
+        email VARCHAR(255),
+        state VARCHAR(128),
+        district VARCHAR(128),
+        status VARCHAR(32) DEFAULT 'queued',
+        call_outcome VARCHAR(128) DEFAULT 'Pending',
+        call_duration VARCHAR(32) DEFAULT '—',
+        retry_count INTEGER DEFAULT 0,
+        reason TEXT,
+        extra_fields JSONB DEFAULT '{}'::jsonb,
+        timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_camp_contacts_camp ON campaign_contacts(campaign_id);
+      CREATE INDEX IF NOT EXISTS idx_camp_contacts_phone ON campaign_contacts(phone);
+      CREATE INDEX IF NOT EXISTS idx_camp_contacts_status ON campaign_contacts(status);
+    `);
+    console.log('[DB] PostgreSQL schema verified and up to date.');
+  } catch (err) {
+    console.warn('[DB] PostgreSQL schema verification notice:', err.message);
+  }
+}
+
 // Ensure database file and folder exists
 async function initDb() {
+  await ensurePostgresSchema();
   try {
     await fs.mkdir(DATA_DIR, { recursive: true });
     try {
@@ -2596,7 +2725,7 @@ async function syncAgentTransferConfigToOmni(agentIds, config = {}) {
 
   const {
     transferEnabled = true,
-    counselorPhone = '+919573097810',
+    counselorPhone = '+919876543210',
     transferCondition = 'Transfer when the user asks to speak with a counsellor/officer, OR agrees to be transferred (for example: saying yes when asked about fees, scholarships, or senior counsellor assistance).',
     transferMessage = "I'm transferring your call to our counselor. Please hold while I connect you."
   } = config;
@@ -2956,8 +3085,26 @@ async function startScheduledCampaign(targetCampaignId) {
     universityName: camp.universityName || 'Vidyavision AI Admission Assistant',
     collegePlace: camp.collegePlace || '',
     applicationUrl: camp.applicationUrl || '',
-    course: camp.course || ''
+    course: camp.course || '',
+    transferEnabled: Boolean(camp.transferEnabled),
+    counselorPhone: camp.counselorPhone || '+91 98765 43210',
+    transferCondition: camp.transferCondition || '',
+    transferMessage: camp.transferMessage || ''
   };
+
+  // Pre-sync counselor transfer configuration to OmniDimension agents
+  if (camp.transferEnabled) {
+    try {
+      const activeBotAgentId = resolveAgentIdForCourse(camp.course, camp.agentId);
+      const syncTargets = [activeBotAgentId, 270604, 270740].filter(Boolean);
+      syncAgentTransferConfigToOmni(syncTargets, {
+        transferEnabled: camp.transferEnabled,
+        counselorPhone: camp.counselorPhone,
+        transferCondition: camp.transferCondition,
+        transferMessage: camp.transferMessage
+      }).catch(err => console.warn('[OmniDimension] Warning: Could not pre-sync scheduled agent transfer config:', err.message));
+    } catch (e) { }
+  }
 
   // If duration limit was set, calculate timeLimitExpiresAt from current start
   if (CAMPAIGN_STATE.endMode === 'duration' && CAMPAIGN_STATE.maxDurationMinutes > 0) {
@@ -3124,7 +3271,7 @@ async function processNextInQueue() {
 
     // Live Counselor Call Transfer (OmniDimension Integration)
     const transferEnabled = Boolean(CAMPAIGN_STATE.transferEnabled || contact.transferEnabled);
-    const counselorPhone = CAMPAIGN_STATE.counselorPhone || contact.counselorPhone || '+91 95730 97810';
+    const counselorPhone = CAMPAIGN_STATE.counselorPhone || contact.counselorPhone || '+91 98765 43210';
     const transferCondition = CAMPAIGN_STATE.transferCondition || contact.transferCondition || 'Transfer when the user asks to speak with a counsellor/officer, OR agrees to be transferred (for example: saying yes when asked about fees, scholarships, or senior counsellor assistance).';
     const transferMessage = CAMPAIGN_STATE.transferMessage || contact.transferMessage || "I'm transferring your call to our counselor. Please hold while I connect you.";
 
@@ -3430,7 +3577,7 @@ app.post('/api/colleges', checkPermission('canManageColleges'), async (req, res)
         courses: courses !== undefined ? normCourses(courses) : (existing.courses || []),
         websiteUrl: websiteUrl !== undefined ? String(websiteUrl).trim() : existing.websiteUrl,
         description: description !== undefined ? String(description).trim() : existing.description,
-        counselorPhone: counselorPhone !== undefined ? String(counselorPhone).trim() : (existing.counselorPhone || '+91 95730 97810'),
+        counselorPhone: counselorPhone !== undefined ? String(counselorPhone).trim() : (existing.counselorPhone || '+91 98765 43210'),
         updatedAt: new Date().toISOString()
       };
       await saveColleges(currentList);
@@ -3451,7 +3598,7 @@ app.post('/api/colleges', checkPermission('canManageColleges'), async (req, res)
       status: 'active',
       websiteUrl: websiteUrl ? websiteUrl.trim() : '',
       description: description ? description.trim() : '',
-      counselorPhone: counselorPhone && String(counselorPhone).trim() ? String(counselorPhone).trim() : '+91 95730 97810',
+      counselorPhone: counselorPhone && String(counselorPhone).trim() ? String(counselorPhone).trim() : '+91 98765 43210',
       createdAt: new Date().toISOString()
     };
 
@@ -3489,6 +3636,11 @@ app.delete('/api/colleges/:id', checkPermission('canManageColleges'), async (req
     }
 
     const updatedList = currentList.filter(c => c.id !== id);
+    try {
+      await query('DELETE FROM colleges WHERE id = $1', [id]);
+    } catch (dbErr) {
+      console.warn('[DB] PostgreSQL delete college warning:', dbErr.message);
+    }
     await saveColleges(updatedList);
     broadcast({ type: 'colleges', data: updatedList });
 
@@ -3518,7 +3670,7 @@ app.post('/api/queue/start', checkPermission('canStartStopCampaigns'), async (re
       maxDurationMinutes = null,
       cutoffTime = null,
       transferEnabled = false,
-      counselorPhone = '+91 95730 97810',
+      counselorPhone = '+91 98765 43210',
       transferCondition = 'Transfer when the user asks to speak with a counsellor/officer, OR agrees to be transferred (for example: saying yes when asked about fees, scholarships, or senior counsellor assistance).',
       transferMessage = "I'm transferring your call to our counselor. Please hold while I connect you."
     } = req.body;
@@ -3676,7 +3828,7 @@ app.post('/api/queue/start', checkPermission('canStartStopCampaigns'), async (re
         applicationUrl: applicationUrl ? String(applicationUrl) : '',
         course: course ? String(course).trim() : '',
         transferEnabled: Boolean(transferEnabled),
-        counselorPhone: counselorPhone ? String(counselorPhone).trim() : '+91 95730 97810',
+        counselorPhone: counselorPhone ? String(counselorPhone).trim() : '+91 98765 43210',
         transferCondition: transferCondition ? String(transferCondition).trim() : '',
         transferMessage: transferMessage ? String(transferMessage).trim() : ''
       };
@@ -3786,7 +3938,7 @@ app.post('/api/queue/start', checkPermission('canStartStopCampaigns'), async (re
       applicationUrl: applicationUrl ? String(applicationUrl) : '',
       course: course ? String(course).trim() : '',
       transferEnabled: Boolean(transferEnabled),
-      counselorPhone: counselorPhone ? String(counselorPhone).trim() : '+91 95730 97810',
+      counselorPhone: counselorPhone ? String(counselorPhone).trim() : '+91 98765 43210',
       transferCondition: transferCondition ? String(transferCondition).trim() : '',
       transferMessage: transferMessage ? String(transferMessage).trim() : ''
     };
@@ -3909,7 +4061,7 @@ app.get('/api/campaigns/:id', async (req, res) => {
   }
 });
 
-app.put('/api/campaigns/:id', async (req, res) => {
+app.put('/api/campaigns/:id', checkPermission('canStartStopCampaigns'), async (req, res) => {
   try {
     const { name } = req.body;
     const all = await loadCampaigns();
@@ -3929,6 +4081,12 @@ app.delete('/api/campaigns/:id', checkPermission('canStartStopCampaigns'), async
     clearScheduledTimer(req.params.id);
     const all = await loadCampaigns();
     const updated = all.filter(c => c.id !== req.params.id);
+    try {
+      await query('DELETE FROM campaign_contacts WHERE campaign_id = $1', [req.params.id]);
+      await query('DELETE FROM campaigns WHERE id = $1', [req.params.id]);
+    } catch (dbErr) {
+      console.warn('[DB] PostgreSQL delete campaign warning:', dbErr.message);
+    }
     await saveCampaigns(updated);
     broadcast({ type: 'campaigns', data: updated });
     res.json({ success: true, deletedId: req.params.id });
@@ -4402,7 +4560,14 @@ app.post('/api/queue/resume', checkPermission('canStartStopCampaigns'), async (r
       universityId: campToResume.universityId || '',
       universityName: campToResume.universityName || 'Vidyavision AI',
       collegePlace: campToResume.collegePlace || '',
-      course: campToResume.course || ''
+      course: campToResume.course || '',
+      transferEnabled: Boolean(campToResume.transferEnabled),
+      counselorPhone: campToResume.counselorPhone || '+91 98765 43210',
+      transferCondition: campToResume.transferCondition || '',
+      transferMessage: campToResume.transferMessage || '',
+      endMode: campToResume.endMode || 'none',
+      maxDurationMinutes: campToResume.maxDurationMinutes ? Number(campToResume.maxDurationMinutes) : null,
+      applicationUrl: campToResume.applicationUrl || ''
     };
 
     campToResume.status = 'in-progress';
@@ -4535,8 +4700,8 @@ app.get('/api/logs', (req, res) => {
   res.json({ logs: LOGS });
 });
 
-// 7. Clear registration logs
-app.post('/api/logs/clear', (req, res) => {
+// 7. Clear registration logs (Admin only)
+app.post('/api/logs/clear', requireAdmin, (req, res) => {
   LOGS.length = 0;
   addLog('info', 'Activity logs cleared.');
   res.json({ success: true, logs: LOGS });
@@ -4612,7 +4777,7 @@ app.get('/api/omni/agent-transfer', async (req, res) => {
       agentId: data.id,
       agentName: data.name,
       isTransferEnabled: data.is_transfer_enabled,
-      counselorPhone: (/\d{4,}/.test(String(primaryOption.number || '')) && String(primaryOption.number).trim() !== 'counselor_phone') ? primaryOption.number : '+91 95730 97810',
+      counselorPhone: (/\d{4,}/.test(String(primaryOption.number || '')) && String(primaryOption.number).trim() !== 'counselor_phone') ? primaryOption.number : '+91 98765 43210',
       transferCondition: primaryOption.transfer_condition || '',
       transferMessage: primaryOption.transfer_message || '',
       rawOptions: data.transfer_options || []
@@ -4645,7 +4810,7 @@ app.all(['/api/counselor/transfer', '/api/transfer', '/counselor/transfer'], asy
     }
 
     if (!targetPhone) {
-      targetPhone = '+919573097810';
+      targetPhone = '+919876543210';
     }
 
     // Clean phone number format (+91XXXXXXXXXX)
@@ -4668,7 +4833,7 @@ app.all(['/api/counselor/transfer', '/api/transfer', '/counselor/transfer'], asy
     console.error('Error in custom API transfer endpoint:', err);
     return res.json({
       success: true,
-      __omni_transfer_number: '+919573097810',
+      __omni_transfer_number: '+919876543210',
       __omni_transfer_message: "I'm connecting you to our admissions team now."
     });
   }
@@ -5075,7 +5240,14 @@ async function recoverServerState() {
         universityId: upcoming.universityId || '',
         universityName: upcoming.universityName || 'Vidyavision AI',
         collegePlace: upcoming.collegePlace || '',
-        course: upcoming.course || ''
+        course: upcoming.course || '',
+        transferEnabled: Boolean(upcoming.transferEnabled),
+        counselorPhone: upcoming.counselorPhone || '+91 98765 43210',
+        transferCondition: upcoming.transferCondition || '',
+        transferMessage: upcoming.transferMessage || '',
+        endMode: upcoming.endMode || 'none',
+        maxDurationMinutes: upcoming.maxDurationMinutes ? Number(upcoming.maxDurationMinutes) : null,
+        applicationUrl: upcoming.applicationUrl || ''
       };
 
       broadcastQueueUpdate();
