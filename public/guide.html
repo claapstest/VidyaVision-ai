@@ -389,6 +389,7 @@
       color: #1e293b;
     }
 
+    /* Screenshot Container */
     /* Screenshot Container with High-Clarity Optimization */
     .screenshot-frame {
       position: relative;
@@ -420,6 +421,15 @@
       margin: 1.35rem auto;
       background: #1e293b;
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+    }
+
+    /* Login screenshot rendered at native 1:1 crisp dimension without blur */
+    .screenshot-frame.login-shot {
+      max-width: 520px;
+      margin: 1.5rem auto;
+      background: #ffffff;
+      border: 1px solid rgba(27, 59, 111, 0.18);
+      box-shadow: 0 10px 28px rgba(27, 59, 111, 0.1);
     }
 
     .zoom-hint {
@@ -458,6 +468,14 @@
       font-weight: 600;
     }
 
+    /* Placeholder for upcoming user screenshots */
+    .screenshot-placeholder {
+      border: 2px dashed #cbd5e1;
+      border-radius: 12px;
+      padding: 2.5rem 1.5rem;
+      text-align: center;
+      background: #f8fafc;
+      margin: 1.25rem 0;
     /* Lightbox Modal for 100% Crisp Full-Screen Viewing */
     #lightbox-modal {
       position: fixed;
@@ -475,11 +493,20 @@
       cursor: zoom-out;
     }
 
+    .screenshot-placeholder h4 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #475569;
+      margin-bottom: 0.25rem;
     #lightbox-modal.active {
       display: flex;
       animation: fadeIn 0.15s ease-out;
     }
 
+    .screenshot-placeholder p {
+      font-size: 0.82rem;
+      color: #94a3b8;
+      margin: 0;
     #lightbox-modal img {
       max-width: 95vw;
       max-height: 90vh;
@@ -565,6 +592,7 @@
 
     /* Print Styles */
     @media print {
+      .top-bar, .btn-print, .sidebar {
       .top-bar, .btn-print, .sidebar, .zoom-hint {
         display: none !important;
       }
@@ -604,6 +632,7 @@
 
   <!-- Sticky Top Brand Bar -->
   <header class="top-bar">
+    <div style="display: flex; alignItems: center; gap: 1.5rem;">
     <div style="display: flex; align-items: center; gap: 1.5rem;">
       <div class="brand-container">
         <img src="/vidyavision-logo.svg" alt="VidyaVision Logo">
@@ -729,9 +758,10 @@
             </ul>
           </div>
 
-          <div class="screenshot-frame modal-shot">
+          <!-- Single high-clarity login screenshot container -->
+          <div class="screenshot-frame login-shot">
             <div class="zoom-hint">🔍 Click to zoom full resolution</div>
-            <img src="/guide-assets/01-login-page.jpg" alt="VidyaVision Counselor & Admin Sign In Portal">
+            <img src="/guide-assets/01-login-page.png" alt="VidyaVision Counselor & Admin Sign In Portal">
             <div class="screenshot-caption">📷 Screen 1.1: Official VidyaVision Counselor & Admin Authentication Portal</div>
           </div>
         </div>
@@ -1218,6 +1248,7 @@
             </ul>
           </div>
 
+          <div class="screenshot-frame">
           <div class="screenshot-frame modal-shot">
             <div class="zoom-hint">🔍 Click to zoom full resolution</div>
             <img src="/guide-assets/10-recent-calls-modal.png" alt="Recent Calls Detail Modal Audio Player and Transcript">
@@ -1242,6 +1273,7 @@
   </div>
 
   <script>
+    // Smooth scrolling & active link highlighting in sidepanel
     // 1. Smooth scrolling & active link highlighting in sidepanel
     const navLinks = document.querySelectorAll('.sidebar-nav-link');
     const sections = document.querySelectorAll('.step-card');

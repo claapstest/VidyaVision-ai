@@ -67,7 +67,7 @@
 2. Navigate to your portal address (e.g., `https://your-domain.com` or local network URL).
 3. The official **VidyaVision** secure authentication portal will appear.
 
-![VidyaVision Counselor & Admin Sign In Portal](public/guide-assets/01-login-page.jpg)
+![VidyaVision Counselor & Admin Sign In Portal](public/guide-assets/01-login-page.png)
 *Figure 1: Clean, secure counselor authentication screen with official VidyaVision branding.*
 
 ### User Roles at a Glance:
