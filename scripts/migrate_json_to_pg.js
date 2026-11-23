@@ -1,9 +1,9 @@
 import fs from 'fs';
 import path from 'path';
-import { query, pool } from '../db.js';
+import { query, getPool } from '../db.js';
 
 async function migrateData() {
-  console.log('--- Migrating Existing JSON Data to PostgreSQL ---');
+  console.log('--- Migrating Existing JSON Data to SQL Server ---');
   const dataDir = path.join(process.cwd(), 'data');
 
   // 1. Migrate Colleges
@@ -15,18 +15,18 @@ async function migrateData() {
         let count = 0;
         for (const col of colleges) {
           await query(`
-            INSERT INTO colleges (id, name, place, agent_id, languages, courses, status, website_url, description)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            ON CONFLICT (id) DO UPDATE SET
-              name = EXCLUDED.name,
-              place = EXCLUDED.place,
-              agent_id = EXCLUDED.agent_id,
-              languages = EXCLUDED.languages,
-              courses = EXCLUDED.courses,
-              status = EXCLUDED.status,
-              website_url = EXCLUDED.website_url,
-              description = EXCLUDED.description,
-              updated_at = NOW();
+            MERGE colleges AS target
+            USING (SELECT $1 AS id, $2 AS name, $3 AS place, $4 AS agent_id, $5 AS languages,
+              $6 AS courses, $7 AS status, $8 AS website_url, $9 AS description) AS source
+            ON target.id = source.id
+            WHEN MATCHED THEN UPDATE SET
+              name = source.name, place = source.place, agent_id = source.agent_id,
+              languages = source.languages, courses = source.courses, status = source.status,
+              website_url = source.website_url, description = source.description,
+              updated_at = SYSDATETIMEOFFSET()
+            WHEN NOT MATCHED THEN INSERT (id, name, place, agent_id, languages, courses, status, website_url, description)
+              VALUES (source.id, source.name, source.place, source.agent_id, source.languages, source.courses,
+                source.status, source.website_url, source.description);
           `, [
             col.id,
             col.name,
@@ -40,7 +40,7 @@ async function migrateData() {
           ]);
           count++;
         }
-        console.log(`✔ Migrated ${count} colleges into PostgreSQL.`);
+        console.log(`✔ Migrated ${count} colleges into SQL Server.`);
       }
     } catch (err) {
       console.warn('Colleges migration error:', err.message);
@@ -57,21 +57,28 @@ async function migrateData() {
         let contactCount = 0;
         for (const c of campaigns) {
           await query(`
-            INSERT INTO campaigns (
+            MERGE campaigns AS target
+            USING (SELECT $1 AS id, $2 AS name, $3 AS university_id, $4 AS university_name, $5 AS college_place,
+              $6 AS course, $7 AS agent_id, $8 AS status, $9 AS total_count, $10 AS completed_count,
+              $11 AS answered_count, $12 AS unanswered_count, $13 AS dispatch_error_count,
+              $14 AS delay_seconds, $15 AS scheduled_start_time, $16 AS started_at, $17 AS completed_at,
+              $18 AS canceled_at, $19 AS stopped_reason) AS source
+            ON target.id = source.id
+            WHEN MATCHED THEN UPDATE SET
+              status = source.status, completed_count = source.completed_count,
+              answered_count = source.answered_count, unanswered_count = source.unanswered_count,
+              dispatch_error_count = source.dispatch_error_count,
+              completed_at = source.completed_at, canceled_at = source.canceled_at,
+              stopped_reason = source.stopped_reason, updated_at = SYSDATETIMEOFFSET()
+            WHEN NOT MATCHED THEN INSERT (
               id, name, university_id, university_name, college_place, course, agent_id,
               status, total_count, completed_count, answered_count, unanswered_count, dispatch_error_count,
               delay_seconds, scheduled_start_time, started_at, completed_at, canceled_at, stopped_reason
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-            ON CONFLICT (id) DO UPDATE SET
-              status = EXCLUDED.status,
-              completed_count = EXCLUDED.completed_count,
-              answered_count = EXCLUDED.answered_count,
-              unanswered_count = EXCLUDED.unanswered_count,
-              dispatch_error_count = EXCLUDED.dispatch_error_count,
-              completed_at = EXCLUDED.completed_at,
-              canceled_at = EXCLUDED.canceled_at,
-              stopped_reason = EXCLUDED.stopped_reason,
-              updated_at = NOW();
+            ) VALUES (source.id, source.name, source.university_id, source.university_name, source.college_place,
+              source.course, source.agent_id, source.status, source.total_count, source.completed_count,
+              source.answered_count, source.unanswered_count, source.dispatch_error_count,
+              source.delay_seconds, source.scheduled_start_time, source.started_at, source.completed_at,
+              source.canceled_at, source.stopped_reason);
           `, [
             c.id,
             c.name,
@@ -99,17 +106,24 @@ async function migrateData() {
             for (const ct of c.contacts) {
               const contactId = ct.id || `contact-${c.id}-${ct.phone}`;
               await query(`
-                INSERT INTO campaign_contacts (
+                MERGE campaign_contacts AS target
+                USING (SELECT $1 AS id, $2 AS campaign_id, $3 AS phone, $4 AS formatted_phone, $5 AS name,
+                  $6 AS university_id, $7 AS university_name, $8 AS course, $9 AS program, $10 AS email,
+                  $11 AS state, $12 AS district, $13 AS status, $14 AS call_outcome, $15 AS call_duration,
+                  $16 AS reason, $17 AS extra_fields, $18 AS [timestamp]) AS source
+                ON target.id = source.id
+                WHEN MATCHED THEN UPDATE SET
+                  status = source.status, call_outcome = source.call_outcome,
+                  call_duration = source.call_duration, reason = source.reason,
+                  updated_at = SYSDATETIMEOFFSET()
+                WHEN NOT MATCHED THEN INSERT (
                   id, campaign_id, phone, formatted_phone, name, university_id, university_name,
                   course, program, email, state, district, status, call_outcome, call_duration,
-                  reason, extra_fields, timestamp
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
-                ON CONFLICT (id) DO UPDATE SET
-                  status = EXCLUDED.status,
-                  call_outcome = EXCLUDED.call_outcome,
-                  call_duration = EXCLUDED.call_duration,
-                  reason = EXCLUDED.reason,
-                  updated_at = NOW();
+                  reason, extra_fields, [timestamp]
+                ) VALUES (source.id, source.campaign_id, source.phone, source.formatted_phone, source.name,
+                  source.university_id, source.university_name, source.course, source.program, source.email,
+                  source.state, source.district, source.status, source.call_outcome, source.call_duration,
+                  source.reason, source.extra_fields, source.[timestamp]);
               `, [
                 contactId,
                 c.id,
@@ -156,25 +170,32 @@ async function migrateData() {
           const recId = r.id || `rec-${cleanPhone}-${callDate.replace(/[^a-zA-Z0-9]/g, '')}`;
 
           await query(`
-            INSERT INTO call_records (
+            MERGE call_records AS target
+            USING (SELECT $1 AS id, $2 AS contact_number, $3 AS clean_phone, $4 AS student_name, $5 AS call_date,
+              $6 AS call_duration, $7 AS call_status, $8 AS lead_status, $9 AS student_interest, $10 AS sentiment,
+              $11 AS counselor_followup, $12 AS call_transferred, $13 AS admission_timeline, $14 AS entrance_exam,
+              $15 AS graduation_status, $16 AS preferred_city, $17 AS preferred_state, $18 AS preferred_university,
+              $19 AS target_course, $20 AS recording_url, $21 AS summary, $22 AS transcript,
+              $23 AS raw_fields, $24 AS extracted_variables, $25 AS source) AS source
+            ON target.clean_phone = source.clean_phone AND target.call_date = source.call_date
+            WHEN MATCHED THEN UPDATE SET
+              student_interest = source.student_interest, lead_status = source.lead_status,
+              call_status = source.call_status, call_duration = source.call_duration,
+              counselor_followup = source.counselor_followup, summary = source.summary,
+              transcript = source.transcript, recording_url = source.recording_url,
+              updated_at = SYSDATETIMEOFFSET()
+            WHEN NOT MATCHED THEN INSERT (
               id, contact_number, clean_phone, student_name, call_date, call_duration,
               call_status, lead_status, student_interest, sentiment, counselor_followup,
               call_transferred, admission_timeline, entrance_exam, graduation_status,
               preferred_city, preferred_state, preferred_university, target_course,
               recording_url, summary, transcript, raw_fields, extracted_variables, source
-            ) VALUES (
-              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
-            )
-            ON CONFLICT (clean_phone, call_date) DO UPDATE SET
-              student_interest = EXCLUDED.student_interest,
-              lead_status = EXCLUDED.lead_status,
-              call_status = EXCLUDED.call_status,
-              call_duration = EXCLUDED.call_duration,
-              counselor_followup = EXCLUDED.counselor_followup,
-              summary = EXCLUDED.summary,
-              transcript = EXCLUDED.transcript,
-              recording_url = EXCLUDED.recording_url,
-              updated_at = NOW();
+            ) VALUES (source.id, source.contact_number, source.clean_phone, source.student_name, source.call_date,
+              source.call_duration, source.call_status, source.lead_status, source.student_interest, source.sentiment,
+              source.counselor_followup, source.call_transferred, source.admission_timeline, source.entrance_exam,
+              source.graduation_status, source.preferred_city, source.preferred_state, source.preferred_university,
+              source.target_course, source.recording_url, source.summary, source.transcript,
+              source.raw_fields, source.extracted_variables, source.source);
           `, [
             recId,
             r.contactNumber || `+91${cleanPhone}`,
@@ -204,7 +225,7 @@ async function migrateData() {
           ]);
           sheetCount++;
         }
-        console.log(`✔ Migrated ${sheetCount} Google Sheets call records into PostgreSQL.`);
+        console.log(`✔ Migrated ${sheetCount} Google Sheets call records into SQL Server.`);
       }
     } catch (err) {
       console.warn('Sheets migration error:', err.message);
@@ -220,15 +241,14 @@ async function migrateData() {
         let userCount = 0;
         for (const u of users) {
           await query(`
-            INSERT INTO users (id, email, password_hash, name, role, permissions, status, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-            ON CONFLICT (email) DO UPDATE SET
-              name = EXCLUDED.name,
-              role = EXCLUDED.role,
-              password_hash = EXCLUDED.password_hash,
-              permissions = EXCLUDED.permissions,
-              status = EXCLUDED.status,
-              updated_at = NOW();
+            MERGE users AS target
+            USING (SELECT $1 AS id, $2 AS email, $3 AS password_hash, $4 AS name, $5 AS role, $6 AS permissions, $7 AS status) AS source
+            ON target.email = source.email
+            WHEN MATCHED THEN UPDATE SET
+              name = source.name, role = source.role, password_hash = source.password_hash,
+              permissions = source.permissions, status = source.status, updated_at = SYSDATETIMEOFFSET()
+            WHEN NOT MATCHED THEN INSERT (id, email, password_hash, name, role, permissions, status, updated_at)
+              VALUES (source.id, source.email, source.password_hash, source.name, source.role, source.permissions, source.status, SYSDATETIMEOFFSET());
           `, [
             u.id,
             u.email,
@@ -240,21 +260,22 @@ async function migrateData() {
           ]);
           userCount++;
         }
-        console.log(`✔ Migrated ${userCount} users into PostgreSQL.`);
+        console.log(`✔ Migrated ${userCount} users into SQL Server.`);
       }
     } catch (err) {
       console.warn('Users migration error:', err.message);
     }
   }
 
-  console.log('\n===========================================');
-  console.log('ALL JSON DATA SUCCESSFULLY MIGRATED TO PG!');
-  console.log('===========================================');
-  await pool.end();
+  console.log('\n=====================================================');
+  console.log('ALL JSON DATA SUCCESSFULLY MIGRATED TO SQL SERVER!');
+  console.log('=====================================================');
+
+  const pool = await getPool();
+  await pool.close();
 }
 
 migrateData().catch(err => {
   console.error('Migration failed:', err);
   process.exit(1);
 });
-

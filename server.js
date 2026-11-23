@@ -7,7 +7,7 @@ import path from 'path';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import { google } from 'googleapis';
-import db, { query, isDbConnected } from './db.js';
+import db, { query, isDbConnected, sql } from './db.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
@@ -85,6 +85,13 @@ const DEFAULT_COUNSELOR_PERMISSIONS = {
   canExportData: false
 };
 
+// Parse JSON stored as NVARCHAR(MAX) in SQL Server
+function parseJsonField(val, fallback = {}) {
+  if (val === null || val === undefined) return fallback;
+  if (typeof val === 'object') return val;
+  try { return JSON.parse(val); } catch { return fallback; }
+}
+
 // Safe User Sanitizer: Strips sensitive password hash before returning over API
 function sanitizeUser(user) {
   if (!user) return null;
@@ -92,7 +99,7 @@ function sanitizeUser(user) {
   return safe;
 }
 
-// User Storage Helpers (PostgreSQL primary with file fallback)
+// User Storage Helpers (SQL Server primary with file fallback)
 async function loadUsers() {
   try {
     const res = await query('SELECT * FROM users ORDER BY created_at ASC');
@@ -103,14 +110,14 @@ async function loadUsers() {
         name: r.name,
         role: r.role,
         passwordHash: r.password_hash,
-        permissions: r.permissions || {},
+        permissions: parseJsonField(r.permissions, {}),
         status: r.status || 'active',
         createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
         updatedAt: r.updated_at ? new Date(r.updated_at).toISOString() : new Date().toISOString()
       }));
     }
   } catch (err) {
-    console.warn('[DB] PostgreSQL loadUsers fallback to file:', err.message);
+    console.warn('[DB] SQL Server loadUsers fallback to file:', err.message);
   }
 
   try {
@@ -127,22 +134,25 @@ async function saveUsers(users) {
   try {
     for (const u of users) {
       await query(`
-        INSERT INTO users (id, email, password_hash, name, role, permissions, status, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-        ON CONFLICT (email) DO UPDATE SET
-          name = EXCLUDED.name,
-          role = EXCLUDED.role,
-          password_hash = EXCLUDED.password_hash,
-          permissions = EXCLUDED.permissions,
-          status = EXCLUDED.status,
-          updated_at = NOW();
+        MERGE users AS target
+        USING (SELECT $1 AS id, $2 AS email, $3 AS password_hash, $4 AS name, $5 AS role, $6 AS permissions, $7 AS status) AS source
+        ON target.email = source.email
+        WHEN MATCHED THEN UPDATE SET
+          name = source.name,
+          role = source.role,
+          password_hash = source.password_hash,
+          permissions = source.permissions,
+          status = source.status,
+          updated_at = SYSDATETIMEOFFSET()
+        WHEN NOT MATCHED THEN INSERT (id, email, password_hash, name, role, permissions, status, updated_at)
+          VALUES (source.id, source.email, source.password_hash, source.name, source.role, source.permissions, source.status, SYSDATETIMEOFFSET());
       `, [
         u.id, u.email, u.passwordHash, u.name, u.role || 'counselor',
         u.permissions || {}, u.status || 'active'
       ]);
     }
   } catch (err) {
-    console.error('[DB] PostgreSQL saveUsers error:', err.message);
+    console.error('[DB] SQL Server saveUsers error:', err.message);
   }
 
   try {
@@ -562,11 +572,11 @@ app.put('/api/admin/users/:id', requireAdmin, async (req, res) => {
 
     try {
       await query(
-        'UPDATE users SET name = $1, email = $2, password_hash = $3, role = $4, permissions = $5, status = $6, updated_at = NOW() WHERE id = $7',
+        'UPDATE users SET name = $1, email = $2, password_hash = $3, role = $4, permissions = $5, status = $6, updated_at = SYSDATETIMEOFFSET() WHERE id = $7',
         [user.name, user.email, user.passwordHash, user.role, JSON.stringify(user.permissions), user.status || 'active', user.id]
       );
     } catch (dbErr) {
-      console.warn('[DB] Error directly updating user in PostgreSQL:', dbErr.message);
+      console.warn('[DB] Error directly updating user in SQL Server:', dbErr.message);
     }
 
     try {
@@ -606,7 +616,7 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
     try {
       await query('DELETE FROM users WHERE id = $1', [id]);
     } catch (dbErr) {
-      console.warn('[DB] Error deleting user from PostgreSQL:', dbErr.message);
+      console.warn('[DB] Error deleting user from SQL Server:', dbErr.message);
     }
 
     const updatedUsers = users.filter(u => u.id !== id);
@@ -706,7 +716,7 @@ async function loadCampaigns() {
           callDuration: r.call_duration,
           retryCount: r.retry_count,
           reason: r.reason,
-          extraFields: r.extra_fields || {},
+          extraFields: parseJsonField(r.extra_fields, {}),
           timestamp: r.timestamp ? new Date(r.timestamp).toISOString() : new Date().toISOString()
         });
       });
@@ -741,7 +751,7 @@ async function loadCampaigns() {
       }));
     }
   } catch (err) {
-    console.warn('[DB] PostgreSQL loadCampaigns fallback to file (legacy migration only):', err.message);
+    console.warn('[DB] SQL Server loadCampaigns fallback to file (legacy migration only):', err.message);
   }
 
   // Legacy one-time migration fallback only — in normal operation data
@@ -763,38 +773,38 @@ async function saveCampaigns(campaigns) {
   try {
     for (const c of campaigns) {
       await query(`
-        INSERT INTO campaigns (
+        MERGE campaigns AS target
+        USING (SELECT $1 AS id, $2 AS name, $3 AS university_id, $4 AS university_name, $5 AS college_place,
+          $6 AS course, $7 AS agent_id, $8 AS status, $9 AS total_count, $10 AS completed_count,
+          $11 AS answered_count, $12 AS unanswered_count, $13 AS dispatch_error_count,
+          $14 AS delay_seconds, $15 AS end_mode, $16 AS max_duration_minutes, $17 AS transfer_enabled,
+          $18 AS counselor_phone, $19 AS transfer_condition, $20 AS transfer_message,
+          $21 AS scheduled_start_time, $22 AS started_at, $23 AS completed_at, $24 AS canceled_at, $25 AS stopped_reason) AS source
+        ON target.id = source.id
+        WHEN MATCHED THEN UPDATE SET
+          name = source.name, university_id = source.university_id, university_name = source.university_name,
+          college_place = source.college_place, course = source.course, agent_id = source.agent_id,
+          status = source.status, total_count = source.total_count, completed_count = source.completed_count,
+          answered_count = source.answered_count, unanswered_count = source.unanswered_count,
+          dispatch_error_count = source.dispatch_error_count, delay_seconds = source.delay_seconds,
+          end_mode = source.end_mode, max_duration_minutes = source.max_duration_minutes,
+          transfer_enabled = source.transfer_enabled, counselor_phone = source.counselor_phone,
+          transfer_condition = source.transfer_condition, transfer_message = source.transfer_message,
+          scheduled_start_time = source.scheduled_start_time, started_at = source.started_at,
+          completed_at = source.completed_at, canceled_at = source.canceled_at,
+          stopped_reason = source.stopped_reason, updated_at = SYSDATETIMEOFFSET()
+        WHEN NOT MATCHED THEN INSERT (
           id, name, university_id, university_name, college_place, course, agent_id,
           status, total_count, completed_count, answered_count, unanswered_count, dispatch_error_count,
           delay_seconds, end_mode, max_duration_minutes, transfer_enabled, counselor_phone, transfer_condition, transfer_message,
           scheduled_start_time, started_at, completed_at, canceled_at, stopped_reason, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          name = EXCLUDED.name,
-          university_id = EXCLUDED.university_id,
-          university_name = EXCLUDED.university_name,
-          college_place = EXCLUDED.college_place,
-          course = EXCLUDED.course,
-          agent_id = EXCLUDED.agent_id,
-          status = EXCLUDED.status,
-          total_count = EXCLUDED.total_count,
-          completed_count = EXCLUDED.completed_count,
-          answered_count = EXCLUDED.answered_count,
-          unanswered_count = EXCLUDED.unanswered_count,
-          dispatch_error_count = EXCLUDED.dispatch_error_count,
-          delay_seconds = EXCLUDED.delay_seconds,
-          end_mode = EXCLUDED.end_mode,
-          max_duration_minutes = EXCLUDED.max_duration_minutes,
-          transfer_enabled = EXCLUDED.transfer_enabled,
-          counselor_phone = EXCLUDED.counselor_phone,
-          transfer_condition = EXCLUDED.transfer_condition,
-          transfer_message = EXCLUDED.transfer_message,
-          scheduled_start_time = EXCLUDED.scheduled_start_time,
-          started_at = EXCLUDED.started_at,
-          completed_at = EXCLUDED.completed_at,
-          canceled_at = EXCLUDED.canceled_at,
-          stopped_reason = EXCLUDED.stopped_reason,
-          updated_at = NOW();
+        ) VALUES (source.id, source.name, source.university_id, source.university_name, source.college_place,
+          source.course, source.agent_id, source.status, source.total_count, source.completed_count,
+          source.answered_count, source.unanswered_count, source.dispatch_error_count,
+          source.delay_seconds, source.end_mode, source.max_duration_minutes, source.transfer_enabled,
+          source.counselor_phone, source.transfer_condition, source.transfer_message,
+          source.scheduled_start_time, source.started_at, source.completed_at, source.canceled_at,
+          source.stopped_reason, SYSDATETIMEOFFSET());
       `, [
         c.id, c.name, c.universityId || '', c.universityName || '', c.collegePlace || '',
         c.course || '', c.agentId ? Number(c.agentId) : null, c.status || 'queued',
@@ -814,19 +824,24 @@ async function saveCampaigns(campaigns) {
         for (const ct of c.contacts) {
           const contactId = ct.id || `contact-${c.id}-${ct.phone}`;
           await query(`
-            INSERT INTO campaign_contacts (
+            MERGE campaign_contacts AS target
+            USING (SELECT $1 AS id, $2 AS campaign_id, $3 AS phone, $4 AS formatted_phone, $5 AS name,
+              $6 AS university_id, $7 AS university_name, $8 AS course, $9 AS program, $10 AS email,
+              $11 AS state, $12 AS district, $13 AS status, $14 AS call_outcome, $15 AS call_duration,
+              $16 AS retry_count, $17 AS reason, $18 AS extra_fields, $19 AS [timestamp]) AS source
+            ON target.id = source.id
+            WHEN MATCHED THEN UPDATE SET
+              status = source.status, call_outcome = source.call_outcome, call_duration = source.call_duration,
+              retry_count = source.retry_count, reason = source.reason, extra_fields = source.extra_fields,
+              updated_at = SYSDATETIMEOFFSET()
+            WHEN NOT MATCHED THEN INSERT (
               id, campaign_id, phone, formatted_phone, name, university_id, university_name,
               course, program, email, state, district, status, call_outcome, call_duration,
-              retry_count, reason, extra_fields, timestamp, updated_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW())
-            ON CONFLICT (id) DO UPDATE SET
-              status = EXCLUDED.status,
-              call_outcome = EXCLUDED.call_outcome,
-              call_duration = EXCLUDED.call_duration,
-              retry_count = EXCLUDED.retry_count,
-              reason = EXCLUDED.reason,
-              extra_fields = EXCLUDED.extra_fields,
-              updated_at = NOW();
+              retry_count, reason, extra_fields, [timestamp], updated_at
+            ) VALUES (source.id, source.campaign_id, source.phone, source.formatted_phone, source.name,
+              source.university_id, source.university_name, source.course, source.program, source.email,
+              source.state, source.district, source.status, source.call_outcome, source.call_duration,
+              source.retry_count, source.reason, source.extra_fields, source.[timestamp], SYSDATETIMEOFFSET());
           `, [
             contactId, c.id, ct.phone || '', ct.formattedPhone || (ct.phone ? `+91${ct.phone}` : ''),
             ct.name || '', ct.universityId || c.universityId || '', ct.universityName || c.universityName || '',
@@ -840,7 +855,7 @@ async function saveCampaigns(campaigns) {
       }
     }
   } catch (err) {
-    console.error('[DB] PostgreSQL saveCampaigns error:', err.message);
+    console.error('[DB] SQL Server saveCampaigns error:', err.message);
     // DB is the single source of truth — do not fall back to file write.
   }
 
@@ -1073,7 +1088,7 @@ async function loadColleges() {
         place: r.place,
         agentId: r.agent_id,
         languages: r.languages,
-        courses: r.courses || [],
+        courses: typeof r.courses === 'string' ? JSON.parse(r.courses || '[]') : (r.courses || []),
         status: r.status,
         websiteUrl: r.website_url,
         description: r.description,
@@ -1081,7 +1096,7 @@ async function loadColleges() {
       }));
     }
   } catch (err) {
-    console.warn('[DB] PostgreSQL loadColleges fallback to file (legacy migration only):', err.message);
+    console.warn('[DB] SQL Server loadColleges fallback to file (legacy migration only):', err.message);
   }
 
   // Legacy one-time migration fallback only — in normal operation data
@@ -1102,19 +1117,18 @@ async function saveColleges(colleges) {
   try {
     for (const c of colleges) {
       await query(`
-        INSERT INTO colleges (id, name, place, agent_id, languages, courses, status, website_url, description, counselor_phone, updated_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          name = EXCLUDED.name,
-          place = EXCLUDED.place,
-          agent_id = EXCLUDED.agent_id,
-          languages = EXCLUDED.languages,
-          courses = EXCLUDED.courses,
-          status = EXCLUDED.status,
-          website_url = EXCLUDED.website_url,
-          description = EXCLUDED.description,
-          counselor_phone = EXCLUDED.counselor_phone,
-          updated_at = NOW();
+        MERGE colleges AS target
+        USING (SELECT $1 AS id, $2 AS name, $3 AS place, $4 AS agent_id, $5 AS languages,
+          $6 AS courses, $7 AS status, $8 AS website_url, $9 AS description, $10 AS counselor_phone) AS source
+        ON target.id = source.id
+        WHEN MATCHED THEN UPDATE SET
+          name = source.name, place = source.place, agent_id = source.agent_id,
+          languages = source.languages, courses = source.courses, status = source.status,
+          website_url = source.website_url, description = source.description,
+          counselor_phone = source.counselor_phone, updated_at = SYSDATETIMEOFFSET()
+        WHEN NOT MATCHED THEN INSERT (id, name, place, agent_id, languages, courses, status, website_url, description, counselor_phone, updated_at)
+          VALUES (source.id, source.name, source.place, source.agent_id, source.languages, source.courses,
+            source.status, source.website_url, source.description, source.counselor_phone, SYSDATETIMEOFFSET());
       `, [
         c.id, c.name, c.place || 'India', c.agentId ? Number(c.agentId) : null,
         c.languages || 'English, Hindi', Array.isArray(c.courses) ? c.courses : [],
@@ -1123,7 +1137,7 @@ async function saveColleges(colleges) {
       ]);
     }
   } catch (err) {
-    console.error('[DB] PostgreSQL saveColleges error:', err.message);
+    console.error('[DB] SQL Server saveColleges error:', err.message);
   }
 
   // DB is the single source of truth — JSON backup only when explicitly requested.
@@ -1300,83 +1314,96 @@ function broadcastQueueUpdate() {
   });
 }
 
-// Ensure PostgreSQL schema and columns match application specifications
-async function ensurePostgresSchema() {
+// Ensure SQL Server schema and columns match application specifications
+async function ensureDbSchema() {
   try {
     const connected = await isDbConnected();
     if (!connected) return;
 
     await query(`
-      CREATE TABLE IF NOT EXISTS users (
+      IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='users' AND xtype='U')
+      CREATE TABLE users (
         id VARCHAR(64) PRIMARY KEY,
-        email VARCHAR(255) UNIQUE NOT NULL,
+        email VARCHAR(255) NOT NULL UNIQUE,
         password_hash VARCHAR(255) NOT NULL,
         name VARCHAR(255) NOT NULL,
         role VARCHAR(32) NOT NULL DEFAULT 'counselor',
-        permissions JSONB NOT NULL DEFAULT '{}'::jsonb,
+        permissions NVARCHAR(MAX) NOT NULL DEFAULT '{}',
         status VARCHAR(32) NOT NULL DEFAULT 'active',
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        created_at DATETIMEOFFSET DEFAULT SYSDATETIMEOFFSET(),
+        updated_at DATETIMEOFFSET DEFAULT SYSDATETIMEOFFSET()
       );
-      CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'active';
+    `);
+    await query(`
+      IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='idx_users_email' AND object_id = OBJECT_ID('users'))
+      CREATE INDEX idx_users_email ON users(email);
+    `);
 
-      CREATE TABLE IF NOT EXISTS colleges (
+    await query(`
+      IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='colleges' AND xtype='U')
+      CREATE TABLE colleges (
         id VARCHAR(64) PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
         place VARCHAR(255) DEFAULT 'India',
-        agent_id INTEGER,
+        agent_id INT,
         languages VARCHAR(255) DEFAULT 'English, Hindi',
-        courses TEXT[] DEFAULT '{}',
+        courses NVARCHAR(MAX) DEFAULT '[]',
         status VARCHAR(32) DEFAULT 'active',
         website_url VARCHAR(512),
-        description TEXT,
+        description NVARCHAR(MAX),
         counselor_phone VARCHAR(50) DEFAULT '+91 98765 43210',
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        created_at DATETIMEOFFSET DEFAULT SYSDATETIMEOFFSET(),
+        updated_at DATETIMEOFFSET DEFAULT SYSDATETIMEOFFSET()
       );
-      CREATE INDEX IF NOT EXISTS idx_colleges_agent_id ON colleges(agent_id);
-      ALTER TABLE colleges ADD COLUMN IF NOT EXISTS counselor_phone VARCHAR(50) DEFAULT '+91 98765 43210';
+    `);
+    await query(`
+      IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='idx_colleges_agent_id' AND object_id = OBJECT_ID('colleges'))
+      CREATE INDEX idx_colleges_agent_id ON colleges(agent_id);
+    `);
 
-      CREATE TABLE IF NOT EXISTS campaigns (
+    await query(`
+      IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='campaigns' AND xtype='U')
+      CREATE TABLE campaigns (
         id VARCHAR(64) PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
         university_id VARCHAR(64),
         university_name VARCHAR(255),
         college_place VARCHAR(255),
         course VARCHAR(255),
-        agent_id INTEGER,
+        agent_id INT,
         status VARCHAR(32) NOT NULL DEFAULT 'queued',
-        total_count INTEGER DEFAULT 0,
-        completed_count INTEGER DEFAULT 0,
-        answered_count INTEGER DEFAULT 0,
-        unanswered_count INTEGER DEFAULT 0,
-        dispatch_error_count INTEGER DEFAULT 0,
-        delay_seconds INTEGER DEFAULT 2,
+        total_count INT DEFAULT 0,
+        completed_count INT DEFAULT 0,
+        answered_count INT DEFAULT 0,
+        unanswered_count INT DEFAULT 0,
+        dispatch_error_count INT DEFAULT 0,
+        delay_seconds INT DEFAULT 2,
         end_mode VARCHAR(32) DEFAULT 'none',
-        max_duration_minutes INTEGER,
-        transfer_enabled BOOLEAN DEFAULT FALSE,
+        max_duration_minutes INT,
+        transfer_enabled BIT DEFAULT 0,
         counselor_phone VARCHAR(50) DEFAULT '+91 98765 43210',
-        transfer_condition TEXT,
-        transfer_message TEXT,
-        scheduled_start_time TIMESTAMP WITH TIME ZONE,
-        started_at TIMESTAMP WITH TIME ZONE,
-        completed_at TIMESTAMP WITH TIME ZONE,
-        canceled_at TIMESTAMP WITH TIME ZONE,
-        paused_at TIMESTAMP WITH TIME ZONE,
-        stopped_reason TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        transfer_condition NVARCHAR(MAX),
+        transfer_message NVARCHAR(MAX),
+        scheduled_start_time DATETIMEOFFSET,
+        started_at DATETIMEOFFSET,
+        completed_at DATETIMEOFFSET,
+        canceled_at DATETIMEOFFSET,
+        paused_at DATETIMEOFFSET,
+        stopped_reason NVARCHAR(MAX),
+        created_at DATETIMEOFFSET DEFAULT SYSDATETIMEOFFSET(),
+        updated_at DATETIMEOFFSET DEFAULT SYSDATETIMEOFFSET()
       );
-      CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status);
-      CREATE INDEX IF NOT EXISTS idx_campaigns_created ON campaigns(created_at DESC);
-      ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS transfer_enabled BOOLEAN DEFAULT FALSE;
-      ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS counselor_phone VARCHAR(50) DEFAULT '+91 98765 43210';
-      ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS transfer_condition TEXT;
-      ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS transfer_message TEXT;
-      ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS paused_at TIMESTAMP WITH TIME ZONE;
+    `);
+    await query(`
+      IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='idx_campaigns_status' AND object_id = OBJECT_ID('campaigns'))
+      CREATE INDEX idx_campaigns_status ON campaigns(status);
+      IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='idx_campaigns_created' AND object_id = OBJECT_ID('campaigns'))
+      CREATE INDEX idx_campaigns_created ON campaigns(created_at DESC);
+    `);
 
-      CREATE TABLE IF NOT EXISTS campaign_contacts (
+    await query(`
+      IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='campaign_contacts' AND xtype='U')
+      CREATE TABLE campaign_contacts (
         id VARCHAR(128) PRIMARY KEY,
         campaign_id VARCHAR(64) REFERENCES campaigns(id) ON DELETE CASCADE,
         phone VARCHAR(32) NOT NULL,
@@ -1391,26 +1418,32 @@ async function ensurePostgresSchema() {
         district VARCHAR(128),
         status VARCHAR(32) DEFAULT 'queued',
         call_outcome VARCHAR(128) DEFAULT 'Pending',
-        call_duration VARCHAR(32) DEFAULT '—',
-        retry_count INTEGER DEFAULT 0,
-        reason TEXT,
-        extra_fields JSONB DEFAULT '{}'::jsonb,
-        timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        call_duration VARCHAR(32) DEFAULT N'—',
+        retry_count INT DEFAULT 0,
+        reason NVARCHAR(MAX),
+        extra_fields NVARCHAR(MAX) DEFAULT '{}',
+        [timestamp] DATETIMEOFFSET DEFAULT SYSDATETIMEOFFSET(),
+        updated_at DATETIMEOFFSET DEFAULT SYSDATETIMEOFFSET()
       );
-      CREATE INDEX IF NOT EXISTS idx_camp_contacts_camp ON campaign_contacts(campaign_id);
-      CREATE INDEX IF NOT EXISTS idx_camp_contacts_phone ON campaign_contacts(phone);
-      CREATE INDEX IF NOT EXISTS idx_camp_contacts_status ON campaign_contacts(status);
     `);
-    console.log('[DB] PostgreSQL schema verified and up to date.');
+    await query(`
+      IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='idx_camp_contacts_camp' AND object_id = OBJECT_ID('campaign_contacts'))
+      CREATE INDEX idx_camp_contacts_camp ON campaign_contacts(campaign_id);
+      IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='idx_camp_contacts_phone' AND object_id = OBJECT_ID('campaign_contacts'))
+      CREATE INDEX idx_camp_contacts_phone ON campaign_contacts(phone);
+      IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='idx_camp_contacts_status' AND object_id = OBJECT_ID('campaign_contacts'))
+      CREATE INDEX idx_camp_contacts_status ON campaign_contacts(status);
+    `);
+
+    console.log('[DB] SQL Server schema verified and up to date.');
   } catch (err) {
-    console.warn('[DB] PostgreSQL schema verification notice:', err.message);
+    console.warn('[DB] SQL Server schema verification notice:', err.message);
   }
 }
 
 // Ensure database tables/seed exist (Postgres is single source of truth)
 async function initDb() {
-  await ensurePostgresSchema();
+  await ensureDbSchema();
   try {
     await fs.mkdir(DATA_DIR, { recursive: true });
     try {
@@ -1429,11 +1462,11 @@ async function initDb() {
     // Seed colleges in Postgres if table is empty (DB is authoritative,
     // JSON file is only a one-time migration fallback).
     try {
-      const res = await query('SELECT COUNT(*) FROM colleges');
-      const count = res && res.rows && res.rows[0] ? Number(res.rows[0].count) : 0;
+      const res = await query('SELECT COUNT(*) AS cnt FROM colleges');
+      const count = res && res.rows && res.rows[0] ? Number(res.rows[0].cnt) : 0;
       if (count === 0) {
         await saveColleges(getDefaultColleges());
-        console.log('Seeded initial colleges in PostgreSQL.');
+        console.log('Seeded initial colleges in SQL Server.');
       }
     } catch (err) {
       console.warn('[DB] Colleges seed check failed:', err.message);
@@ -1928,13 +1961,13 @@ async function loadCache() {
         summary: r.summary,
         transcript: r.transcript,
         call_conversation: r.transcript,
-        rawFields: r.raw_fields || {},
-        extractedVariables: r.extracted_variables || {},
+        rawFields: parseJsonField(r.raw_fields, {}),
+        extractedVariables: parseJsonField(r.extracted_variables, {}),
         source: r.source
       }));
     }
   } catch (err) {
-    console.warn('[DB] PostgreSQL loadCache fallback to file (legacy migration only):', err.message);
+    console.warn('[DB] SQL Server loadCache fallback to file (legacy migration only):', err.message);
   }
 
   // Legacy one-time migration fallback only — in normal operation data
@@ -1966,27 +1999,38 @@ async function saveCache(data) {
       const recId = String(r.id || `rec-${cleanPhone}-${callDate.replace(/[^a-zA-Z0-9]/g, '')}`);
 
       await query(`
-        INSERT INTO call_records (
+        MERGE call_records AS target
+        USING (SELECT $1 AS id, $2 AS contact_number, $3 AS clean_phone, $4 AS student_name, $5 AS call_date,
+          $6 AS call_duration, $7 AS call_status, $8 AS lead_status, $9 AS student_interest, $10 AS sentiment,
+          $11 AS counselor_followup, $12 AS call_transferred, $13 AS admission_timeline, $14 AS entrance_exam,
+          $15 AS graduation_status, $16 AS preferred_city, $17 AS preferred_state, $18 AS preferred_university,
+          $19 AS target_course, $20 AS recording_url, $21 AS summary, $22 AS transcript,
+          $23 AS raw_fields, $24 AS extracted_variables, $25 AS source) AS source
+        ON target.clean_phone = source.clean_phone AND target.call_date = source.call_date
+        WHEN MATCHED THEN UPDATE SET
+          student_name = COALESCE(NULLIF(source.student_name, 'Student'), target.student_name),
+          student_interest = COALESCE(NULLIF(source.student_interest, ''), target.student_interest),
+          lead_status = COALESCE(NULLIF(source.lead_status, ''), target.lead_status),
+          call_status = COALESCE(NULLIF(source.call_status, ''), target.call_status),
+          call_duration = COALESCE(NULLIF(source.call_duration, N'—'), target.call_duration),
+          counselor_followup = source.counselor_followup,
+          summary = COALESCE(NULLIF(source.summary, ''), target.summary),
+          transcript = COALESCE(NULLIF(source.transcript, ''), target.transcript),
+          recording_url = COALESCE(NULLIF(source.recording_url, ''), target.recording_url),
+          raw_fields = source.raw_fields,
+          updated_at = SYSDATETIMEOFFSET()
+        WHEN NOT MATCHED THEN INSERT (
           id, contact_number, clean_phone, student_name, call_date, call_duration,
           call_status, lead_status, student_interest, sentiment, counselor_followup,
           call_transferred, admission_timeline, entrance_exam, graduation_status,
           preferred_city, preferred_state, preferred_university, target_course,
           recording_url, summary, transcript, raw_fields, extracted_variables, source, updated_at
-        ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, NOW()
-        )
-        ON CONFLICT (clean_phone, call_date) DO UPDATE SET
-          student_name = COALESCE(NULLIF(EXCLUDED.student_name, 'Student'), call_records.student_name),
-          student_interest = COALESCE(NULLIF(EXCLUDED.student_interest, ''), call_records.student_interest),
-          lead_status = COALESCE(NULLIF(EXCLUDED.lead_status, ''), call_records.lead_status),
-          call_status = COALESCE(NULLIF(EXCLUDED.call_status, ''), call_records.call_status),
-          call_duration = COALESCE(NULLIF(EXCLUDED.call_duration, '—'), call_records.call_duration),
-          counselor_followup = EXCLUDED.counselor_followup,
-          summary = COALESCE(NULLIF(EXCLUDED.summary, ''), call_records.summary),
-          transcript = COALESCE(NULLIF(EXCLUDED.transcript, ''), call_records.transcript),
-          recording_url = COALESCE(NULLIF(EXCLUDED.recording_url, ''), call_records.recording_url),
-          raw_fields = EXCLUDED.raw_fields,
-          updated_at = NOW();
+        ) VALUES (source.id, source.contact_number, source.clean_phone, source.student_name, source.call_date,
+          source.call_duration, source.call_status, source.lead_status, source.student_interest, source.sentiment,
+          source.counselor_followup, source.call_transferred, source.admission_timeline, source.entrance_exam,
+          source.graduation_status, source.preferred_city, source.preferred_state, source.preferred_university,
+          source.target_course, source.recording_url, source.summary, source.transcript,
+          source.raw_fields, source.extracted_variables, source.source, SYSDATETIMEOFFSET());
       `, [
         recId,
         r.contactNumber || `+91${cleanPhone}`,
@@ -2016,7 +2060,7 @@ async function saveCache(data) {
       ]);
     }
   } catch (err) {
-    console.error('[DB] PostgreSQL saveCache error:', err.message);
+    console.error('[DB] SQL Server saveCache error:', err.message);
     // DB is the single source of truth — do not write file on DB failure.
     return false;
   }
@@ -3560,9 +3604,9 @@ function validateAndFormatMobile(mobile) {
 // Initial status logs
 isDbConnected().then(connected => {
   if (connected) {
-    console.log('[INFO] PostgreSQL Database connected successfully (vidyavision).');
+    console.log('[INFO] SQL Server Database connected successfully (vidyavision).');
   } else {
-    console.warn('[WARN] PostgreSQL Database not reachable; using file storage fallback.');
+    console.warn('[WARN] SQL Server Database not reachable; using file storage fallback.');
   }
 }).catch(() => { });
 console.log(`[INFO] OmniDimension Server Ready. Agent ID: ${getAgentId() || 'Not Configured'}`);
@@ -3674,7 +3718,7 @@ app.delete('/api/colleges/:id', checkPermission('canManageColleges'), async (req
     try {
       await query('DELETE FROM colleges WHERE id = $1', [id]);
     } catch (dbErr) {
-      console.warn('[DB] PostgreSQL delete college warning:', dbErr.message);
+      console.warn('[DB] SQL Server delete college warning:', dbErr.message);
     }
     await saveColleges(updatedList);
     broadcast({ type: 'colleges', data: updatedList });
@@ -4120,7 +4164,7 @@ app.delete('/api/campaigns/:id', checkPermission('canStartStopCampaigns'), async
       await query('DELETE FROM campaign_contacts WHERE campaign_id = $1', [req.params.id]);
       await query('DELETE FROM campaigns WHERE id = $1', [req.params.id]);
     } catch (dbErr) {
-      console.warn('[DB] PostgreSQL delete campaign warning:', dbErr.message);
+      console.warn('[DB] SQL Server delete campaign warning:', dbErr.message);
     }
     await saveCampaigns(updated);
     broadcast({ type: 'campaigns', data: updated });
@@ -5059,7 +5103,7 @@ async function handlePostCallWebhook(payload, source = 'omni') {
     }
   };
 
-  // 0. Record raw audit event in PostgreSQL (Zero data loss)
+  // 0. Record raw audit event in SQL Server (Zero data loss)
   try {
     await query(
       'INSERT INTO webhook_events (source, payload, status) VALUES ($1, $2, $3)',
@@ -5069,7 +5113,7 @@ async function handlePostCallWebhook(payload, source = 'omni') {
     console.warn('[DB] Failed to log webhook event:', err.message);
   }
 
-  // 1. Upsert into Google Sheets cache and PostgreSQL call_records
+  // 1. Upsert into Google Sheets cache and SQL Server call_records
   let cached = await loadCache();
   if (!Array.isArray(cached)) cached = [];
   const existingIdx = cached.findIndex(r => String(r.id) === String(callId) || (cleanPhone && String(r.contactNumber || '').replace(/\D/g, '').slice(-10) === cleanPhone));

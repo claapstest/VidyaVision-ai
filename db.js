@@ -1,49 +1,80 @@
-import pg from 'pg';
+import sql from 'mssql';
 import dotenv from 'dotenv';
 dotenv.config({ quiet: true });
 
-const { Pool } = pg;
+const config = {
+  server: process.env.MSSQL_HOST || 'localhost',
+  port: parseInt(process.env.MSSQL_PORT || '1433', 10),
+  user: process.env.MSSQL_USER || 'sa',
+  password: process.env.MSSQL_PASSWORD || '',
+  database: process.env.MSSQL_DATABASE || 'vidyavision',
+  options: {
+    encrypt: process.env.MSSQL_ENCRYPT === 'true',
+    trustServerCertificate: process.env.MSSQL_TRUST_CERT !== 'false',
+    enableArithAbort: true
+  },
+  pool: {
+    max: 20,
+    min: 0,
+    idleTimeoutMillis: 30000
+  }
+};
 
-// Construct connection URL:
-// 1. If DATABASE_URL is set (Render / Cloud / custom), use it directly.
-// 2. Otherwise fallback to local PostgreSQL defaults on port 5433.
-const localHost = process.env.PG_HOST || 'localhost';
-const localPort = process.env.PG_PORT || '5433';
-const localUser = process.env.PG_USER || 'postgres';
-const localPassword = process.env.PG_PASSWORD || 'postgres';
-const localDb = process.env.PG_DATABASE || 'vidyavision';
+let pool = null;
 
-const connectionString = process.env.DATABASE_URL ||
-  `postgresql://${localUser}:${localPassword}@${localHost}:${localPort}/${localDb}`;
-
-const isProduction = process.env.NODE_ENV === 'production' || connectionString.includes('render.com');
-
-export const pool = new Pool({
-  connectionString,
-  ssl: isProduction ? { rejectUnauthorized: false } : false,
-  max: 20, // Max concurrent client connections in pool
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000
-});
-
-pool.on('error', (err) => {
-  console.error('[POSTGRES POOL ERROR]', err.message);
-});
+async function getPool() {
+  if (!pool) {
+    pool = await sql.connect(config);
+    pool.on('error', (err) => {
+      console.error('[MSSQL POOL ERROR]', err.message);
+      pool = null;
+    });
+  }
+  return pool;
+}
 
 /**
- * Universal Query Helper
- * @param {string} text SQL statement
- * @param {Array} params Bind parameters
- * @returns {Promise<pg.QueryResult>}
+ * Universal Query Helper — accepts parameterised SQL with @p0, @p1, ... placeholders.
+ * Converts the PG-style $1, $2, ... placeholders to @p0, @p1, ... automatically
+ * so the rest of the codebase can migrate incrementally.
  */
 export async function query(text, params) {
   const start = Date.now();
-  const res = await pool.query(text, params);
+  const p = await getPool();
+  const request = p.request();
+
+  // Convert PostgreSQL $1, $2, ... to @p0, @p1, ... and bind parameters
+  let converted = text;
+  if (params && params.length > 0) {
+    for (let i = 0; i < params.length; i++) {
+      const pgPlaceholder = `$${i + 1}`;
+      const mssqlPlaceholder = `@p${i}`;
+      converted = converted.split(pgPlaceholder).join(mssqlPlaceholder);
+
+      let value = params[i];
+      // Convert JS objects/arrays to JSON string for NVARCHAR(MAX) columns
+      if (value !== null && value !== undefined && typeof value === 'object' && !(value instanceof Date)) {
+        value = JSON.stringify(value);
+      }
+      // Convert boolean to bit
+      if (typeof value === 'boolean') {
+        value = value ? 1 : 0;
+      }
+      request.input(`p${i}`, value);
+    }
+  }
+
+  const res = await request.query(converted);
   const duration = Date.now() - start;
   if (process.env.DEBUG_SQL === 'true') {
-    console.log('[SQL]', { text, duration: `${duration}ms`, rows: res.rowCount });
+    console.log('[SQL]', { text: converted, duration: `${duration}ms`, rows: res.rowsAffected?.[0] });
   }
-  return res;
+
+  // Return a PG-compatible shape so callers don't need rewriting
+  return {
+    rows: res.recordset || [],
+    rowCount: res.recordset ? res.recordset.length : (res.rowsAffected?.[0] || 0)
+  };
 }
 
 /**
@@ -51,13 +82,14 @@ export async function query(text, params) {
  */
 export async function isDbConnected() {
   try {
-    const res = await pool.query('SELECT 1 AS status');
-    return res.rowCount > 0;
+    const p = await getPool();
+    const res = await p.request().query('SELECT 1 AS status');
+    return res.recordset.length > 0;
   } catch (err) {
-    console.error('PostgreSQL Connection Check Failed:', err.message);
+    console.error('SQL Server Connection Check Failed:', err.message);
     return false;
   }
 }
 
-export default { pool, query, isDbConnected };
-
+export { sql, getPool };
+export default { query, isDbConnected, sql, getPool };
