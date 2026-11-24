@@ -26,10 +26,21 @@ export default function LoginPage({ onLoginSuccess }) {
         body: JSON.stringify({ email: email.trim(), password })
       });
 
-      const data = await res.json();
+      let data = null;
+      try {
+        data = await res.json();
+      } catch (jsonErr) {
+        console.warn('Could not parse auth response as JSON:', jsonErr);
+      }
 
-      if (!res.ok || !data.success) {
-        setError(data.error || 'Invalid email or password. Please check your credentials.');
+      if (!res.ok || !data?.success) {
+        setError(
+          data?.error || 
+          data?.message || 
+          (res.status === 401 
+            ? 'Invalid email or password. Please check your credentials.' 
+            : `Authentication failed (status ${res.status}). Please check your connection or server status.`)
+        );
         return;
       }
 
