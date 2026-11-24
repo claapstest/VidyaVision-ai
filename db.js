@@ -44,20 +44,22 @@ export async function query(text, params) {
   const request = p.request();
 
   // Convert PostgreSQL $1, $2, ... to @p0, @p1, ... and bind parameters
+  // Use regex with word boundary (\b) so $1 does NOT match inside $10, $11, etc.
   let converted = text;
   if (params && params.length > 0) {
-    for (let i = 0; i < params.length; i++) {
-      const pgPlaceholder = `$${i + 1}`;
-      const mssqlPlaceholder = `@p${i}`;
-      converted = converted.split(pgPlaceholder).join(mssqlPlaceholder);
+    converted = converted.replace(/\$(\d+)\b/g, (_m, n) => `@p${parseInt(n, 10) - 1}`);
 
+    for (let i = 0; i < params.length; i++) {
       let value = params[i];
-      // Convert JS objects/arrays to JSON string for NVARCHAR(MAX) columns
-      if (value !== null && value !== undefined && typeof value === 'object' && !(value instanceof Date)) {
+      if (value === undefined) {
+        value = null;
+      } else if (value instanceof Date) {
+        value = isNaN(value.getTime()) ? null : value;
+      } else if (value !== null && typeof value === 'object') {
+        // Convert JS objects/arrays to JSON string for NVARCHAR(MAX) columns
         value = JSON.stringify(value);
-      }
-      // Convert boolean to bit
-      if (typeof value === 'boolean') {
+      } else if (typeof value === 'boolean') {
+        // Convert boolean to bit (1 or 0)
         value = value ? 1 : 0;
       }
       request.input(`p${i}`, value);
