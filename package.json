@@ -11,7 +11,8 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "db:init": "node scripts/init_db.js",
-    "db:migrate": "node scripts/migrate_json_to_pg.js"
+    "db:migrate": "node scripts/migrate_json_to_pg.js",
+    "db:test": "node scripts/test_db.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
