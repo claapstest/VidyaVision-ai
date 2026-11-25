@@ -98,7 +98,7 @@ VidyaVision allows multi-college management from a single interface. System Admi
    - **College / University Name:** Official registered name (e.g., *VidyaVision Institute of Technology*).
    - **Campus Location / City:** (e.g., *Hyderabad, Telangana*).
    - **Course Offerings:** Add programs as comma-separated tags or pill badges (e.g., *B.Tech, CSE, MBA, Data Science, AI & ML*).
-   - **Primary AI Voice Agent ID:** Telephony bot ID configured in the voice engine (e.g., `270740` for UG or `270604` for PG).
+   - **Primary AI Voice Agent ID:** Telephony bot ID configured via environment variables on the server.
    - **Default Counselor Transfer Number:** The direct 10-digit mobile number that live student calls bridge to when a student asks to speak with an advisor.
    - **Official Website & Prospectus URL:** Automatic URL dispatched to students via WhatsApp.
 3. Click **"Save College"** to instantly update the platform database.
@@ -276,8 +276,8 @@ Once contacts are imported, the **"Configure Calling Settings"** panel activates
 3. **Select Course & Automated Voice Bot Routing:**
    - Choose a course from the college's offering dropdown (or select *General* if unassigned).
    - **Dynamic Bot Routing:**
-     - Selecting an **Undergraduate program** (e.g. *B.Tech, BBA, BCA, B.Sc*) automatically assigns the **🤖 UG Admission Assistant (Bot #270740)**.
-     - Selecting a **Postgraduate program** (e.g. *MBA, M.Tech, MCA*) automatically assigns the **🤖 PG Admission Assistant (Bot #270604)**.
+     - Selecting an **Undergraduate program** (e.g. *B.Tech, BBA, BCA, B.Sc*) automatically assigns the **🤖 UG Admission Assistant**.
+     - Selecting a **Postgraduate program** (e.g. *MBA, M.Tech, MCA*) automatically assigns the **🤖 PG Admission Assistant**.
 
 ![Step 2 Campaign Configuration](public/guide-assets/03-campaign-config-step2.png)
 *Figure 12: Step 2 Campaign Configuration — University Selector, Course Offerings, and Voice Bot Routing*
@@ -300,7 +300,7 @@ Under **"3. Select Call Buffer Delay between calls"**:
 - Click **"Stage Contacts for Calling"** to push the configured batch into the active **Staged Calling Queue**.
 - **Isolated User Workspace:** Staged queues are private to each counselor's login session. An Admin and Counselor working simultaneously will never see or overwrite each other's staged drafts.
 - **Queue Table Review:**
-  - Inspect `#`, Mobile Number, Student Name, Target University, Course, University ID badge (`#270740 UG` / `#270604 PG`), and Staged Status.
+  - Inspect `#`, Mobile Number, Student Name, Target University, Course, Bot type badge (`UG` / `PG`), and Staged Status.
   - Delete individual contacts with the red trash button, or click **"Clear Queue"** to wipe the queue.
 
 ![Staged Calling Queue Table](public/guide-assets/05-staged-queue-table.png)

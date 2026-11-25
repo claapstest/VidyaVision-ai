@@ -74,6 +74,31 @@ const isUgCourse = (courseName) => {
 
 export default function App() {
   // ==========================================
+  // Server-side Agent Configuration (obfuscated)
+  // ==========================================
+  const [agentConfig, setAgentConfig] = useState({ defaultAgentId: null, ugAgentId: null, pgAgentId: null });
+
+  useEffect(() => {
+    fetch('/api/config')
+      .then(r => r.json())
+      .then(data => {
+        if (data.success) {
+          setAgentConfig({
+            defaultAgentId: data.defaultAgentId || null,
+            ugAgentId: data.ugAgentId || null,
+            pgAgentId: data.pgAgentId || null
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const resolveAgentId = (courseName, collegeAgentId) => {
+    if (isUgCourse(courseName)) return agentConfig.ugAgentId || agentConfig.defaultAgentId;
+    return collegeAgentId || agentConfig.pgAgentId || agentConfig.defaultAgentId;
+  };
+
+  // ==========================================
   // Authentication & Granular RBAC State
   // ==========================================
   const [currentUser, setCurrentUser] = useState(null);
@@ -247,7 +272,7 @@ export default function App() {
     setIsSyncingOmni(true);
     try {
       const uni = universities.find(u => u.id === selectedUniversity);
-      const cAgentId = uni?.agentId || 270604;
+      const cAgentId = uni?.agentId || agentConfig.defaultAgentId;
       const res = await fetch('/api/omni/sync-transfer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -606,7 +631,7 @@ export default function App() {
       id: 'vidyavision',
       name: 'Vidyavision AI Assistant',
       place: 'Hyderabad, Telangana',
-      agentId: 270604,
+      agentId: null,
       languages: 'Telugu, English, Hindi, Tamil, Malayalam',
       courses: ['B.Tech CSE', 'B.Tech ECE', 'B.Tech IT', 'MBA'],
       status: 'active',
@@ -617,7 +642,7 @@ export default function App() {
       id: 'gitam',
       name: 'GITAM University',
       place: 'Visakhapatnam & Hyderabad',
-      agentId: 270604,
+      agentId: null,
       languages: 'English, Hindi',
       courses: ['B.Tech CSE', 'B.Tech ECE', 'MBA'],
       status: 'active',
@@ -628,7 +653,7 @@ export default function App() {
       id: 'kl',
       name: 'KL University',
       place: 'Vijayawada & Hyderabad',
-      agentId: 270604,
+      agentId: null,
       languages: 'English, Hindi',
       courses: ['B.Tech CSE', 'B.Tech ECE', 'MBA'],
       status: 'active',
@@ -639,7 +664,7 @@ export default function App() {
       id: 'icfai',
       name: 'ICFAI Foundation for Higher Education',
       place: 'Hyderabad, Telangana',
-      agentId: 270604,
+      agentId: null,
       languages: 'English, Hindi',
       courses: ['MBA', 'BBA', 'B.Tech CSE'],
       status: 'active',
@@ -650,7 +675,7 @@ export default function App() {
       id: 'mnr',
       name: 'MNR University',
       place: 'Sangareddy, Telangana',
-      agentId: 270604,
+      agentId: null,
       languages: 'Telugu, English, Hindi',
       courses: ['B.Tech CSE', 'B.Tech ECE', 'MBA'],
       status: 'active',
@@ -661,7 +686,7 @@ export default function App() {
       id: 'mitwpu',
       name: 'MIT WPU',
       place: 'Pune, Maharashtra',
-      agentId: 270604,
+      agentId: null,
       languages: 'English, Hindi',
       courses: ['MBA', 'B.Tech CSE', 'B.Tech ECE', 'BBA'],
       status: 'active',
@@ -828,7 +853,7 @@ export default function App() {
     place: '',
     websiteUrl: '',
     description: '',
-    agentId: '270604',
+    agentId: '',
     languages: 'English, Hindi, Telugu',
     courses: '',
     counselorPhone: ''
@@ -910,7 +935,7 @@ export default function App() {
       place: '',
       websiteUrl: '',
       description: '',
-      agentId: '270604',
+      agentId: '',
       languages: 'English, Hindi, Telugu',
       courses: '',
       counselorPhone: ''
@@ -925,7 +950,7 @@ export default function App() {
       place: college.place || '',
       websiteUrl: college.websiteUrl || '',
       description: college.description || '',
-      agentId: String(college.agentId || 270604),
+      agentId: String(college.agentId || ''),
       languages: college.languages || 'English, Hindi, Telugu',
       courses: Array.isArray(college.courses) ? college.courses.join(', ') : (college.courses || ''),
       counselorPhone: college.counselorPhone || ''
@@ -957,7 +982,7 @@ export default function App() {
           place: collegeForm.place.trim(),
           websiteUrl: collegeForm.websiteUrl.trim(),
           description: collegeForm.description.trim(),
-          agentId: Number(collegeForm.agentId) || 270604,
+          agentId: Number(collegeForm.agentId) || agentConfig.defaultAgentId,
           languages: (collegeForm.languages || '').trim() || 'English, Hindi, Telugu',
           courses: String(collegeForm.courses || '').split(',').map(s => s.trim()).filter(Boolean),
           counselorPhone: (collegeForm.counselorPhone || '').trim() || '+91 98765 43210'
@@ -1668,7 +1693,7 @@ export default function App() {
     const targetCourse = selectedCourse || '';
     const enrichedContacts = contactsToStage.map(c => {
       const contactCourse = c.course || targetCourse;
-      const contactAgentId = isUgCourse(contactCourse) ? 270740 : (uni.agentId || 270604);
+      const contactAgentId = resolveAgentId(contactCourse, uni.agentId);
       return {
         ...c,
         universityId: uni.id,
@@ -1723,7 +1748,7 @@ export default function App() {
       universityId: targetUni?.id || 'vidyavision',
       universityName: targetUni?.name || 'Vidyavision AI',
       collegePlace: targetUni?.place || '',
-      agentId: isUgCourse(c.course || targetCourse) ? 270740 : (targetUni?.agentId || 270604),
+      agentId: resolveAgentId(c.course || targetCourse, targetUni?.agentId),
       course: c.course || targetCourse,
       fileName: campaignState.fileName || uploadedFileInfo?.fileName || '',
       email: c.email || '',
@@ -1757,8 +1782,8 @@ export default function App() {
     }
 
     const campaignCourse = selectedCourse || stagedContacts[0]?.course || '';
-    const campaignAgentId = isUgCourse(campaignCourse) ? 270740 : (uni.agentId || 270604);
-    const botLabel = isUgCourse(campaignCourse) ? 'UG Bot (#270740)' : 'PG Bot (#270604)';
+    const campaignAgentId = resolveAgentId(campaignCourse, uni.agentId);
+    const botLabel = isUgCourse(campaignCourse) ? 'UG Bot' : 'PG Bot';
 
     // Safely resolve and validate scheduled time
     let resolvedScheduledStartTime = null;
@@ -1782,7 +1807,7 @@ export default function App() {
         body: JSON.stringify({
           contacts: stagedContacts.map(c => {
             const cCourse = c.course || selectedCourse || '';
-            const cAgentId = isUgCourse(cCourse) ? 270740 : (uni.agentId || 270604);
+            const cAgentId = resolveAgentId(cCourse, uni.agentId);
             return {
               phone: c.phone,
               formattedPhone: c.formattedPhone || (c.phone ? `+91${c.phone}` : ''),
@@ -2050,7 +2075,7 @@ export default function App() {
 
     const uni = universities.find(u => u.id === camp.universityId) || universities[0];
     const campaignCourse = camp.course || uncalled[0]?.course || '';
-    const campaignAgentId = camp.agentId || (isUgCourse(campaignCourse) ? 270740 : (uni?.agentId || 270604));
+    const campaignAgentId = camp.agentId || resolveAgentId(campaignCourse, uni?.agentId);
 
     try {
       const res = await fetch('/api/queue/start', {
@@ -2117,7 +2142,7 @@ export default function App() {
       universityId: camp.universityId || selectedUniversity,
       universityName: camp.universityName || 'Vidyavision AI',
       collegePlace: camp.collegePlace || '',
-      agentId: camp.agentId || 270740,
+      agentId: camp.agentId || agentConfig.ugAgentId || agentConfig.defaultAgentId,
       course: c.course || camp.course || selectedCourse,
       email: c.email || '',
       state: c.state || '',
@@ -5008,7 +5033,7 @@ export default function App() {
                               {sel.place && <p style={{ fontSize: '0.8rem', color: '#818cf8', margin: '0.15rem 0', fontWeight: '600' }}>📍 {sel.place}</p>}
                               {sel.websiteUrl && <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', margin: '0.1rem 0' }}>🔗 {sel.websiteUrl}</p>}
                               {sel.description && <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: '0.25rem 0 0', fontStyle: 'italic' }}>"{sel.description}"</p>}
-                              <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', margin: '0.25rem 0 0' }}>🗣️ {sel.languages || 'English, Hindi, Telugu'} • 🤖 Agent #{sel.agentId || 270604}</p>
+                              <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)', margin: '0.25rem 0 0' }}>🗣️ {sel.languages || 'English, Hindi, Telugu'} • 🤖 Voice Agent</p>
                               <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: '0.15rem 0 0' }}>🕒 Created: {sel.createdAt ? new Date(sel.createdAt).toLocaleString() : '—'}</p>
                             </div>
                           </div>
@@ -5064,7 +5089,7 @@ export default function App() {
                               color: isUgCourse(selectedCourse) ? '#059669' : '#6366f1',
                               border: isUgCourse(selectedCourse) ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(99, 102, 241, 0.3)'
                             }}>
-                              <span>🤖 <b>Voice Bot Assigned:</b> {isUgCourse(selectedCourse) ? 'UG Admission Assistant (#270740)' : 'PG Admission Assistant (#270604)'}</span>
+                              <span>🤖 <b>Voice Bot Assigned:</b> {isUgCourse(selectedCourse) ? 'UG Admission Assistant' : 'PG Admission Assistant'}</span>
                               <span style={{
                                 fontSize: '0.72rem',
                                 padding: '0.15rem 0.45rem',
@@ -5338,7 +5363,7 @@ export default function App() {
                                     color: isUgCourse(c.course) ? '#059669' : '#6366f1',
                                     border: isUgCourse(c.course) ? '1px solid rgba(16, 185, 129, 0.25)' : '1px solid rgba(99, 102, 241, 0.25)'
                                   }}>
-                                    🤖 #{isUgCourse(c.course) ? '270740' : (c.agentId || '270604')}
+                                    🤖 {isUgCourse(c.course) ? 'UG' : 'PG'} Bot
                                     <span style={{ fontSize: '0.7rem' }}>({isUgCourse(c.course) ? 'UG' : 'PG'})</span>
                                   </span>
                                 </td>
@@ -5839,7 +5864,7 @@ export default function App() {
                           </span>
                           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                             Assigned Voice Bot: <b style={{ color: isUgCourse(selectedCourse || stagedContacts[0]?.course) ? '#059669' : '#6366f1' }}>
-                              {isUgCourse(selectedCourse || stagedContacts[0]?.course) ? '🤖 UG Admission Bot (#270740)' : '🤖 PG Admission Bot (#270604)'}
+                              {isUgCourse(selectedCourse || stagedContacts[0]?.course) ? '🤖 UG Admission Bot' : '🤖 PG Admission Bot'}
                             </b>
                           </span>
                           <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>

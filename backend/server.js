@@ -349,6 +349,19 @@ app.get(['/health', '/api/health'], async (req, res) => {
 });
 
 // ==========================================================
+// Client Configuration Endpoint (obfuscated agent config)
+// ==========================================================
+app.get('/api/config', (req, res) => {
+  res.json({
+    success: true,
+    defaultAgentId: getAgentId() || null,
+    ugAgentId: getUgAgentId() || null,
+    pgAgentId: getPgAgentId() || null,
+    agentConfigured: Boolean(getApiKey() && getAgentId())
+  });
+});
+
+// ==========================================================
 // Authentication REST API Endpoints
 // ==========================================================
 
@@ -655,6 +668,10 @@ function getUgAgentId() {
 function getPgAgentId() {
   const id = Number(process.env.PG_AGENT_ID || process.env.AGENT_ID);
   return !isNaN(id) && id > 0 ? id : getAgentId();
+}
+
+function getAllConfiguredAgentIds() {
+  return [...new Set([getAgentId(), getUgAgentId(), getPgAgentId()].filter(Boolean))];
 }
 
 function isUgCourse(courseName) {
@@ -3175,7 +3192,7 @@ async function startScheduledCampaign(targetCampaignId) {
   if (camp.transferEnabled) {
     try {
       const activeBotAgentId = resolveAgentIdForCourse(camp.course, camp.agentId);
-      const syncTargets = [activeBotAgentId, 270604, 270740].filter(Boolean);
+      const syncTargets = [...new Set([activeBotAgentId, ...getAllConfiguredAgentIds()])].filter(Boolean);
       syncAgentTransferConfigToOmni(syncTargets, {
         transferEnabled: camp.transferEnabled,
         counselorPhone: camp.counselorPhone,
@@ -3321,7 +3338,7 @@ async function processNextInQueue() {
     return;
   }
 
-  const botLabel = isUgCourse(targetCourse) ? `UG Bot (#${activeAgentId})` : `PG Bot (#${activeAgentId})`;
+  const botLabel = isUgCourse(targetCourse) ? 'UG Bot' : 'PG Bot';
   const apiKey = getApiKey();
   addLog('info', `Sequential Dialing [${nextIndex + 1}/${CAMPAIGN_STATE.totalCount}] using ${universityDisplay} [${botLabel}]: Initiating call to ${contact.formattedPhone} (Name: ${nameDisplay}, Course: ${targetCourse || 'General'})...`);
 
@@ -3801,7 +3818,7 @@ app.post('/api/queue/start', checkPermission('canStartStopCampaigns'), async (re
     // Synchronize Counselor Call Transfer directly to OmniDimension Voice Agents
     try {
       const activeBotAgentId = resolveAgentIdForCourse(course || parsedQueue[0]?.course, agentId);
-      const syncTargets = [activeBotAgentId, 270604, 270740].filter(Boolean);
+      const syncTargets = [...new Set([activeBotAgentId, ...getAllConfiguredAgentIds()])].filter(Boolean);
       await syncAgentTransferConfigToOmni(syncTargets, {
         transferEnabled,
         counselorPhone,
@@ -4809,7 +4826,7 @@ app.post('/api/omni/sync-transfer', async (req, res) => {
   try {
     const { agentId, counselorPhone, transferEnabled = true, transferCondition, transferMessage } = req.body;
     const targetAgentId = agentId ? Number(agentId) : getAgentId();
-    const agentsToSync = [targetAgentId, 270604, 270740].filter(Boolean);
+    const agentsToSync = [...new Set([targetAgentId, ...getAllConfiguredAgentIds()])].filter(Boolean);
 
     const syncResult = await syncAgentTransferConfigToOmni(agentsToSync, {
       transferEnabled,
@@ -4835,7 +4852,7 @@ app.post('/api/omni/sync-transfer', async (req, res) => {
 app.get('/api/omni/agent-transfer', async (req, res) => {
   try {
     const apiKey = getApiKey();
-    const agentId = Number(req.query.agentId) || getAgentId() || 270604;
+    const agentId = Number(req.query.agentId) || getAgentId();
     if (!apiKey) {
       return res.status(400).json({ success: false, error: 'OMNIDIM_API_KEY missing' });
     }

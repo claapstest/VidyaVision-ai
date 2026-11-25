@@ -786,7 +786,7 @@
                   <li><b>College Name *:</b> Full official name (e.g., <i>KL University Hyderabad</i> or <i>MIT WPU Pune</i>).</li>
                   <li><b>Campus Location:</b> City and state (e.g., <i>Hyderabad, Telangana</i>).</li>
                   <li><b>Description:</b> Key institutional USPs used by the AI during conversation (e.g., <i>"NAAC A++ Accredited, 100% Placement Assistance"</i>).</li>
-                  <li><b>Assigned Voice Agent ID:</b> Dedicated telephony agent identifier (defaults to <code>270604</code>).</li>
+                  <li><b>Assigned Voice Agent ID:</b> Dedicated telephony agent identifier (configured via environment).</li>
                   <li><b>Supported Languages:</b> Comma-separated list (e.g. <i>English, Hindi, Telugu</i>).</li>
                   <li><b>Course Offerings:</b> Comma-separated programs (e.g. <i>B.Tech CSE, MBA, Data Science, AI & ML</i>). These appear in the Step 2 course dropdown.</li>
                   <li><b>Application / Website Link:</b> URL automatically delivered to students via WhatsApp brochures.</li>
@@ -1035,8 +1035,8 @@
               <li><b>Select Target University:</b> Search and pick from your institution list. The card displays campus location, website link, spoken languages (English, Hindi, Telugu), and agent ID.</li>
               <li><b>Dynamic Voice Bot Assignment:</b>
                 <ul>
-                  <li>Selecting an <b>Undergraduate program</b> (B.Tech, BBA, BCA, B.Sc) routes automatically to <b>🤖 UG Admission Assistant (#270740)</b>.</li>
-                  <li>Selecting a <b>Postgraduate program</b> (MBA, M.Tech, MCA) routes automatically to <b>🤖 PG Admission Assistant (#270604)</b>.</li>
+                  <li>Selecting an <b>Undergraduate program</b> (B.Tech, BBA, BCA, B.Sc) routes automatically to <b>🤖 UG Admission Assistant</b>.</li>
+                  <li>Selecting a <b>Postgraduate program</b> (MBA, M.Tech, MCA) routes automatically to <b>🤖 PG Admission Assistant</b>.</li>
                   <li>Selecting <b>General</b> instructs the bot to query the caller regarding their degree level.</li>
                 </ul>
               </li>
@@ -1093,7 +1093,7 @@
             <p>Click <b>"Stage Contacts for Calling"</b> to move validated leads into the active staging table:</p>
             <ul>
               <li><b>Isolated Counselor Workspace:</b> Staged drafts are private to your login session. Multiple counselors can stage their own lists without cross-contamination.</li>
-              <li><b>Full Parameter Inspection:</b> Verify the Mobile Number, Student Name, Target College badge, Program, and Bot ID badge (<code>#270740 UG</code> or <code>#270604 PG</code>).</li>
+              <li><b>Full Parameter Inspection:</b> Verify the Mobile Number, Student Name, Target College badge, Program, and Bot type badge (<code>UG</code> or <code>PG</code>).</li>
               <li><b>Queue Sanitation:</b> Remove individual contacts with the red trash button, or click <b>"Clear Queue"</b> to start fresh.</li>
             </ul>
           </div>
