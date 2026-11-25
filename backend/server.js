@@ -2800,7 +2800,7 @@ async function syncAgentTransferConfigToOmni(agentIds, config = {}) {
     ? [...new Set(agentIds.map(Number).filter(Boolean))]
     : [Number(agentIds || getAgentId())].filter(Boolean);
 
-  if (idsToSync.length === 0) idsToSync.push(270604);
+  if (idsToSync.length === 0) idsToSync.push(...getAllConfiguredAgentIds());
 
   const {
     transferEnabled = true,
@@ -2849,15 +2849,15 @@ async function syncAgentTransferConfigToOmni(agentIds, config = {}) {
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        console.log(`[OmniDimension Sync] Agent #${agentId} transfer config synced: number=${formattedNumber}, enabled=${transferEnabled}`);
-        addLog('success', `Synced OmniDimension Agent #${agentId}: Live Call Transfer set to ${formattedNumber} (${transferEnabled ? 'Enabled' : 'Disabled'})`);
+        console.log(`[OmniDimension Sync] Agent transfer config synced: number=${formattedNumber}, enabled=${transferEnabled}`);
+        addLog('success', `Synced Voice Agent: Live Call Transfer set to ${formattedNumber} (${transferEnabled ? 'Enabled' : 'Disabled'})`);
         results.push({ agentId, success: true, data });
       } else {
-        console.warn(`[OmniDimension Sync] Failed to sync Agent #${agentId}:`, res.status, data);
+        console.warn(`[OmniDimension Sync] Failed to sync agent:`, res.status, data);
         results.push({ agentId, success: false, status: res.status, error: data.detail || data.error });
       }
     } catch (err) {
-      console.error(`[OmniDimension Sync] Network error for Agent #${agentId}:`, err.message);
+      console.error(`[OmniDimension Sync] Network error for agent:`, err.message);
       results.push({ agentId, success: false, error: err.message });
     }
   }
