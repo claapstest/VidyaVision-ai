@@ -118,29 +118,30 @@ Verify:
 .\scripts\validate-service-lifecycle.ps1
 ```
 
-### 6. Deploy Frontend to IIS
+### 6. Deploy Frontend and Configure IIS
 
-Extract the frontend ZIP to the IIS site root:
-```powershell
-Expand-Archive -Path .\frontend\vidyavision-frontend-*.zip -DestinationPath C:\CallingBot\Frontend\ -Force
-```
-
-### 7. Configure IIS
+Deploy the frontend to a dedicated physical directory and configure isolated IIS hosting:
 
 ```powershell
-# Set up app pool isolation
-.\scripts\setup-iis-isolation.ps1
+# 1. Setup isolated Application Pool (No Managed Code) and /callingbot application
+$frontendZip = (Get-ChildItem .\frontend\vidyavision-frontend-*.zip).FullName
+.\scripts\setup-iis-isolation.ps1 -PhysicalPath "C:\inetpub\CallingBot" -AppPath "/callingbot" -FrontendSource $frontendZip
 
-# Configure HTTPS and permissions
-.\scripts\configure-iis-https-permissions.ps1
+# 2. Configure ARR reverse proxy to backend private port (5000)
+.\scripts\configure-iis-backend-routing.ps1 -PhysicalPath "C:\inetpub\CallingBot"
 
-# Configure reverse proxy to backend
-.\scripts\configure-iis-backend-routing.ps1
+# 3. Configure HTTPS binding and least-privilege NTFS permissions
+.\scripts\configure-iis-https-permissions.ps1 -PhysicalPath "C:\inetpub\CallingBot"
 ```
 
-### 8. Validate Deployment
+### 7. Validate Deployment
 
-Run all validation scripts:
+Run the master automated acceptance checklist (24 automated tests):
+```powershell
+.\scripts\run-acceptance-checklist.ps1 -SkipBuild
+```
+
+Or run individual verification suites:
 ```powershell
 .\scripts\validate-backend-exe.ps1
 .\scripts\validate-service-lifecycle.ps1
