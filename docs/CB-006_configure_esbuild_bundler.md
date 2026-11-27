@@ -16,6 +16,10 @@ Configured esbuild as the backend JavaScript bundler to consolidate all backend 
 - Set `platform: 'node'` so Node.js built-in modules (`node:fs`, `node:http`, etc.) are treated as external
 - Two-pass build: unminified for debugging, minified+mangled for production
 
+## Node.js Version
+Pinned to **v25.0.0** via `.nvmrc` and `engines` field in `package.json` (requires Node ≥22.0.0).
+SEA support is stable from Node 22+.
+
 ## Usage
 ```powershell
 npm run build:backend

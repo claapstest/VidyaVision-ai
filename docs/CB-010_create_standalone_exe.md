@@ -12,7 +12,7 @@ Packages the SEA blob into a standalone Windows executable (`CallingBot.exe`) th
 - **Tool**: postject (npm package) injects the blob into the PE binary's resource section
 - **Sentinel fuse**: `NODE_SEA_FUSE_fce680ab2cc467b6e072b8b5df1996b2` — Node.js checks this at startup to determine if it's running as a SEA
 - **Architecture**: x64 Windows (matches the build host's Node.js)
-- **Node.js version**: v25.2.1
+- **Node.js version**: v25.0.0 (pinned in .nvmrc)
 
 ## Runtime Behavior
 - Reads `.env` from the current working directory

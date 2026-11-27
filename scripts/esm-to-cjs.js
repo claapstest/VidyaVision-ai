@@ -55,8 +55,23 @@ console.log(`   Converted ${importCount} import statements to require()`);
 // Verify no unconverted import-from statements remain
 const remaining = [...code.matchAll(/^import\s+.+?from\s*["']/gm)];
 if (remaining.length > 0) {
-  console.warn(`   ⚠ ${remaining.length} unconverted import statement(s):`);
-  remaining.slice(0, 5).forEach(m => console.warn(`     ${m[0].substring(0, 80)}`));
+  console.error(`   ❌ ${remaining.length} unconverted import statement(s):`);
+  remaining.slice(0, 10).forEach(m => console.error(`     ${m[0].substring(0, 120)}`));
+  console.error('   The CJS output will fail at runtime. Fix the patterns in esm-to-cjs.js.');
+  process.exit(1);
+}
+
+// Warn about dynamic imports that require() cannot handle
+const dynamicImports = [...code.matchAll(/\bimport\s*\(/g)];
+if (dynamicImports.length > 0) {
+  console.warn(`   ⚠ ${dynamicImports.length} dynamic import() call(s) found — these will fail in SEA CJS mode.`);
+  console.warn('     If the EXE crashes at runtime, check for dynamic import() in the backend code.');
+}
+
+// Warn about remaining export statements
+const exports = [...code.matchAll(/^export\s+/gm)];
+if (exports.length > 0) {
+  console.warn(`   ⚠ ${exports.length} unconverted export statement(s) — these may cause syntax errors.`);
 }
 
 // Wrap in async IIFE with CJS compatibility shims
