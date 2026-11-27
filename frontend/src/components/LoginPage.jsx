@@ -141,7 +141,7 @@ export default function LoginPage({ onLoginSuccess }) {
         <div style={{ textAlign: 'center', marginBottom: '1.85rem' }}>
           <div style={{ marginBottom: '0.85rem' }}>
             <img
-              src="/vidyavision-logo.svg"
+              src={`${import.meta.env.BASE_URL}vidyavision-logo.svg`}
               alt="VidyaVision Logo"
               style={{
                 height: '46px',

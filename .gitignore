@@ -29,6 +29,9 @@ dist-server
 .env.*
 !.env.example
 
+# Release artifacts
+release/
+
 # Local data / caches
 data/
 *.sql

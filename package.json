@@ -1,7 +1,7 @@
 {
   "name": "omni2",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev:frontend": "vite --config frontend/vite.config.js",
@@ -10,6 +10,7 @@
     "build": "vite build --config frontend/vite.config.js && node backend/scripts/obfuscate.js",
     "build:frontend": "vite build --config frontend/vite.config.js",
     "lint": "oxlint",
+    "package:frontend": "node scripts/package-frontend.js",
     "preview": "vite preview --config frontend/vite.config.js",
     "db:init": "node backend/scripts/init_db.js",
     "db:migrate": "node backend/scripts/migrate_json_to_pg.js",

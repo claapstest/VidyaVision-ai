@@ -10,8 +10,11 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, path.resolve(__dirname, '..'), '')
   const backendPort = env.PORT || 5005
 
+  const basePath = env.VITE_BASE_PATH || '/'
+
   return {
     root: __dirname,
+    base: basePath,
     plugins: [react()],
     server: {
       host: true,

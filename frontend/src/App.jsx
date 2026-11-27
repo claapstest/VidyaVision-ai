@@ -3880,7 +3880,7 @@ export default function App() {
         <div style={{ textAlign: 'center' }}>
           <div style={{ marginBottom: '1rem' }}>
             <img
-              src="/vidyavision-logo.svg"
+              src={`${import.meta.env.BASE_URL}vidyavision-logo.svg`}
               alt="VidyaVision Logo"
               style={{
                 height: '48px',
@@ -3947,7 +3947,7 @@ export default function App() {
             transition: 'transform 0.15s ease, box-shadow 0.15s ease'
           }}>
             <img
-              src="/vidyavision-logo.svg"
+              src={`${import.meta.env.BASE_URL}vidyavision-logo.svg`}
               alt="VidyaVision"
               style={{
                 height: '30px',
@@ -4152,7 +4152,7 @@ export default function App() {
 
           {/* Visual User Guide Shortcut */}
           <a
-            href="/guide.html"
+            href={`${import.meta.env.BASE_URL}guide.html`}
             target="_blank"
             rel="noopener noreferrer"
             title="Open Interactive Calling Process Visual Guide & Manual"
