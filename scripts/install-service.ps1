@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Installs CallingBot as a Windows service using WinSW (CB-019 / CB-020).
 

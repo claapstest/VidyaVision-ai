@@ -22,6 +22,8 @@
     "service:install": "powershell -ExecutionPolicy Bypass -File scripts/install-service.ps1",
     "service:uninstall": "powershell -ExecutionPolicy Bypass -File scripts/uninstall-service.ps1",
     "validate:service": "powershell -ExecutionPolicy Bypass -File scripts/validate-service-lifecycle.ps1",
+    "iis:setup": "powershell -ExecutionPolicy Bypass -File scripts/setup-iis-isolation.ps1",
+    "iis:verify": "powershell -ExecutionPolicy Bypass -File scripts/verify-iis-isolation.ps1",
     "package:frontend": "node scripts/package-frontend.js",
     "preview": "vite preview --config frontend/vite.config.js",
     "db:init": "node backend/scripts/init_db.js",

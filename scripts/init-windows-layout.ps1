@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Provisions the standardized Windows application folder structure for CallingBot (CB-018).
 
