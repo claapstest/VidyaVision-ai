@@ -1,0 +1,49 @@
+<!--
+  CallingBot Windows Service Configuration (WinSW)
+  EPIC-04 / CB-019: Windows service wrapper configuration
+
+  Place this file alongside WinSW.exe (renamed to CallingBot-service.exe)
+  in C:\CallingBot\Service\
+-->
+<service>
+  <!-- Service identity -->
+  <id>CallingBot</id>
+  <name>CallingBot Backend</name>
+  <description>CallingBot VidyaVision backend server — campaign management, call dispatch and WebSocket API.</description>
+
+  <!-- Executable and working directory -->
+  <executable>%BASE%\..\Backend\CallingBot.exe</executable>
+  <workingdirectory>%BASE%\..\Backend</workingdirectory>
+
+  <!-- Environment: point to external JSON config -->
+  <env name="CALLINGBOT_CONFIG" value="%BASE%\..\Config\callingbot.json" />
+  <env name="NODE_ENV" value="production" />
+
+  <!-- Logging: stdout/stderr routed to Logs folder -->
+  <log mode="roll-by-size">
+    <logpath>%BASE%\..\Logs</logpath>
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>10</keepFiles>
+  </log>
+
+  <!-- Startup and shutdown behavior -->
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <stoptimeout>30 sec</stoptimeout>
+  <stopparentprocessfirst>false</stopparentprocessfirst>
+
+  <!-- Recovery / failure policy (CB-020) -->
+  <onfailure action="restart" delay="10 sec" />
+  <onfailure action="restart" delay="30 sec" />
+  <onfailure action="restart" delay="60 sec" />
+  <resetfailure>1 hour</resetfailure>
+
+  <!-- Service account (CB-020): use dedicated least-privilege account -->
+  <serviceaccount>
+    <username>NT SERVICE\CallingBot</username>
+    <allowservicelogon>true</allowservicelogon>
+  </serviceaccount>
+
+  <!-- Priority: normal to avoid starving other services -->
+  <priority>Normal</priority>
+</service>
