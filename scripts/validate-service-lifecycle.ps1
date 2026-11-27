@@ -42,6 +42,24 @@ function Add-Result($name, $pass, $detail) {
     }
 }
 
+function Print-Results {
+    Write-Host "`n========================================" -ForegroundColor Cyan
+    Write-Host "  Service Lifecycle Results" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+
+    $passCount = @($results | Where-Object { $_.Status -eq "PASS" }).Count
+    $failCount = @($results | Where-Object { $_.Status -eq "FAIL" }).Count
+
+    foreach ($r in $results) {
+        $color = if ($r.Status -eq "PASS") { "Green" } else { "Red" }
+        $icon = if ($r.Status -eq "PASS") { "[PASS]" } else { "[FAIL]" }
+        Write-Host "  $icon $($r.Test): $($r.Detail)" -ForegroundColor $color
+    }
+
+    Write-Host "`n  Total: $passCount passed, $failCount failed" -ForegroundColor $(if ($failCount -eq 0) { "Green" } else { "Yellow" })
+    Write-Host ""
+}
+
 $serviceDir = Join-Path $InstallRoot "Service"
 $logsDir    = Join-Path $InstallRoot "Logs"
 $serviceExe = Join-Path $serviceDir "CallingBot-service.exe"
@@ -58,8 +76,8 @@ Add-Result "Service registered" $registered $(if ($registered) { "Status: $($svc
 
 if (-not $registered) {
     Write-Host "  Service not found. Run install-service.ps1 first." -ForegroundColor Red
-    # Print results and exit
-    goto printResults
+    Print-Results
+    exit 1
 }
 
 # --- Test 2: Startup type is auto/delayed ---
@@ -172,21 +190,7 @@ if ($svcFinal -and $svcFinal.Status -eq "Running") {
 }
 
 # --- Print results ---
-:printResults
-Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "  Service Lifecycle Results" -ForegroundColor Cyan
-Write-Host "========================================" -ForegroundColor Cyan
+Print-Results
 
-$passCount = ($results | Where-Object { $_.Status -eq "PASS" }).Count
 $failCount = ($results | Where-Object { $_.Status -eq "FAIL" }).Count
-
-foreach ($r in $results) {
-    $color = if ($r.Status -eq "PASS") { "Green" } else { "Red" }
-    $icon = if ($r.Status -eq "PASS") { "[PASS]" } else { "[FAIL]" }
-    Write-Host "  $icon $($r.Test): $($r.Detail)" -ForegroundColor $color
-}
-
-Write-Host "`n  Total: $passCount passed, $failCount failed" -ForegroundColor $(if ($failCount -eq 0) { "Green" } else { "Yellow" })
-Write-Host ""
-
 exit $failCount

@@ -27,6 +27,11 @@ Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  CallingBot Service Uninstaller" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
 
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Write-Warning "Current session is not running as Administrator. Windows service uninstallation requires elevation."
+}
+
 $svc = Get-Service -Name "CallingBot" -ErrorAction SilentlyContinue
 if (-not $svc) {
     Write-Host "Service 'CallingBot' is not installed." -ForegroundColor Yellow

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Installs CallingBot as a Windows service using WinSW (CB-019 / CB-020).
 
@@ -48,6 +48,11 @@ Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  CallingBot Service Installer" -ForegroundColor Cyan
 Write-Host "========================================`n" -ForegroundColor Cyan
 
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Write-Warning "Current session is not running as Administrator. Windows service installation requires elevation."
+}
+
 # --- Prerequisite checks ---
 Write-Host "[1/5] Validating prerequisites..." -ForegroundColor Yellow
 
@@ -71,6 +76,19 @@ Write-Host "  Prerequisites OK" -ForegroundColor Green
 
 # --- Obtain WinSW ---
 Write-Host "[2/5] Preparing WinSW..." -ForegroundColor Yellow
+
+if (-not $WinSWPath) {
+    $candidates = @(
+        (Join-Path $PSScriptRoot "..\service\WinSW-x64.exe"),
+        (Join-Path $PSScriptRoot "..\release\service\WinSW-x64.exe")
+    )
+    foreach ($c in $candidates) {
+        if (Test-Path $c) {
+            $WinSWPath = $c
+            break
+        }
+    }
+}
 
 if ($WinSWPath -and (Test-Path $WinSWPath)) {
     Copy-Item -Path $WinSWPath -Destination $serviceExe -Force -Confirm:$false

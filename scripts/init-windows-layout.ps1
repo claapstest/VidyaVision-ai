@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Provisions the standardized Windows application folder structure for CallingBot (CB-018).
 
@@ -112,6 +112,13 @@ if ($CopyArtifacts) {
             Write-Host "  ✓ Initialized callingbot.json from template -> Config\" -ForegroundColor Green
         }
         Write-Host "  ✓ Copied callingbot.template.json -> Config\" -ForegroundColor Green
+    }
+
+    # Copy Service XML configuration
+    $srcServiceXml = Join-Path $scriptRoot "service\CallingBot-service.xml"
+    if (Test-Path $srcServiceXml) {
+        Copy-Item -Path $srcServiceXml -Destination (Join-Path $serviceDir "CallingBot-service.xml") -Force
+        Write-Host "  ✓ Copied CallingBot-service.xml -> Service\" -ForegroundColor Green
     }
 
     # Write placeholder service script if empty
