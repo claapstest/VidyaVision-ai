@@ -29,6 +29,9 @@ dist-server
 .env.*
 !.env.example
 
+# SEA build config (generated)
+sea-config.json
+
 # Release artifacts
 release/
 
