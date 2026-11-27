@@ -38,5 +38,7 @@ release/
 # Local data / caches
 data/
 *.sql
+!schema.sql
+!config/schema.sql
 .iis-sim/
 reports/
