@@ -38,3 +38,4 @@ release/
 # Local data / caches
 data/
 *.sql
+.iis-sim/

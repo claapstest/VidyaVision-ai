@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Checks and enables IIS features required for CallingBot static hosting and SPA fallback (CB-023).
 
@@ -77,7 +77,7 @@ if ($isServer) {
             }
         }
     } else {
-        Write-Host "  ℹ Querying and enabling Windows features requires an elevated PowerShell session." -ForegroundColor Gray
+        Write-Host "  [INFO] Querying and enabling Windows features requires an elevated PowerShell session." -ForegroundColor Gray
         foreach ($f in $features) {
             Write-Host "  [REQUIRES ELEVATION] $f" -ForegroundColor Yellow
         }

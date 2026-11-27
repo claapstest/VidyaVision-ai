@@ -96,7 +96,7 @@ try {
         if (-not $DryRun) {
             Import-Module WebAdministration -ErrorAction Stop
         }
-        Write-Host "  ✓ IIS WebAdministration module is available" -ForegroundColor Green
+        Write-Host "  [OK] IIS WebAdministration module is available" -ForegroundColor Green
     } else {
         Write-Warning "WebAdministration PowerShell module not found on this system."
     }
@@ -117,10 +117,10 @@ if (-not (Test-Path $PhysicalPath)) {
         Write-Host "  [DryRun] Would create directory: $PhysicalPath" -ForegroundColor Cyan
     } else {
         New-Item -ItemType Directory -Path $PhysicalPath -Force | Out-Null
-        Write-Host "  ✓ Created dedicated directory: $PhysicalPath" -ForegroundColor Green
+        Write-Host "  [OK] Created dedicated directory: $PhysicalPath" -ForegroundColor Green
     }
 } else {
-    Write-Host "  ✓ Directory already exists: $PhysicalPath" -ForegroundColor Gray
+    Write-Host "  [OK] Directory already exists: $PhysicalPath" -ForegroundColor Gray
 }
 
 # Verify physical path is separate from Default Web Site root (C:\inetpub\wwwroot)
@@ -129,7 +129,7 @@ if ($PhysicalPath.TrimEnd('\') -eq $wwwroot.TrimEnd('\')) {
     Write-Error "CRITICAL: PhysicalPath cannot be the root wwwroot folder! It must be isolated (e.g. C:\inetpub\CallingBot) to avoid overwriting existing ASP.NET applications."
     exit 1
 } else {
-    Write-Host "  ✓ Physical directory is isolated from root ASP.NET directory ($wwwroot)" -ForegroundColor Green
+    Write-Host "  [OK] Physical directory is isolated from root ASP.NET directory ($wwwroot)" -ForegroundColor Green
 }
 
 # Step 4: Deploy frontend files to physical directory
@@ -142,10 +142,10 @@ if ($srcResolved -and (Test-Path $srcResolved)) {
     } else {
         if ((Get-Item $srcResolved) -is [System.IO.DirectoryInfo]) {
             Copy-Item -Path "$srcResolved\*" -Destination $PhysicalPath -Recurse -Force
-            Write-Host "  ✓ Deployed static files from $srcResolved" -ForegroundColor Green
+            Write-Host "  [OK] Deployed static files from $srcResolved" -ForegroundColor Green
         } elseif ($srcResolved.Path.EndsWith(".zip")) {
             Expand-Archive -Path $srcResolved.Path -DestinationPath $PhysicalPath -Force
-            Write-Host "  ✓ Extracted frontend ZIP to $PhysicalPath" -ForegroundColor Green
+            Write-Host "  [OK] Extracted frontend ZIP to $PhysicalPath" -ForegroundColor Green
         }
     }
 } else {
@@ -158,7 +158,7 @@ if (-not (Test-Path $destWebConfig) -and -not $DryRun) {
     $srcWebConfig = Join-Path $PSScriptRoot "..\frontend\public\web.config"
     if (Test-Path $srcWebConfig) {
         Copy-Item -Path $srcWebConfig -Destination $destWebConfig -Force
-        Write-Host "  ✓ Copied web.config to $PhysicalPath" -ForegroundColor Green
+        Write-Host "  [OK] Copied web.config to $PhysicalPath" -ForegroundColor Green
     }
 }
 
@@ -174,9 +174,9 @@ if ($DryRun -or $simulateIIS) {
     # Check if app pool exists
     if (-not (Test-Path "IIS:\AppPools\$AppPoolName")) {
         New-Item "IIS:\AppPools\$AppPoolName" | Out-Null
-        Write-Host "  ✓ Created Application Pool: $AppPoolName" -ForegroundColor Green
+        Write-Host "  [OK] Created Application Pool: $AppPoolName" -ForegroundColor Green
     } else {
-        Write-Host "  ✓ Application Pool already exists: $AppPoolName" -ForegroundColor Gray
+        Write-Host "  [OK] Application Pool already exists: $AppPoolName" -ForegroundColor Gray
     }
 
     # Set No Managed Code (Static React SPA does not use .NET CLR)
@@ -184,7 +184,7 @@ if ($DryRun -or $simulateIIS) {
     Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name "managedPipelineMode" -Value "Integrated"
     Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name "startMode" -Value "AlwaysRunning"
     Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name "processModel.idleTimeout" -Value ([TimeSpan]::Zero)
-    Write-Host "  ✓ AppPool configured: No Managed Code, Integrated pipeline, AlwaysRunning" -ForegroundColor Green
+    Write-Host "  [OK] AppPool configured: No Managed Code, Integrated pipeline, AlwaysRunning" -ForegroundColor Green
 }
 
 # Step 6: Create and bind IIS Application / Site
@@ -201,20 +201,20 @@ if ($DryRun -or $simulateIIS) {
         if (-not $siteObj) {
             New-Item "IIS:\Sites\CallingBotSite" -bindings @{protocol="http";bindingInformation="*:${Port}:"} -physicalPath $PhysicalPath | Out-Null
             Set-ItemProperty "IIS:\Sites\CallingBotSite" -Name "applicationPool" -Value $AppPoolName
-            Write-Host "  ✓ Created dedicated site: CallingBotSite on port $Port" -ForegroundColor Green
+            Write-Host "  [OK] Created dedicated site: CallingBotSite on port $Port" -ForegroundColor Green
         } else {
-            Write-Host "  ✓ Dedicated site CallingBotSite already exists" -ForegroundColor Gray
+            Write-Host "  [OK] Dedicated site CallingBotSite already exists" -ForegroundColor Gray
         }
     } else {
         $appObj = Get-Item "IIS:\Sites\$SiteName$AppPath" -ErrorAction SilentlyContinue
         if (-not $appObj) {
             New-Item "IIS:\Sites\$SiteName$AppPath" -type Application -physicalPath $PhysicalPath | Out-Null
             Set-ItemProperty "IIS:\Sites\$SiteName$AppPath" -Name "applicationPool" -Value $AppPoolName
-            Write-Host "  ✓ Created Application '$AppPath' under '$SiteName' bound to $AppPoolName" -ForegroundColor Green
+            Write-Host "  [OK] Created Application '$AppPath' under '$SiteName' bound to $AppPoolName" -ForegroundColor Green
         } else {
             Set-ItemProperty "IIS:\Sites\$SiteName$AppPath" -Name "physicalPath" -Value $PhysicalPath
             Set-ItemProperty "IIS:\Sites\$SiteName$AppPath" -Name "applicationPool" -Value $AppPoolName
-            Write-Host "  ✓ Updated Application '$AppPath' mapping and AppPool" -ForegroundColor Green
+            Write-Host "  [OK] Updated Application '$AppPath' mapping and AppPool" -ForegroundColor Green
         }
     }
 }
@@ -242,7 +242,7 @@ $manifest = [ordered]@{
 $manifestFile = Join-Path $PhysicalPath "iis-isolation-manifest.json"
 if (-not $DryRun) {
     $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $manifestFile -Encoding UTF8
-    Write-Host "`n✓ Isolation manifest saved to $manifestFile" -ForegroundColor Cyan
+    Write-Host "`n[OK] Isolation manifest saved to $manifestFile" -ForegroundColor Cyan
 }
 
 Write-Host "`n========================================================" -ForegroundColor Green

@@ -120,7 +120,7 @@ if ($iisAvailable) {
         Assert-Check "Application Bound to Dedicated AppPool" $isBoundToPool "Pool: $($app.applicationPool)"
     }
 } else {
-    Write-Host "  ℹ IIS WebAdministration not active on local host; skipping live IIS object checks (run on server)." -ForegroundColor Gray
+    Write-Host "  [INFO] IIS WebAdministration not active on local host; skipping live IIS object checks (run on server)." -ForegroundColor Gray
 }
 
 Write-Host "`n========================================================" -ForegroundColor Cyan
@@ -130,6 +130,6 @@ Write-Host "========================================================`n" -Foregro
 if ($failCount -gt 0) {
     exit 1
 } else {
-    Write-Host "✓ IIS Application Isolation verified successfully.`n" -ForegroundColor Green
+    Write-Host "[OK] IIS Application Isolation verified successfully.`n" -ForegroundColor Green
     exit 0
 }

@@ -25,6 +25,8 @@
     "iis:setup": "powershell -ExecutionPolicy Bypass -File scripts/setup-iis-isolation.ps1",
     "iis:verify": "powershell -ExecutionPolicy Bypass -File scripts/verify-iis-isolation.ps1",
     "validate:spa": "powershell -ExecutionPolicy Bypass -File scripts/validate-iis-spa-fallback.ps1",
+    "iis:https": "powershell -ExecutionPolicy Bypass -File scripts/configure-iis-https-permissions.ps1",
+    "iis:verify-https": "powershell -ExecutionPolicy Bypass -File scripts/verify-iis-https-permissions.ps1",
     "package:frontend": "node scripts/package-frontend.js",
     "preview": "vite preview --config frontend/vite.config.js",
     "db:init": "node backend/scripts/init_db.js",

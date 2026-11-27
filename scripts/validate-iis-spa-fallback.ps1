@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Validates IIS static content hosting, default document, and SPA fallback rules (CB-023 / TC-014).
 
@@ -163,6 +163,6 @@ Write-Host "========================================================`n" -Foregro
 if ($failCount -gt 0) {
     exit 1
 } else {
-    Write-Host "✓ IIS Static Content and SPA Fallback verified successfully.`n" -ForegroundColor Green
+    Write-Host "[OK] IIS Static Content and SPA Fallback verified successfully.`n" -ForegroundColor Green
     exit 0
 }
