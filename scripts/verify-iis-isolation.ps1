@@ -46,6 +46,15 @@ Write-Host "`n========================================================" -Foregro
 Write-Host "  CallingBot IIS Application Isolation Audit (CB-022)" -ForegroundColor Cyan
 Write-Host "========================================================`n" -ForegroundColor Cyan
 
+# Resolve simulation directory if default does not exist
+if (-not (Test-Path $PhysicalPath)) {
+    $simCandidate = Join-Path $PSScriptRoot "..\.iis-sim\CallingBot"
+    if (Test-Path $simCandidate) {
+        $PhysicalPath = (Resolve-Path $simCandidate).Path
+        Write-Host "  [INFO] Physical directory resolved from simulation folder: $PhysicalPath" -ForegroundColor Gray
+    }
+}
+
 $passCount = 0
 $failCount = 0
 
