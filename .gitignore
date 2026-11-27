@@ -39,3 +39,4 @@ release/
 data/
 *.sql
 .iis-sim/
+reports/

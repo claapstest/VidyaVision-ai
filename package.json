@@ -29,6 +29,8 @@
     "iis:verify-https": "powershell -ExecutionPolicy Bypass -File scripts/verify-iis-https-permissions.ps1",
     "iis:routing": "powershell -ExecutionPolicy Bypass -File scripts/configure-iis-backend-routing.ps1",
     "validate:routing": "powershell -ExecutionPolicy Bypass -File scripts/validate-iis-backend-routing.ps1",
+    "validate:integrations": "node scripts/validate-integrations.js",
+    "test:connectivity": "powershell -ExecutionPolicy Bypass -File scripts/validate-integrations.ps1",
     "package:frontend": "node scripts/package-frontend.js",
     "preview": "vite preview --config frontend/vite.config.js",
     "db:init": "node backend/scripts/init_db.js",
