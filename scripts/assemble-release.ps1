@@ -138,6 +138,13 @@ if (Test-Path $configReadme) {
     Write-Host "  config/README.md" -ForegroundColor Gray
 }
 
+# SQL Server Database Creation Script
+$schemaSql = Join-Path $root "schema.sql"
+if (Test-Path $schemaSql) {
+    Copy-Item -Path $schemaSql -Destination (Join-Path $releaseDir "config\schema.sql") -Confirm:$false
+    Write-Host "  config/schema.sql" -ForegroundColor Gray
+}
+
 # Deployment scripts (only the ones needed for deployment)
 $deployScripts = @(
     "init-windows-layout.ps1",
