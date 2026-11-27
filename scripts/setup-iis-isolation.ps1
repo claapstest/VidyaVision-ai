@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Provisions isolated IIS hosting for CallingBot without impacting existing ASP.NET apps (CB-022).
 

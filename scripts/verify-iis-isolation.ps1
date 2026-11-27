@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Verifies IIS application isolation for CallingBot (CB-022 / CB-027).
 
