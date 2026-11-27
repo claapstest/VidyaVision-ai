@@ -35,6 +35,7 @@
     "release:assemble": "powershell -ExecutionPolicy Bypass -File scripts/assemble-release.ps1",
     "release:metadata": "powershell -ExecutionPolicy Bypass -File scripts/generate-release-metadata.ps1",
     "security:scan": "powershell -ExecutionPolicy Bypass -File scripts/run-security-scans.ps1",
+    "acceptance:check": "powershell -ExecutionPolicy Bypass -File scripts/run-acceptance-checklist.ps1",
     "package:frontend": "node scripts/package-frontend.js",
     "preview": "vite preview --config frontend/vite.config.js",
     "db:init": "node backend/scripts/init_db.js",
