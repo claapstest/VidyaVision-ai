@@ -4,9 +4,9 @@
 
 .DESCRIPTION
     Produces three files inside the release directory:
-      CHECKSUMS.sha256    — SHA-256 hashes for every file in the release
-      SBOM.json           — Software Bill of Materials (CycloneDX 1.5 format)
-      TEST_SUMMARY.md     — Build environment, dependency audit, and verification results
+      CHECKSUMS.sha256    - SHA-256 hashes for every file in the release
+      SBOM.json           - Software Bill of Materials (CycloneDX 1.5 format)
+      TEST_SUMMARY.md     - Build environment, dependency audit, and verification results
 
 .PARAMETER ReleaseDir
     The assembled release directory. Default: auto-detects latest in .\release\
@@ -217,7 +217,7 @@ $(if ($auditSeverity) { "| Severity breakdown | $auditSeverity |`n" } else { "" 
 
 ## Notes
 
-- Backend EXE validation (10/10 tests) was run during build — results in ``docs/CB-013_validation_testing.md``
+- Backend EXE validation (10/10 tests) was run during build - results in ``docs/CB-013_validation_testing.md``
 - Full service lifecycle testing requires the service installed on a Windows Server
 - IIS validation requires IIS role enabled with URL Rewrite module
 - Integration tests require live SQL Server and OmniDimension API access
@@ -231,7 +231,7 @@ Write-Host "  TEST_SUMMARY.md generated" -ForegroundColor Green
 Write-Host "`n========================================" -ForegroundColor Cyan
 Write-Host "  Metadata Generation Complete" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  CHECKSUMS.sha256  — $($allFiles.Count) file hashes" -ForegroundColor Gray
-Write-Host "  SBOM.json         — $($components.Count) components (CycloneDX 1.5)" -ForegroundColor Gray
-Write-Host "  TEST_SUMMARY.md   — Build and verification summary" -ForegroundColor Gray
+Write-Host "  CHECKSUMS.sha256  - $($allFiles.Count) file hashes" -ForegroundColor Gray
+Write-Host "  SBOM.json         - $($components.Count) components (CycloneDX 1.5)" -ForegroundColor Gray
+Write-Host "  TEST_SUMMARY.md   - Build and verification summary" -ForegroundColor Gray
 Write-Host ""

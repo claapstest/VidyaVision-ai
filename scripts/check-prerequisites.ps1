@@ -53,7 +53,7 @@ function Add-Check($category, $item, $status, $detail, $remediation) {
         Remediation = $remediation
     }
     $color = switch ($status) { "PASS" { "Green" }; "FAIL" { "Red" }; "WARN" { "Yellow" }; "INFO" { "Gray" } }
-    Write-Host "  [$status] $item — $detail" -ForegroundColor $color
+    Write-Host "  [$status] $item - $detail" -ForegroundColor $color
 }
 
 # =============================================================
@@ -145,7 +145,7 @@ $certs = Get-ChildItem Cert:\LocalMachine\My -ErrorAction SilentlyContinue |
 if ($certs.Count -gt 0) {
     $cert = $certs | Sort-Object NotAfter -Descending | Select-Object -First 1
     $daysLeft = ($cert.NotAfter - (Get-Date)).Days
-    Add-Check "TLS" "Valid SSL certificate" "PASS" "$($cert.Subject) — expires in $daysLeft days" ""
+    Add-Check "TLS" "Valid SSL certificate" "PASS" "$($cert.Subject) - expires in $daysLeft days" ""
 }
 else {
     Add-Check "TLS" "Valid SSL certificate" "WARN" "No valid certs with private key in LocalMachine\My" "Import or request an SSL certificate for the site hostname"
@@ -205,7 +205,7 @@ $serviceAccount = "NT SERVICE\CallingBot"
 Add-Check "Permissions" "Service account" "INFO" "$serviceAccount (virtual, created automatically)" "WinSW creates this when the service is installed"
 
 $adminCheck = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-Add-Check "Permissions" "Running as administrator" $(if ($adminCheck) { "PASS" } else { "WARN" }) $(if ($adminCheck) { "Yes" } else { "No — some install steps require elevation" }) "Run PowerShell as Administrator for deployment"
+Add-Check "Permissions" "Running as administrator" $(if ($adminCheck) { "PASS" } else { "WARN" }) $(if ($adminCheck) { "Yes" } else { "No - some install steps require elevation" }) "Run PowerShell as Administrator for deployment"
 
 # =============================================================
 # Generate PREREQUISITES_REPORT.md

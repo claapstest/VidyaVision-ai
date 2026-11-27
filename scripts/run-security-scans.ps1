@@ -4,11 +4,11 @@
 
 .DESCRIPTION
     Executes six security checks and writes SECURITY_SCAN_REPORT.md:
-      1. npm audit — dependency vulnerabilities
-      2. Secret scan — hardcoded credentials in source
-      3. EXE signature check — Authenticode status
-      4. ACL review — config folder permissions
-      5. Firewall rule review — inbound port exposure
+      1. npm audit - dependency vulnerabilities
+      2. Secret scan - hardcoded credentials in source
+      3. EXE signature check - Authenticode status
+      4. ACL review - config folder permissions
+      5. Firewall rule review - inbound port exposure
       6. Release artifact secret scan
 
 .PARAMETER ReleaseDir
@@ -57,7 +57,7 @@ function Add-ScanResult($category, $status, $summary, $details) {
 }
 
 # =============================================================
-# 1. npm audit — dependency vulnerabilities
+# 1. npm audit - dependency vulnerabilities
 # =============================================================
 Write-Host "[1/6] Running npm audit..." -ForegroundColor Yellow
 
@@ -104,9 +104,9 @@ Write-Host "  Done" -ForegroundColor Green
 Write-Host "[2/6] Running source code secret scan..." -ForegroundColor Yellow
 
 $secretPatterns = @(
-    @{ Name = "Hardcoded password";   Regex = 'password\s*[:=]\s*[''"][^<\s]' },
-    @{ Name = "API key";              Regex = 'api[_-]?key\s*[:=]\s*[''"][^<\s]' },
-    @{ Name = "Secret token";         Regex = 'secret\s*[:=]\s*[''"][^<\s]' },
+    @{ Name = "Hardcoded password";   Regex = 'password\s*[:=]\s*[''"][^<"''\s]' },
+    @{ Name = "API key";              Regex = 'api[_-]?key\s*[:=]\s*[''"][^<"''\s]' },
+    @{ Name = "Secret token";         Regex = 'secret\s*[:=]\s*[''"][^<"''\s]' },
     @{ Name = "Private key file";     Regex = '-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY' },
     @{ Name = "AWS credential";       Regex = 'AKIA[0-9A-Z]{16}' },
     @{ Name = "Connection string";    Regex = 'Server=tcp:[^;]+;.*Password=[^;]+' }
@@ -330,7 +330,7 @@ foreach ($r in $scanResults) {
 $reportLines += "## Recommendations"
 $reportLines += ""
 $reportLines += "1. **Sign the EXE** with an Authenticode certificate before production deployment"
-$reportLines += "2. **Lock down port 5000** — backend should only be accessible via IIS reverse proxy (localhost)"
+$reportLines += "2. **Lock down port 5000** - backend should only be accessible via IIS reverse proxy (localhost)"
 $reportLines += "3. **Run ``npm audit fix``** if any vulnerabilities are reported above"
 $reportLines += "4. **Apply config ACLs** with ``set-config-acls.ps1`` on the target server"
 $reportLines += "5. **Review firewall rules** to ensure only ports 80/443 are externally exposed"

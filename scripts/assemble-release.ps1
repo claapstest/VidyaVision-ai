@@ -5,14 +5,14 @@
 .DESCRIPTION
     Creates a self-contained release package:
       release/CallingBot-v<version>-<date>/
-        ├── backend/           CallingBot.exe
-        ├── frontend/          vidyavision-frontend-*.zip
-        ├── service/           WinSW XML config
-        ├── config/            callingbot.template.json + README
-        ├── scripts/           Deployment and validation scripts
-        ├── docs/              All story documentation
-        ├── RELEASE_NOTES.md   Version summary
-        └── MANIFEST.txt       File listing with sizes
+        |-- backend/           CallingBot.exe
+        |-- frontend/          vidyavision-frontend-*.zip
+        |-- service/           WinSW XML config
+        |-- config/            callingbot.template.json + README
+        |-- scripts/           Deployment and validation scripts
+        |-- docs/              All story documentation
+        |-- RELEASE_NOTES.md   Version summary
+        \-- MANIFEST.txt       File listing with sizes
 
     Excludes: source code, .git, node_modules, secrets, private keys, debug artifacts.
 
@@ -267,9 +267,9 @@ Write-Host "  MANIFEST.txt ($($allFiles.Count) files, $totalSize MB)" -Foregroun
 Write-Host "[6/6] Scanning for leaked secrets..." -ForegroundColor Yellow
 
 $secretPatterns = @(
-    "password\s*[:=]\s*[""'][^<]",
-    "api[_-]?key\s*[:=]\s*[""'][^<]",
-    "secret\s*[:=]\s*[""'][^<]",
+    "password\s*[:=]\s*[""'][^<""'\s]",
+    "api[_-]?key\s*[:=]\s*[""'][^<""'\s]",
+    "secret\s*[:=]\s*[""'][^<""'\s]",
     "-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY",
     "\.env$"
 )
