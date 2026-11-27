@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "_comment": "CallingBot Deployment Configuration Template (CB-016). Replace placeholders before deployment.",
+  "NODE_ENV": "production",
+  "PORT": 5000,
+  "ALLOWED_ORIGINS": "https://callingbot.internal.example.com",
+
+  "MSSQL_HOST": "sqlserver.internal.example.com",
+  "MSSQL_PORT": 1433,
+  "MSSQL_DATABASE": "vidyavision",
+  "MSSQL_USER": "callingbot_svc",
+  "MSSQL_PASSWORD": "<REPLACE_WITH_MSSQL_PASSWORD>",
+  "MSSQL_ENCRYPT": false,
+  "MSSQL_TRUST_CERT": true,
+
+  "OMNIDIM_BASE_URL": "https://backend.omnidim.io",
+  "OMNIDIM_API_KEY": "<REPLACE_WITH_OMNIDIM_API_KEY>",
+  "AGENT_ID": "<REPLACE_WITH_DEFAULT_AGENT_ID>",
+  "UG_AGENT_ID": "<REPLACE_WITH_UG_AGENT_ID>",
+  "PG_AGENT_ID": "<REPLACE_WITH_PG_AGENT_ID>",
+
+  "JWT_SECRET": "<REPLACE_WITH_SECURE_RANDOM_SECRET_AT_LEAST_32_CHARS>",
+  "WEBHOOK_SECRET": "<REPLACE_WITH_WEBHOOK_SECRET>",
+  "APP_API_KEY": "<REPLACE_WITH_APP_API_KEY>",
+
+  "LOG_LEVEL": "info",
+  "DEBUG_SQL": false,
+
+  "GOOGLE_SPREADSHEET_ID": "<OPTIONAL_SPREADSHEET_ID_OR_EMPTY>",
+  "GOOGLE_SHEET_NAME": "Sheet1",
+  "GOOGLE_SERVICE_ACCOUNT_JSON": "<OPTIONAL_SERVICE_ACCOUNT_JSON_OR_EMPTY>",
+  "WRITE_CACHE_FILE": false
+}

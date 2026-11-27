@@ -1,6 +1,6 @@
 import sql from 'mssql';
-import dotenv from 'dotenv';
-dotenv.config({ quiet: true });
+import { loadConfig } from './config.js';
+loadConfig();
 
 const config = {
   server: process.env.MSSQL_HOST || 'localhost',

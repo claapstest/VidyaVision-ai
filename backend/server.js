@@ -5,13 +5,13 @@ import { WebSocketServer } from 'ws';
 import { promises as fs } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import dotenv from 'dotenv';
 import { google } from 'googleapis';
+import { loadConfig } from './config.js';
 import db, { query, isDbConnected, sql } from './db.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
-dotenv.config({ quiet: true });
+loadConfig();
 
 // Constant-time string comparison to prevent timing attacks (SEC-08)
 function timingSafeCompare(a, b) {
@@ -44,6 +44,8 @@ function isOriginAllowed(origin) {
   return false;
 }
 
+const OMNIDIM_BASE_URL = (process.env.OMNIDIM_BASE_URL || 'https://backend.omnidim.io').replace(/\/+$/, '');
+
 const app = express();
 app.use(cors({
   origin: (origin, callback) => {
@@ -61,7 +63,7 @@ app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 // ==========================================================
 // User Authentication & Granular RBAC Configuration
 // ==========================================================
-const JWT_SECRET = process.env.JWT_SECRET || 'vidyavision-secure-jwt-key-2026';
+const JWT_SECRET = process.env.JWT_SECRET;
 const DATA_DIR = path.join(process.cwd(), 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 
@@ -962,7 +964,7 @@ function enrichCampaignContact(c, omniCalls, sheetsCalls) {
     if (raw && typeof raw === 'string' && raw !== 'false' && raw !== '—') {
       const trimmed = raw.trim();
       if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) recUrl = trimmed;
-      else if (trimmed.startsWith('/')) recUrl = `https://backend.omnidim.io${trimmed}`;
+      else if (trimmed.startsWith('/')) recUrl = `${OMNIDIM_BASE_URL}${trimmed}`;
       else recUrl = trimmed;
     }
   }
@@ -2746,7 +2748,7 @@ async function fetchCallsFromOmni(pages = 1) {
   const maxPages = Math.max(1, Math.min(Number(pages) || 1, 10));
 
   for (let page = 1; page <= maxPages; page++) {
-    const target = `https://backend.omnidim.io/api/v1/calls/logs?pageno=${page}&pagesize=50`;
+    const target = `${OMNIDIM_BASE_URL}/api/v1/calls/logs?pageno=${page}&pagesize=50`;
     try {
       const response = await fetch(target, {
         headers: { Authorization: `Bearer ${apiKey}` },
@@ -2774,7 +2776,7 @@ async function fetchCallsFromOmni(pages = 1) {
             raw.internal_recording_url = raw.internal_recording_url || trimmed;
           } else if (trimmed.startsWith('/')) {
             raw.recordingUrl = `https://omnidim.io${trimmed}`;
-            raw.recording_url = `https://backend.omnidim.io${trimmed}`;
+            raw.recording_url = `${OMNIDIM_BASE_URL}${trimmed}`;
             raw.internal_recording_url = `https://omnidim.io${trimmed}`;
           }
         }
@@ -2856,7 +2858,7 @@ async function syncAgentTransferConfigToOmni(agentIds, config = {}) {
   const results = [];
   for (const agentId of idsToSync) {
     try {
-      const res = await fetch(`https://backend.omnidim.io/api/v1/agents/${agentId}`, {
+      const res = await fetch(`${OMNIDIM_BASE_URL}/api/v1/agents/${agentId}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${apiKey}`,
@@ -3444,7 +3446,7 @@ async function processNextInQueue() {
       }
     };
 
-    const targetUrl = 'https://backend.omnidim.io/api/v1/calls/dispatch';
+    const targetUrl = `${OMNIDIM_BASE_URL}/api/v1/calls/dispatch`;
     const dispatchResponse = await fetch(targetUrl, {
       method: 'POST',
       headers: {
@@ -3628,7 +3630,7 @@ isDbConnected().then(connected => {
 }).catch(() => { });
 console.log(`[INFO] OmniDimension Server Ready. Agent ID: ${getAgentId() || 'Not Configured'}`);
 if (!getApiKey()) {
-  console.error('[ERROR] OMNIDIM_API_KEY is not defined in .env! Call dispatches will fail.');
+  console.error('[ERROR] OMNIDIM_API_KEY is not configured! Call dispatches will fail.');
 } else {
   console.log('[INFO] OMNIDIM_API_KEY authenticated successfully.');
 }
@@ -4347,7 +4349,7 @@ app.get('/api/campaigns/:id/export', checkPermission('canExportData'), async (re
         if (raw && typeof raw === 'string' && raw !== 'false' && raw !== '—') {
           const trimmed = raw.trim();
           if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) recUrl = trimmed;
-          else if (trimmed.startsWith('/')) recUrl = `https://backend.omnidim.io${trimmed}`;
+          else if (trimmed.startsWith('/')) recUrl = `${OMNIDIM_BASE_URL}${trimmed}`;
           else recUrl = trimmed;
         } else {
           recUrl = '—';
@@ -4857,7 +4859,7 @@ app.get('/api/omni/agent-transfer', async (req, res) => {
       return res.status(400).json({ success: false, error: 'OMNIDIM_API_KEY missing' });
     }
 
-    const response = await fetch(`https://backend.omnidim.io/api/v1/agents/${agentId}`, {
+    const response = await fetch(`${OMNIDIM_BASE_URL}/api/v1/agents/${agentId}`, {
       headers: { Authorization: `Bearer ${apiKey}` }
     });
     if (!response.ok) {
